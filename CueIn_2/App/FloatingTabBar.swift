@@ -1,0 +1,154 @@
+import SwiftUI
+
+// MARK: - FloatingTabBar
+/// Floating Liquid Glass tab bar tuned to match the native iOS 26 visual language.
+
+struct FloatingTabBar: View {
+    @Binding var selectedTab: AppTab
+    var todayPresentation: TodayTabBarPresentation
+    @Namespace private var indicatorNamespace
+
+    private var barHeight: CGFloat { CueInLayout.floatingBarHeight }
+    /// Selection pill stays slightly shorter than the bar for glass margins.
+    private var pillHeight: CGFloat { barHeight - 14 }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(AppTab.allCases) { tab in
+                tabItem(for: tab)
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 7)
+        .frame(height: barHeight)
+        .modifier(TabBarGlassModifier())
+        // Keep the bar compact regardless of the system Dynamic Type size.
+        .dynamicTypeSize(.xSmall ... .large)
+    }
+
+    @ViewBuilder
+    private func tabItem(for tab: AppTab) -> some View {
+        let isSelected = selectedTab == tab
+        let activeSymbol = tab == .today
+            ? (isSelected ? todayPresentation.icon : todayPresentation.iconInactive)
+            : (isSelected ? tab.icon : tab.iconInactive)
+        let title = tab == .today ? todayPresentation.title : tab.label
+
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                selectedTab = tab
+            }
+        } label: {
+            ZStack {
+                if isSelected {
+                    selectedPill
+                        .frame(height: pillHeight)
+                        .matchedGeometryEffect(id: "pill", in: indicatorNamespace)
+                }
+
+                VStack(spacing: 3) {
+                    tabBarIcon(tab: tab, isSelected: isSelected, systemName: activeSymbol)
+                    tabBarTitle(tab: tab, title: title)
+                }
+                .foregroundStyle(isSelected ? .white : Color.white.opacity(0.40))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func tabBarIcon(tab: AppTab, isSelected: Bool, systemName: String) -> some View {
+        let base = Image(systemName: systemName)
+            .font(.system(size: 22, weight: isSelected ? .semibold : .regular))
+            .frame(width: 26, height: 26)
+        if tab == .today {
+            base
+                .contentTransition(.symbolEffect(.replace.downUp))
+                .animation(.smooth(duration: 0.28), value: todayPresentation)
+        } else {
+            base
+        }
+    }
+
+    @ViewBuilder
+    private func tabBarTitle(tab: AppTab, title: String) -> some View {
+        let base = Text(title)
+            .font(.system(size: 11, weight: .medium))
+            .fixedSize()
+        if tab == .today {
+            base
+                .contentTransition(.interpolate)
+                .animation(.smooth(duration: 0.28), value: todayPresentation)
+        } else {
+            base
+        }
+    }
+
+    @ViewBuilder
+    private var selectedPill: some View {
+        if #available(iOS 26, *) {
+            Color.clear
+                .glassEffect(
+                    .regular
+                        .tint(Color.white.opacity(0.18))
+                        .interactive(),
+                    in: .capsule
+                )
+                .glassEffectID("selected-tab", in: indicatorNamespace)
+        } else {
+            Capsule()
+                .fill(Color.white.opacity(0.14))
+        }
+    }
+}
+
+private struct TabBarGlassModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .cueInGlass(
+                .capsule,
+                tint: Color.white.opacity(0.10),
+                interactive: false,
+                showsBorder: true,
+                borderColor: Color.white.opacity(0.18),
+                borderWidth: 0.75,
+                shadow: CueInGlassShadow(color: Color.black.opacity(0.24), radius: 22, x: 0, y: 8)
+            )
+    }
+}
+
+#Preview {
+    ZStack {
+        LinearGradient(
+            colors: [Color(red: 0.7, green: 0.33, blue: 0.04),
+                     Color(red: 0.4, green: 0.18, blue: 0.04)],
+            startPoint: .top, endPoint: .bottom
+        )
+        .ignoresSafeArea()
+
+        VStack(spacing: 10) {
+            ForEach(0..<6, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(.black.opacity(0.45))
+                    .frame(height: 72)
+                    .padding(.horizontal, 16)
+            }
+        }
+
+        VStack {
+            Spacer()
+            HStack(alignment: .center, spacing: 10) {
+                FloatingTabBar(
+                    selectedTab: .constant(.today),
+                    todayPresentation: .resolved(dayEngine: .taskLed, taskLedViewMode: .timeline)
+                )
+                FloatingPlusButton {}
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+    }
+    .preferredColorScheme(.dark)
+}

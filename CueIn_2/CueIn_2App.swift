@@ -11,7 +11,8 @@ import SwiftUI
 struct CueIn_2App: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            AppShellView()
+                .preferredColorScheme(.dark)
         }
     }
 }
