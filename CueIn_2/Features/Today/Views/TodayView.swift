@@ -6,7 +6,7 @@ import SwiftUI
 struct TodayView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel = TodayViewModel.shared
-    @State private var tasksStore = TasksStore.shared
+    @Bindable private var tasksStore = TasksStore.shared
     @State private var showFormulaPickerSheet = false
     @State private var showScheduleMakerSheet = false
     @State private var showSettingsSheet = false
@@ -24,7 +24,6 @@ struct TodayView: View {
     @AppStorage(TodayDisplayPreferences.timelineHourHeight)  private var timelineHourHeight = TodayDisplayPreferences.timelineHourHeightDefault
     @AppStorage(TodayDisplayPreferences.timelineLayoutMode)  private var timelineLayoutModeRaw = TodayDisplayPreferences.TimelineLayoutMode.vertical.rawValue
     @AppStorage(TodayDisplayPreferences.taskLedViewMode) private var taskLedViewModeRaw = TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue
-    @AppStorage(TodayDisplayPreferences.todoViewShowInfoBlock) private var todoViewShowInfoBlock = true
     @AppStorage(TodayDisplayPreferences.scheduleDesign) private var scheduleDesignRaw = TodayDisplayPreferences.ScheduleDesign.glass.rawValue
     @AppStorage(TodayDisplayPreferences.runningLineStyle) private var runningLineStyleRaw = TodayDisplayPreferences.RunningLineStyle.minimal.rawValue
     @AppStorage(TodayDisplayPreferences.activeBlockEmphasis) private var activeBlockEmphasisRaw
@@ -44,6 +43,11 @@ struct TodayView: View {
     @AppStorage(TodayDisplayPreferences.scheduleBlockTimerShowsSeconds) private var scheduleBlockTimerShowsSeconds = false
     @AppStorage(TodayDisplayPreferences.canvasDotsBackground) private var canvasDotsBackground = false
     @AppStorage(TodayDisplayPreferences.pullsTasksFromExecutionPool) private var pullsTasksFromExecutionPool = true
+    @AppStorage(TodayDisplayPreferences.todoViewShowInfoBlock) private var todoViewShowInfoBlock = true
+    @AppStorage(TodayDisplayPreferences.todoSummaryPlacement) private var todoSummaryPlacementRaw
+        = TodayDisplayPreferences.TodoSummaryPlacement.inList.rawValue
+    @AppStorage(TodayDisplayPreferences.todoChromeSummaryMetric) private var todoChromeSummaryMetricRaw
+        = TodayDisplayPreferences.TodoChromeSummaryMetric.openAndPlanned.rawValue
 
     private var timelineLayoutMode: TodayDisplayPreferences.TimelineLayoutMode {
         TodayDisplayPreferences.TimelineLayoutMode(rawValue: timelineLayoutModeRaw) ?? .vertical
@@ -51,6 +55,18 @@ struct TodayView: View {
 
     private var taskLedViewMode: TodayDisplayPreferences.TaskLedViewMode {
         TodayDisplayPreferences.TaskLedViewMode(rawValue: taskLedViewModeRaw) ?? .timeline
+    }
+
+    private var todoSummaryPlacement: TodayDisplayPreferences.TodoSummaryPlacement {
+        TodayDisplayPreferences.migratedTodoSummaryPlacement(from: todoSummaryPlacementRaw)
+    }
+
+    private var todoChromeSummaryMetric: TodayDisplayPreferences.TodoChromeSummaryMetric {
+        TodayDisplayPreferences.migratedTodoChromeSummaryMetric(from: todoChromeSummaryMetricRaw)
+    }
+
+    private var todoOpenTasksForChromeSort: [TaskItem] {
+        tasksStore.todayTasks.filter { !$0.isCompleted }
     }
 
     private var scheduleDesign: TodayDisplayPreferences.ScheduleDesign {
@@ -222,10 +238,12 @@ struct TodayView: View {
                     showsRearrangeDone: isJiggleRearrangeMode,
                     onRearrangeDone: { isJiggleRearrangeMode = false },
                     scheduleLiveMenu: { EmptyView() },
+                    beforeTrailing: { todayTodoChromeBeforeTrailing },
                     trailing: { todayOverflowMenu }
                 )
             }
         }
+        .devNotebookScreen("Today")
         .tint(CueInColors.textPrimary)
         .sheet(isPresented: $showFormulaPickerSheet) {
                 FormulaPickerSheet(
@@ -449,24 +467,51 @@ struct TodayView: View {
         }
     }
 
+    @ViewBuilder
+    private var todayTodoChromeBeforeTrailing: some View {
+        if viewModel.isTaskLedMode, taskLedViewMode == .todo {
+            let showSummaryPill = todoViewShowInfoBlock && todoSummaryPlacement == .inChrome
+            let showSort = !todoOpenTasksForChromeSort.isEmpty
+            if showSummaryPill || showSort {
+                HStack(spacing: CueInSpacing.sm) {
+                    if showSummaryPill {
+                        TodayTodoChromeSummaryBarPill(
+                            metric: todoChromeSummaryMetric,
+                            openCount: tasksStore.todayTasks.filter { !$0.isCompleted }.count,
+                            completedCount: tasksStore.todayTasks.filter(\.isCompleted).count,
+                            totalCount: tasksStore.todayTasks.count,
+                            plannedMinutesOpen: tasksStore.todayTasks.filter { !$0.isCompleted }.reduce(0) { $0 + $1.plannedMinutes }
+                        )
+                    }
+                    if showSort {
+                        TodayTodoChromeSortMenu(
+                            store: tasksStore,
+                            tasksToSort: todoOpenTasksForChromeSort
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private var todayOverflowMenu: some View {
         Menu {
             if viewModel.isTaskLedMode {
-                Picker("View", selection: $taskLedViewModeRaw) {
-                    ForEach(TodayDisplayPreferences.TaskLedViewMode.allCases) { mode in
-                        Label(mode.title, systemImage: mode.icon)
-                            .tag(mode.rawValue)
+                Menu {
+                    Picker("Schedule views", selection: $taskLedViewModeRaw) {
+                        ForEach(TodayDisplayPreferences.TaskLedViewMode.allCases) { mode in
+                            Label(mode.title, systemImage: mode.icon)
+                                .tag(mode.rawValue)
+                        }
                     }
+                } label: {
+                    Label("Views", systemImage: "square.grid.2x2")
                 }
 
-                if taskLedViewMode == .todo {
-                    Menu {
-                        Toggle(isOn: $todoViewShowInfoBlock) {
-                            Label("Show summary info", systemImage: "rectangle.and.text.magnifyingglass")
-                        }
-                    } label: {
-                        Label("To-do view settings", systemImage: "checklist")
-                    }
+                Button {
+                    showSettingsSheet = true
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
                 }
 
                 Button {
@@ -511,10 +556,12 @@ struct TodayView: View {
                 }
             }
 
-            Button {
-                showSettingsSheet = true
-            } label: {
-                Label("Settings", systemImage: "gearshape")
+            if !viewModel.isTaskLedMode {
+                Button {
+                    showSettingsSheet = true
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
             }
         } label: {
             TodayChromeMenuGlyph()
@@ -550,6 +597,136 @@ struct TodayView: View {
                 proxy.scrollTo(currentID, anchor: .center)
             }
         }
+    }
+}
+
+// MARK: - To-do chrome sort (circle glass, matches ⋯ control)
+
+private struct TodayTodoChromeSortMenu: View {
+    let store: TasksStore
+    let tasksToSort: [TaskItem]
+
+    private var listKey: String { "today:todo" }
+
+    var body: some View {
+        Menu {
+            Section {
+                Button("By priority", systemImage: "line.3.horizontal.decrease") {
+                    applyPrioritySort()
+                }
+            }
+            Section("Order") {
+                Button("Title A → Z", systemImage: "textformat.abc") {
+                    applyTitleSort(ascending: true)
+                }
+                Button("Title Z → A", systemImage: "textformat.abc") {
+                    applyTitleSort(ascending: false)
+                }
+                Button("Planned time · longest first", systemImage: "clock") {
+                    applyPlannedSort(longestFirst: true)
+                }
+                Button("Planned time · shortest first", systemImage: "clock") {
+                    applyPlannedSort(longestFirst: false)
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(CueInColors.textPrimary)
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+                .modifier(CueInStableGlassCircleModifier())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Sort to-do list")
+        .cueInMenuInteractionStability()
+    }
+
+    private func syncTimeline() {
+        TodayViewModel.shared.syncExecutionTimelineAfterExternalTaskEdit()
+    }
+
+    private func applyPrioritySort() {
+        store.clearTaskListOrder(listKey: listKey)
+        syncTimeline()
+    }
+
+    private func applyTitleSort(ascending: Bool) {
+        let sorted = tasksToSort.sorted { a, b in
+            let cmp = a.title.localizedStandardCompare(b.title)
+            if cmp == .orderedSame { return a.createdAt < b.createdAt }
+            return ascending ? (cmp == .orderedAscending) : (cmp == .orderedDescending)
+        }
+        store.setTaskOrder(listKey: listKey, orderedIDs: sorted.map(\.id))
+        syncTimeline()
+    }
+
+    private func applyPlannedSort(longestFirst: Bool) {
+        let sorted = tasksToSort.sorted { a, b in
+            if a.plannedMinutes != b.plannedMinutes {
+                return longestFirst ? (a.plannedMinutes > b.plannedMinutes) : (a.plannedMinutes < b.plannedMinutes)
+            }
+            let t = a.title.localizedStandardCompare(b.title)
+            if t == .orderedSame { return a.createdAt < b.createdAt }
+            return t == .orderedAscending
+        }
+        store.setTaskOrder(listKey: listKey, orderedIDs: sorted.map(\.id))
+        syncTimeline()
+    }
+}
+
+// MARK: - To-do chrome summary (thin pill, matches menu height)
+
+private struct TodayTodoChromeSummaryBarPill: View {
+    let metric: TodayDisplayPreferences.TodoChromeSummaryMetric
+    let openCount: Int
+    let completedCount: Int
+    let totalCount: Int
+    let plannedMinutesOpen: Int
+
+    private var line: String {
+        switch metric {
+        case .plannedTime:
+            return TodayDisplayPreferences.formatTodoPlannedMinutesLine(plannedMinutesOpen)
+        case .openCount:
+            return "\(openCount)"
+        case .completedCount:
+            return "\(completedCount)"
+        case .totalCount:
+            return "\(totalCount)"
+        case .openAndPlanned:
+            let t = TodayDisplayPreferences.formatTodoPlannedMinutesLine(plannedMinutesOpen)
+            return "\(openCount) · \(t)"
+        }
+    }
+
+    private var accessibilitySummary: String {
+        switch metric {
+        case .plannedTime:
+            return "Planned time on open tasks, \(TodayDisplayPreferences.formatTodoPlannedMinutesLine(plannedMinutesOpen))"
+        case .openCount:
+            return "\(openCount) open tasks"
+        case .completedCount:
+            return "\(completedCount) completed tasks"
+        case .totalCount:
+            return "\(totalCount) tasks total"
+        case .openAndPlanned:
+            return "\(openCount) open tasks, planned \(TodayDisplayPreferences.formatTodoPlannedMinutesLine(plannedMinutesOpen))"
+        }
+    }
+
+    var body: some View {
+        Text(line)
+            .font(.system(size: 13, weight: .semibold))
+            .monospacedDigit()
+            .foregroundStyle(CueInColors.textPrimary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .padding(.horizontal, 12)
+            .frame(height: CueInLayout.topChromeButtonHeight)
+            .contentShape(Capsule(style: .continuous))
+            .modifier(CueInStableGlassCapsuleModifier())
+            .accessibilityLabel(accessibilitySummary)
     }
 }
 

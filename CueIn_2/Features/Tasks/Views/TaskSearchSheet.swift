@@ -88,7 +88,7 @@ struct TaskSearchSheet: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(CueInColors.textSecondary)
 
-                TextField("Search tasks, projects, fields…", text: $query)
+                TextField("Search tasks, projects, initiatives…", text: $query)
                     .font(CueInTypography.body)
                     .foregroundStyle(CueInColors.textPrimary)
                     .tint(CueInColors.accentFocus)
@@ -205,7 +205,7 @@ struct TaskSearchSheet: View {
                 if let f = store.field(fid) {
                     return Group(label: f.name, color: f.color, tasks: tasks)
                 } else {
-                    return Group(label: "No field", color: CueInColors.textTertiary, tasks: tasks)
+                    return Group(label: "No initiative", color: CueInColors.textTertiary, tasks: tasks)
                 }
             }
             .sorted { $0.label < $1.label }

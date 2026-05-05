@@ -10,7 +10,7 @@ private enum TodayChromeTitleFont {
 // MARK: - TodayTopChromeBar
 /// Top row for Today: title ownership plus compact glass controls.
 
-struct TodayTopChromeBar<ScheduleMenu: View, Trailing: View>: View {
+struct TodayTopChromeBar<ScheduleMenu: View, BeforeTrailing: View, Trailing: View>: View {
     var title: String = "Today"
     /// Slightly larger nav-style title (e.g. To-do mode).
     var prominentTitle: Bool = false
@@ -24,6 +24,8 @@ struct TodayTopChromeBar<ScheduleMenu: View, Trailing: View>: View {
     var showsRearrangeDone: Bool = false
     var onRearrangeDone: () -> Void = {}
     @ViewBuilder var scheduleLiveMenu: () -> ScheduleMenu
+    /// Shown immediately left of the trailing menu (e.g. To-do summary pill).
+    @ViewBuilder var beforeTrailing: () -> BeforeTrailing
     @ViewBuilder var trailing: () -> Trailing
 
     var body: some View {
@@ -53,6 +55,8 @@ struct TodayTopChromeBar<ScheduleMenu: View, Trailing: View>: View {
 
             scheduleLiveMenu()
 
+            beforeTrailing()
+
             trailing()
         }
         .padding(.horizontal, CueInSpacing.screenHorizontal)
@@ -76,9 +80,9 @@ struct TodayChromeCapsuleButton: View {
                 .padding(.horizontal, 16)
                 .frame(height: CueInLayout.topChromeButtonHeight)
                 .contentShape(Capsule(style: .continuous))
+                .cueInGlass(.capsule)
         }
         .buttonStyle(.plain)
-        .modifier(TodayCapsuleGlassModifier())
     }
 }
 
@@ -94,9 +98,9 @@ struct TodayChromeIconButton: View {
                 .foregroundStyle(CueInColors.textPrimary)
                 .frame(width: 44, height: 44)
                 .contentShape(Circle())
+                .cueInGlass(.circle)
         }
         .buttonStyle(.plain)
-        .modifier(TodayCircleGlassModifier())
         .accessibilityLabel(accessibilityLabel)
     }
 }
@@ -122,4 +126,3 @@ struct TodayCircleGlassModifier: ViewModifier {
         content.cueInGlass(.circle)
     }
 }
-

@@ -2,12 +2,18 @@ import SwiftUI
 
 // MARK: - TaskRowView
 /// Clean task row. Neutral checkbox, no colored badges.
+///
+/// **Note:** The status control uses a Button + popover instead of
+/// `Menu { ... } .menuStyle(.borderlessButton)`. The borderless menu style
+/// forces a `UIContextMenuInteraction` UIKit bridge that emits runtime
+/// warnings on iOS 26. The popover approach is native SwiftUI and silent.
 
 struct TaskRowView: View {
     let task: DayTask
     let onToggle: () -> Void
 
     @State private var animateCheck = false
+    @State private var isStatusPopoverPresented = false
 
     var body: some View {
         HStack(spacing: CueInSpacing.md) {
@@ -41,19 +47,26 @@ struct TaskRowView: View {
     @ViewBuilder
     private var statusControl: some View {
         if task.plannerTaskItemID != nil {
-            Menu {
-                statusMenuButtons
+            Button {
+                isStatusPopoverPresented = true
             } label: {
                 checkbox(status: plannerTask?.status)
             }
-            .menuStyle(.borderlessButton)
-            .cueInMenuInteractionStability()
+            .buttonStyle(.plain)
+            .popover(isPresented: $isStatusPopoverPresented) {
+                CueInTaskStatusPopoverContent(selection: statusPickerSelection) { applyStatusAndClose($0) }
+            }
         } else {
             Button(action: toggleFallback) {
                 checkbox(status: nil)
             }
             .buttonStyle(.plain)
         }
+    }
+
+    private var statusPickerSelection: TaskStatus {
+        if let s = plannerTask?.status { return s }
+        return task.isCompleted ? .completed : .inbox
     }
 
     private func checkbox(status: TaskStatus?) -> some View {
@@ -69,79 +82,14 @@ struct TaskRowView: View {
         .animation(.easeInOut(duration: 0.15), value: task.isCompleted)
     }
 
-    @ViewBuilder
-    private var statusMenuButtons: some View {
-        if task.isCompleted {
-            Button(action: {}) {
-                statusMenuRow(
-                    icon: TaskStatus.completed.icon,
-                    title: TaskStatus.completed.label,
-                    isSelected: true
-                )
-            }
-            .disabled(true)
-
-            Divider()
-
-            ForEach(TaskStatus.executionPoolOpenStatuses, id: \.self) { status in
-                Button {
-                    applyStatus(status)
-                } label: {
-                    statusMenuRow(
-                        icon: status.icon,
-                        title: status.reopenFromDoneMenuTitle(),
-                        isSelected: false
-                    )
-                }
-            }
-        } else {
-            ForEach(TaskStatus.executionPoolOpenStatuses, id: \.self) { status in
-                Button {
-                    applyStatus(status)
-                } label: {
-                    statusMenuRow(
-                        icon: status.icon,
-                        title: status.label,
-                        isSelected: plannerTask?.status == status
-                    )
-                }
-            }
-
-            Divider()
-
-            Button {
-                applyStatus(.completed)
-            } label: {
-                statusMenuRow(
-                    icon: TaskStatus.completed.icon,
-                    title: TaskStatus.completed.label,
-                    isSelected: false
-                )
-            }
-        }
-    }
-
-    private func statusMenuRow(icon: String, title: String, isSelected: Bool) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(CueInColors.textSecondary)
-                .frame(width: 20, alignment: .center)
-            Text(title)
-                .font(.system(size: 15, weight: .regular))
-                .foregroundStyle(CueInColors.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(CueInColors.textSecondary)
-            }
-        }
-    }
-
     private var plannerTask: TaskItem? {
         guard let id = task.plannerTaskItemID else { return nil }
         return TasksStore.shared.tasks.first { $0.id == id }
+    }
+
+    private func applyStatusAndClose(_ status: TaskStatus) {
+        isStatusPopoverPresented = false
+        applyStatus(status)
     }
 
     private func applyStatus(_ status: TaskStatus) {

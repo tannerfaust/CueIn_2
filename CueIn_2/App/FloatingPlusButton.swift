@@ -60,41 +60,38 @@ private struct FloatingCircularGlassIconButton: View {
             sensoryTrigger.toggle()
             action()
         } label: {
-            ZStack {
-                Image(systemName: systemImage)
-                    .font(.system(size: iconSize, weight: .semibold))
-                    .foregroundStyle(iconColor)
-            }
-            .frame(width: diameter, height: diameter)
+            // Glass is applied INSIDE the button label so the ButtonStyle's
+            // scaleEffect wraps the already-resolved glass shape. This prevents
+            // the glass renderer from seeing a rectangular frame during the
+            // press animation.
+            Image(systemName: systemImage)
+                .font(.system(size: iconSize, weight: .semibold))
+                .foregroundStyle(iconColor)
+                .frame(width: diameter, height: diameter)
+                .contentShape(Circle())
+                .cueInGlass(
+                    .circle,
+                    tint: glassTint,
+                    showsBorder: true,
+                    borderColor: Color.white.opacity(0.18),
+                    borderWidth: 0.75,
+                    shadow: CueInGlassShadow(color: Color.black.opacity(0.24), radius: 18, x: 0, y: 8)
+                )
         }
-        .buttonStyle(PressScaleStyle())
-        .contentShape(Circle())
-        .modifier(CircularGlassButtonModifier(glassTint: glassTint))
+        .buttonStyle(GlassPressStyle())
         .sensoryFeedback(.impact, trigger: sensoryTrigger)
     }
 }
 
-private struct PressScaleStyle: ButtonStyle {
+// MARK: - Press style (scale only, no layout invalidation)
+
+/// Applies a subtle scale-down on press. The glass effect is applied inside the
+/// label so it doesn't re-resolve during the animation.
+private struct GlassPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.88 : 1.0)
             .animation(.easeOut(duration: 0.10), value: configuration.isPressed)
-    }
-}
-
-private struct CircularGlassButtonModifier: ViewModifier {
-    var glassTint: Color = Color.white.opacity(0.14)
-
-    func body(content: Content) -> some View {
-        content
-            .cueInGlass(
-                .circle,
-                tint: glassTint,
-                showsBorder: true,
-                borderColor: Color.white.opacity(0.18),
-                borderWidth: 0.75,
-                shadow: CueInGlassShadow(color: Color.black.opacity(0.24), radius: 18, x: 0, y: 8)
-            )
     }
 }
 

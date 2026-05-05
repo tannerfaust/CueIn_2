@@ -20,6 +20,8 @@ struct AppShellView: View {
     @State private var showScheduleBlockTaskSheet = false
     @State private var screenSafeAreaBottom: CGFloat = 0
     @State private var pendingTodaySheetRoute: TodaySheetRoute?
+    @State private var showDevCaptureSheet = false
+    @AppStorage("cuein.devNotebook.showCaptureButton") private var showDevNotebookCaptureButton = false
     @Bindable private var toastCenter = CueInToastCenter.shared
     @Bindable private var todayViewModel = TodayViewModel.shared
 
@@ -41,6 +43,14 @@ struct AppShellView: View {
                 .onPreferenceChange(BottomSafeAreaKey.self) { screenSafeAreaBottom = $0 }
             tabContent
             bottomFeedbackAndBar
+            devNotebookFloatingControl
+        }
+        .onAppear {
+            DevNotebookContext.shared.selectedTab = selectedTab
+        }
+        .onChange(of: selectedTab) { _, newValue in
+            DevNotebookContext.shared.selectedTab = newValue
+            DevNotebookContext.shared.screenLabel = nil
         }
         .sheet(isPresented: $showAddSheet, onDismiss: handleAddSheetDismiss) {
             sheetContent
@@ -76,6 +86,20 @@ struct AppShellView: View {
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showDevCaptureSheet) {
+            DevNotebookCaptureSheet(isPresented: $showDevCaptureSheet, defaultKind: .moduleIdea) { kind, body in
+                let snap = DevNotebookContext.shared.makeSnapshot()
+                DevNotebookStore.shared.add(DevNotebookEntry(
+                    kind: kind,
+                    body: body,
+                    moduleLabel: snap.moduleLabel,
+                    contextLine: snap.contextLine
+                ))
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
         .animation(.easeInOut(duration: 0.18), value: selectedTab)
     }
 
@@ -108,6 +132,32 @@ struct AppShellView: View {
         .padding(.bottom, CueInLayout.barBottomPadding(safeAreaBottom: screenSafeAreaBottom))
         .offset(y: screenSafeAreaBottom > 0 ? 9 : 3)
         .ignoresSafeArea(edges: .bottom)
+    }
+
+    private var devNotebookFloatingControl: some View {
+        Group {
+            if showDevNotebookCaptureButton && !shellSheetsBlockDevCapture && !showDevCaptureSheet {
+                DevNotebookFloatingButton {
+                    showDevCaptureSheet = true
+                }
+                .padding(.leading, 16)
+                // Sit just above the floating tab bar (not aligned with the taller trailing FAB column).
+                .padding(
+                    .bottom,
+                    CueInLayout.floatingBarHeight
+                        + CueInLayout.barBottomPadding(safeAreaBottom: screenSafeAreaBottom)
+                        + 8
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .zIndex(1)
+                .allowsHitTesting(true)
+            }
+        }
+    }
+
+    /// Hide the dev capture control while primary shell sheets are up (avoids stacked presentations).
+    private var shellSheetsBlockDevCapture: Bool {
+        showAddSheet || showExecutionSheet || showTimelineCapture || showScheduleBlockTaskSheet
     }
 
     private var bottomFeedbackAndBar: some View {

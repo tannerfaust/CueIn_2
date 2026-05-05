@@ -63,6 +63,14 @@ struct CueInTaskStatusCheckbox: View {
                     .fill(openStrokeStrong.opacity(0.55))
                     .frame(width: diameter * 0.28, height: diameter * 0.28)
             }
+        case .paused:
+            ZStack {
+                Circle()
+                    .strokeBorder(CueInColors.warning.opacity(0.55), lineWidth: diameter * 0.072)
+                RoundedRectangle(cornerRadius: diameter * 0.06, style: .continuous)
+                    .fill(CueInColors.warning.opacity(0.88))
+                    .frame(width: diameter * 0.22, height: diameter * 0.26)
+            }
         case .archived:
             Circle()
                 .strokeBorder(
@@ -76,7 +84,7 @@ struct CueInTaskStatusCheckbox: View {
     }
 
     private enum IncompleteKind {
-        case inbox, scheduled, active, archived, queuedInBlock
+        case inbox, scheduled, active, paused, archived, queuedInBlock
     }
 
     private var resolvedIncomplete: IncompleteKind {
@@ -85,6 +93,7 @@ struct CueInTaskStatusCheckbox: View {
         case .inbox: return .inbox
         case .scheduled: return .scheduled
         case .active: return .active
+        case .paused: return .paused
         case .archived: return .archived
         case .completed: return .queuedInBlock
         }

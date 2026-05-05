@@ -50,8 +50,6 @@ struct ProjectDetailView: View {
                 } label: {
                     CueInOverflowMenuGlyph()
                 }
-                .menuStyle(.borderlessButton)
-                .cueInMenuInteractionStability()
             }
         }
         .sheet(isPresented: $creatingTask) {
@@ -254,7 +252,7 @@ struct ProjectDetailView: View {
         switch filter {
         case .all:    return all
         case .active: return all.filter { !$0.isCompleted && $0.status != .archived }
-        case .today:  return all.filter { $0.isScheduledToday || $0.status == .active }
+        case .today:  return all.filter { $0.isScheduledToday || $0.status == .active || $0.status == .paused }
         case .done:   return all.filter(\.isCompleted)
         }
     }

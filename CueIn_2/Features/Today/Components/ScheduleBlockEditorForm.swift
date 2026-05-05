@@ -1301,7 +1301,6 @@ struct ScheduleBlockEditorForm: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .menuStyle(.borderlessButton)
     }
 }
 

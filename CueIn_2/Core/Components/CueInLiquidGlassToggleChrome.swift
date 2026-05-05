@@ -2,6 +2,12 @@ import SwiftUI
 
 // MARK: - Liquid glass toggle chrome (iOS 26)
 /// Shared capsule shell + selection thumb for segmented controls (Today mode bar, block editor strips).
+///
+/// **Flicker-free pattern:**
+///  - Shell: `.cueInGlass(.capsule)` already clips internally.
+///  - Thumb: Uses `.cueInGlass(.capsule)` on a clear capsule — the clip-first
+///    approach inside the modifier prevents any rectangular flash during the
+///    matched-geometry animation.
 
 struct CueInLiquidGlassToggleShellModifier: ViewModifier {
     func body(content: Content) -> some View {
@@ -17,8 +23,9 @@ struct CueInLiquidGlassToggleShellModifier: ViewModifier {
 
 struct CueInLiquidGlassToggleThumb: View {
     var body: some View {
-        Capsule(style: .continuous)
-            .fill(Color.clear)
+        // Use Color.clear as the base — the glass modifier handles clipping,
+        // glass effect application, and border in the correct order.
+        Color.clear
             .cueInGlass(
                 .capsule,
                 tint: Color.white.opacity(0.16),

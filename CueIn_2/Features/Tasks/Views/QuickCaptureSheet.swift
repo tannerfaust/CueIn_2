@@ -153,7 +153,7 @@ struct QuickCaptureSheet: View {
     private var chips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: CueInSpacing.sm) {
-                // Field
+                // Initiative
                 Menu {
                     ForEach(store.fields) { f in
                         Button {
@@ -165,12 +165,10 @@ struct QuickCaptureSheet: View {
                 } label: {
                     chipLabel(
                         icon: store.field(fieldID)?.resolvedIconSystemName ?? "square.grid.2x2",
-                        text: store.field(fieldID)?.name ?? "Field",
+                        text: store.field(fieldID)?.name ?? "Initiative",
                         accent: store.field(fieldID)?.color
                     )
                 }
-                .menuStyle(.borderlessButton)
-                .cueInMenuInteractionStability()
 
                 // Project
                 let projectOptions = fieldID.map(store.projects) ?? store.projects
@@ -192,8 +190,6 @@ struct QuickCaptureSheet: View {
                         accent: store.project(projectID).map { store.color(for: $0) }
                     )
                 }
-                .menuStyle(.borderlessButton)
-                .cueInMenuInteractionStability()
 
                 // Execution type — inline segmented
                 executionSegmented
@@ -212,8 +208,6 @@ struct QuickCaptureSheet: View {
                         accent: priority.color
                     )
                 }
-                .menuStyle(.borderlessButton)
-                .cueInMenuInteractionStability()
 
                 // Due
                 Menu {
@@ -227,8 +221,6 @@ struct QuickCaptureSheet: View {
                         accent: dueOption == .today ? CueInColors.accentFixed : nil
                     )
                 }
-                .menuStyle(.borderlessButton)
-                .cueInMenuInteractionStability()
             }
             .padding(.horizontal, CueInSpacing.base)
         }

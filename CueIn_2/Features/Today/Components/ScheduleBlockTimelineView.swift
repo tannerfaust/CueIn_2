@@ -504,28 +504,19 @@ struct LongPressDragView: UIViewRepresentable {
         let view = UIView()
         view.backgroundColor = .clear
         
-        let longPress = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleLongPress(_:)))
-        longPress.minimumPressDuration = minimumPressDuration
-        longPress.allowableMovement = allowableMovement
-        longPress.cancelsTouchesInView = true
-        longPress.delaysTouchesBegan = false
-        longPress.delaysTouchesEnded = false
-        longPress.delegate = context.coordinator
-        view.addGestureRecognizer(longPress)
-        
-        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
-        tap.cancelsTouchesInView = false
-        tap.delaysTouchesBegan = false
-        tap.delaysTouchesEnded = false
-        tap.require(toFail: longPress)
-        tap.delegate = context.coordinator
-        view.addGestureRecognizer(tap)
+        let holdDrag = StationaryHoldDragGestureRecognizer()
+        context.coordinator.dragRecognizer = holdDrag
+        context.coordinator.configure(holdDrag)
+        view.addGestureRecognizer(holdDrag)
         
         return view
     }
     
     func updateUIView(_ uiView: UIView, context: Context) {
         context.coordinator.parent = self
+        if let dragRecognizer = context.coordinator.dragRecognizer {
+            context.coordinator.configure(dragRecognizer)
+        }
     }
     
     func makeCoordinator() -> Coordinator {
@@ -534,37 +525,38 @@ struct LongPressDragView: UIViewRepresentable {
     
     class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: LongPressDragView
+        weak var dragRecognizer: StationaryHoldDragGestureRecognizer?
         
         init(_ parent: LongPressDragView) {
             self.parent = parent
         }
         
-        @objc func handleLongPress(_ sender: UILongPressGestureRecognizer) {
-            let location = sender.location(in: nil) // global coordinates
-            switch sender.state {
-            case .began:
-                parent.onBegan(location)
-            case .changed:
-                parent.onChanged(location)
-            case .ended:
-                parent.onEnded()
-            case .cancelled, .failed:
-                parent.onCancelled()
-            case .possible:
-                break
-            @unknown default:
-                break
+        func configure(_ recognizer: StationaryHoldDragGestureRecognizer) {
+            recognizer.minimumPressDuration = parent.minimumPressDuration
+            recognizer.allowableMovementBeforeActivation = parent.allowableMovement
+            recognizer.delegate = self
+            recognizer.onBegan = { [weak self] location in
+                self?.parent.onBegan(location)
             }
-        }
-        
-        @objc func handleTap(_ sender: UITapGestureRecognizer) {
-            if sender.state == .ended {
-                parent.onTapped()
+            recognizer.onChanged = { [weak self] location in
+                self?.parent.onChanged(location)
+            }
+            recognizer.onEnded = { [weak self] in
+                self?.parent.onEnded()
+            }
+            recognizer.onCancelled = { [weak self] in
+                self?.parent.onCancelled()
+            }
+            recognizer.onTapped = { [weak self] in
+                self?.parent.onTapped()
             }
         }
         
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            parent.recognizesSimultaneouslyWithScroll && isScrollViewGesture(otherGestureRecognizer)
+            guard let recognizer = gestureRecognizer as? StationaryHoldDragGestureRecognizer else {
+                return false
+            }
+            return !recognizer.hasActivated && isScrollViewGesture(otherGestureRecognizer)
         }
 
         private func isScrollViewGesture(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -577,5 +569,120 @@ struct LongPressDragView: UIViewRepresentable {
             }
             return false
         }
+    }
+}
+
+final class StationaryHoldDragGestureRecognizer: UIGestureRecognizer {
+    var minimumPressDuration: TimeInterval = 0.18
+    var allowableMovementBeforeActivation: CGFloat = 10
+    var tapMovementTolerance: CGFloat = 8
+    var onBegan: ((CGPoint) -> Void)?
+    var onChanged: ((CGPoint) -> Void)?
+    var onEnded: (() -> Void)?
+    var onCancelled: (() -> Void)?
+    var onTapped: (() -> Void)?
+
+    private(set) var hasActivated = false
+    private var activeTouch: UITouch?
+    private var initialLocation: CGPoint = .zero
+    private var latestLocation: CGPoint = .zero
+    private var activationTimer: Timer?
+
+    override init(target: Any?, action: Selector?) {
+        super.init(target: target, action: action)
+        cancelsTouchesInView = true
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+    }
+
+    convenience init() {
+        self.init(target: nil, action: nil)
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard activeTouch == nil,
+              touches.count == 1,
+              let touch = touches.first
+        else {
+            state = .failed
+            return
+        }
+
+        activeTouch = touch
+        initialLocation = touch.location(in: nil)
+        latestLocation = initialLocation
+        scheduleActivation()
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let touch = activeTouch, touches.contains(touch) else { return }
+        latestLocation = touch.location(in: nil)
+
+        if hasActivated {
+            if state == .began {
+                state = .changed
+            }
+            onChanged?(latestLocation)
+            return
+        }
+
+        if distance(from: initialLocation, to: latestLocation) > allowableMovementBeforeActivation {
+            state = .failed
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let touch = activeTouch, touches.contains(touch) else { return }
+        latestLocation = touch.location(in: nil)
+
+        if hasActivated {
+            onEnded?()
+            state = .ended
+        } else {
+            if distance(from: initialLocation, to: latestLocation) <= tapMovementTolerance {
+                onTapped?()
+            }
+            state = .failed
+        }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        if hasActivated {
+            onCancelled?()
+        }
+        state = .cancelled
+    }
+
+    override func reset() {
+        activationTimer?.invalidate()
+        activationTimer = nil
+        activeTouch = nil
+        hasActivated = false
+        initialLocation = .zero
+        latestLocation = .zero
+    }
+
+    private func scheduleActivation() {
+        activationTimer?.invalidate()
+        let timer = Timer(timeInterval: minimumPressDuration, repeats: false) { [weak self] _ in
+            self?.activateIfStationary()
+        }
+        activationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func activateIfStationary() {
+        guard state == .possible,
+              activeTouch != nil,
+              distance(from: initialLocation, to: latestLocation) <= allowableMovementBeforeActivation
+        else { return }
+
+        hasActivated = true
+        state = .began
+        onBegan?(latestLocation)
+    }
+
+    private func distance(from start: CGPoint, to end: CGPoint) -> CGFloat {
+        hypot(end.x - start.x, end.y - start.y)
     }
 }

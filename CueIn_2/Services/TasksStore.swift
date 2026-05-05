@@ -98,7 +98,7 @@ final class TasksStore {
         tasks
             .filter {
                 $0.status != .archived &&
-                ($0.isScheduledToday || $0.status == .active)
+                ($0.isScheduledToday || $0.status == .active || $0.status == .paused)
             }
             .sorted(by: prioritySort)
     }
@@ -204,6 +204,11 @@ final class TasksStore {
         taskListOrder[listKey] = orderedIDs
     }
 
+    /// Clears a stored manual order so lists fall back to `prioritySort`.
+    func clearTaskListOrder(listKey: String) {
+        taskListOrder.removeValue(forKey: listKey)
+    }
+
     func setTaskPriority(id: UUID, priority: TaskPriority) {
         guard let i = tasks.firstIndex(where: { $0.id == id }) else { return }
         guard tasks[i].priority != priority else { return }
@@ -263,6 +268,10 @@ final class TasksStore {
             tasks[i].scheduledDate = tasks[i].scheduledDate ?? today
             tasks[i].completedAt = nil
             tasks[i].status = .active
+        case .paused:
+            tasks[i].scheduledDate = tasks[i].scheduledDate ?? today
+            tasks[i].completedAt = nil
+            tasks[i].status = .paused
         case .completed:
             tasks[i].status = .completed
             tasks[i].completedAt = tasks[i].completedAt ?? Date()

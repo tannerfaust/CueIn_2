@@ -1,7 +1,11 @@
 import SwiftUI
 
 // MARK: - Liquid Glass toolbar circles (iOS 26)
-/// Native `glassEffect` only — no extra strokes or highlight overlays (those read as “whitish rings” on small 38pt circles).
+/// Native `glassEffect` only — no extra strokes or highlight overlays (those read as "whitish rings" on small 38pt circles).
+///
+/// **Flicker-free approach:** The glass effect is applied inside the button
+/// label so the `ToolbarLiquidGlassPressStyle` scale animation wraps an
+/// already-resolved glass shape.
 
 enum CueInLiquidGlassToolbarRole {
     case close
@@ -18,14 +22,12 @@ struct CueInLiquidGlassToolbarIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                Image(systemName: role == .close ? "xmark" : "checkmark")
-                    .font(.system(size: role == .close ? 16 : 18, weight: .semibold))
-                    .foregroundStyle(iconForeground)
-            }
-            .frame(width: diameter, height: diameter)
-            .modifier(LiquidGlassToolbarCircleModifier(role: role))
-            .contentShape(Circle())
+            Image(systemName: role == .close ? "xmark" : "checkmark")
+                .font(.system(size: role == .close ? 16 : 18, weight: .semibold))
+                .foregroundStyle(iconForeground)
+                .frame(width: diameter, height: diameter)
+                .contentShape(Circle())
+                .modifier(LiquidGlassToolbarCircleModifier(role: role))
         }
         .buttonStyle(ToolbarLiquidGlassPressStyle())
         /// Keeps the nav bar from vertically compressing the circle (flat-top clipping).
@@ -53,13 +55,16 @@ private struct LiquidGlassToolbarCircleModifier: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
             content
-                .glassEffect(
-                    .regular
-                        .tint(glassTint)
-                        .interactive(),
-                    in: .circle
-                )
-                /// Tight shadow so the bar doesn’t clip the glow (nav toolbar clips aggressively).
+                .background {
+                    Circle()
+                        .fill(.clear)
+                        .glassEffect(
+                            .regular
+                                .tint(glassTint)
+                                .interactive(),
+                            in: .circle
+                        )
+                }
                 .shadow(color: Color.black.opacity(0.22), radius: 5, x: 0, y: 3)
         } else {
             content
@@ -115,7 +120,7 @@ private struct ToolbarLiquidGlassPressStyle: ButtonStyle {
     }
 }
 
-// MARK: - iOS 26 toolbar: drop system “shared glass” behind items
+// MARK: - iOS 26 toolbar: drop system "shared glass" behind items
 
 extension ToolbarContent {
     /// Navigation bar items get an extra system Liquid Glass layer; combined with our own `glassEffect` it reads as a double ring. Hide it for custom glass controls.

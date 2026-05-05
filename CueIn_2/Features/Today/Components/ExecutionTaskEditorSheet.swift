@@ -130,8 +130,6 @@ struct ExecutionTaskEditorSheet: View {
                 } label: {
                     pickerValue("\(draft.durationMinutes) min")
                 }
-                .menuStyle(.borderlessButton)
-                .cueInMenuInteractionStability()
             }
         }
         .timelineEditorCard()
@@ -153,8 +151,6 @@ struct ExecutionTaskEditorSheet: View {
                 } label: {
                     pickerValue(draft.blockType.label)
                 }
-                .menuStyle(.borderlessButton)
-                .cueInMenuInteractionStability()
             }
 
             Divider().background(CueInColors.divider)

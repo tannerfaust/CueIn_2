@@ -1174,6 +1174,7 @@ private struct ScheduleBlockGlassDesignModifier: ViewModifier {
             liquidGlassBody(content: content)
         } else {
             content
+                .clipShape(shape)
                 .background(
                     (isCurrentBlock ? CueInColors.surfaceSecondary : CueInColors.surfacePrimary)
                         .opacity(0.4)
@@ -1189,6 +1190,7 @@ private struct ScheduleBlockGlassDesignModifier: ViewModifier {
                 ? runningPrimary.opacity(0.16)
                 : Color.white.opacity(0.10)
             content
+                .clipShape(shape)
                 .glassEffect(
                     .regular
                         .tint(tint)
@@ -1206,6 +1208,7 @@ private struct ScheduleBlockGlassDesignModifier: ViewModifier {
                 }
         } else {
             content
+                .clipShape(shape)
                 .background(
                     (isCurrentBlock ? CueInColors.surfaceSecondary : CueInColors.surfacePrimary)
                         .opacity(0.4)

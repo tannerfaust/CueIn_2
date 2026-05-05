@@ -43,6 +43,8 @@ struct TodayTodoTaskRow: View {
     @State private var dragOffset: CGFloat = 0
     @State private var hasCrossedThreshold = false
     @State private var isSwipeActive = false
+    @State private var isStatusPopoverPresented = false
+    @State private var isCompactStatusPopoverPresented = false
     @State private var swipeCompleteHaptic = false
     @State private var swipeThresholdHaptic = false
 
@@ -51,7 +53,7 @@ struct TodayTodoTaskRow: View {
     private let deleteCommitThreshold: CGFloat = -152
     private let deleteActionWidth: CGFloat = 96
     private let maxSwipe: CGFloat = 184
-    private let checkboxSize: CGFloat = 18
+    private let checkboxSize: CGFloat = 20
 
     private var blockStyle: TodayDisplayPreferences.TodoTaskBlockStyle {
         TodayDisplayPreferences.migratedTodoTaskBlockStyle(from: blockStyleRaw)
@@ -62,6 +64,16 @@ struct TodayTodoTaskRow: View {
     }
 
     private var rowVerticalPadding: CGFloat { rowDensity.verticalPadding }
+
+    /// Frames wrap the row with their own outer padding — keep inner row a bit tighter so the list doesn’t feel vertically “compressed”.
+    private var mainRowVerticalPadding: CGFloat {
+        switch blockStyle {
+        case .listClassic:
+            return rowVerticalPadding
+        case .frames:
+            return max(3, rowVerticalPadding - 3)
+        }
+    }
 
     private var showsLeadingAccent: Bool {
         rowShowLeadingFieldAccent && fieldAccentColor != nil
@@ -88,10 +100,10 @@ struct TodayTodoTaskRow: View {
 
     private var doingSelectionCornerRadius: CGFloat {
         switch blockStyle {
-        case .listClassic, .minimalHairline:
+        case .listClassic:
             return CueInSpacing.md
-        case .cardElevated, .insetPanel:
-            return CueInSpacing.cardRadius - 4
+        case .frames:
+            return CueInSpacing.cardRadius
         }
     }
 
@@ -238,7 +250,7 @@ struct TodayTodoTaskRow: View {
             .contentShape(Rectangle())
             .onTapGesture { onOpen() }
         }
-        .padding(.vertical, rowVerticalPadding)
+        .padding(.vertical, mainRowVerticalPadding)
         .padding(.horizontal, horizontalPaddingForStyle)
         .overlay {
             if let reorderActions {
@@ -248,19 +260,24 @@ struct TodayTodoTaskRow: View {
     }
 
     private func reorderPressSurface(actions: TodayTodoRowReorderActions) -> some View {
-        HStack(spacing: 0) {
+        let remindersLikeHoldDuration: TimeInterval = 0.42
+        let stationaryHoldTolerance: CGFloat = 16
+
+        return HStack(spacing: 0) {
             Color.clear
-                .frame(width: rowShowCheckbox ? 36 : 0)
+                .frame(width: rowShowCheckbox ? 38 : 0)
+
             LongPressDragView(
                 onBegan: actions.onBegan,
                 onChanged: actions.onChanged,
                 onEnded: actions.onEnded,
                 onCancelled: actions.onCancelled,
                 onTapped: actions.onTapped,
-                minimumPressDuration: 0.14,
-                allowableMovement: 26
+                minimumPressDuration: remindersLikeHoldDuration,
+                allowableMovement: stationaryHoldTolerance
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+
             Color.clear
                 .frame(width: rowShowCheckbox ? 0 : 40)
         }
@@ -269,8 +286,8 @@ struct TodayTodoTaskRow: View {
 
     private var horizontalPaddingForStyle: CGFloat {
         switch blockStyle {
-        case .listClassic, .minimalHairline: return 2
-        case .cardElevated, .insetPanel: return 4
+        case .listClassic: return 2
+        case .frames: return 2
         }
     }
 
@@ -316,95 +333,29 @@ struct TodayTodoTaskRow: View {
     // MARK: Checkbox → status menu
 
     private var statusMenuControl: some View {
-        Menu {
-            statusMenuButtons
+        Button {
+            isStatusPopoverPresented = true
         } label: {
             checkboxGlyph
         }
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
+        .buttonStyle(.plain)
+        .popover(isPresented: $isStatusPopoverPresented) {
+            CueInTaskStatusPopoverContent(selection: task.status) { applyStatusAndClose($0) }
+        }
     }
 
     private var statusMenuControlCompact: some View {
-        Menu {
-            statusMenuButtons
+        Button {
+            isCompactStatusPopoverPresented = true
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(CueInColors.textSecondary.opacity(0.85))
                 .frame(width: 28, height: 32)
         }
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
-    }
-
-    @ViewBuilder
-    private var statusMenuButtons: some View {
-        if task.isCompleted {
-            Button(action: {}) {
-                statusMenuRow(
-                    icon: TaskStatus.completed.icon,
-                    title: TaskStatus.completed.label,
-                    isSelected: true
-                )
-            }
-            .disabled(true)
-
-            Divider()
-
-            ForEach(TaskStatus.executionPoolOpenStatuses, id: \.self) { status in
-                Button {
-                    applyStatus(status)
-                } label: {
-                    statusMenuRow(
-                        icon: status.icon,
-                        title: status.reopenFromDoneMenuTitle(),
-                        isSelected: false
-                    )
-                }
-            }
-        } else {
-            ForEach(TaskStatus.executionPoolOpenStatuses, id: \.self) { status in
-                Button {
-                    applyStatus(status)
-                } label: {
-                    statusMenuRow(
-                        icon: status.icon,
-                        title: status.label,
-                        isSelected: task.status == status
-                    )
-                }
-            }
-
-            Divider()
-
-            Button {
-                applyStatus(.completed)
-            } label: {
-                statusMenuRow(
-                    icon: TaskStatus.completed.icon,
-                    title: TaskStatus.completed.label,
-                    isSelected: false
-                )
-            }
-        }
-    }
-
-    private func statusMenuRow(icon: String, title: String, isSelected: Bool) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(CueInColors.textSecondary)
-                .frame(width: 20, alignment: .center)
-            Text(title)
-                .font(.system(size: 15, weight: .regular))
-                .foregroundStyle(CueInColors.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(CueInColors.textSecondary)
-            }
+        .buttonStyle(.plain)
+        .popover(isPresented: $isCompactStatusPopoverPresented) {
+            CueInTaskStatusPopoverContent(selection: task.status) { applyStatusAndClose($0) }
         }
     }
 
@@ -421,6 +372,12 @@ struct TodayTodoTaskRow: View {
         .animation(.easeInOut(duration: 0.18), value: task.status)
     }
 
+    private func applyStatusAndClose(_ status: TaskStatus) {
+        isStatusPopoverPresented = false
+        isCompactStatusPopoverPresented = false
+        applyStatus(status)
+    }
+
     private func applyStatus(_ status: TaskStatus) {
         if task.isCompleted {
             guard status != .completed else { return }
@@ -431,7 +388,7 @@ struct TodayTodoTaskRow: View {
         let snapshot = task
         let wasOnOpenTodayList = !snapshot.isCompleted
             && snapshot.status != .archived
-            && (snapshot.isScheduledToday || snapshot.status == .active)
+            && (snapshot.isScheduledToday || snapshot.status == .active || snapshot.status == .paused)
 
         store.setTodayTodoTaskStatus(id: task.id, status: status)
         TodayViewModel.shared.syncExecutionTimelineAfterExternalTaskEdit()

@@ -129,9 +129,14 @@ private struct CueInUndoToastGlassModifier: ViewModifier {
         return false
     }
 
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+    }
+
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
             content
+                .clipShape(shape)
                 .glassEffect(
                     .regular
                         .tint((isWarning ? tint : Color(hex: 0x3D8CFF)).opacity(isWarning ? 0.24 : 0.18))
@@ -139,18 +144,19 @@ private struct CueInUndoToastGlassModifier: ViewModifier {
                     in: .rect(cornerRadius: 22)
                 )
                 .overlay {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    shape
                         .strokeBorder(tint.opacity(isWarning ? 0.32 : 0.18), lineWidth: isWarning ? 1.0 : 0.7)
                 }
         } else {
             content
+                .clipShape(shape)
                 .background(
                     (isWarning ? tint.opacity(0.18) : Color.clear),
-                    in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    in: shape
                 )
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .background(.regularMaterial, in: shape)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    shape
                         .strokeBorder(tint.opacity(isWarning ? 0.34 : 0.22), lineWidth: isWarning ? 1.0 : 0.7)
                 }
         }

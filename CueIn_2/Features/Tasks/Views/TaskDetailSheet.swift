@@ -23,6 +23,7 @@ struct TaskDetailSheet: View {
     @State private var newTagText = ""
     @State private var newSubtaskTitle = ""
     @State private var accessoryPanel: TaskEditorAccessoryPanel? = nil
+    @State private var isStatusPopoverPresented = false
     @FocusState private var titleFocused: Bool
     @FocusState private var descriptionFocused: Bool
 
@@ -113,7 +114,7 @@ private enum TaskEditorAccessoryPanel {
 private extension TaskDetailSheet {
     var projectHeaderChip: some View {
         Menu {
-            Section("Field") {
+            Section("Initiative") {
                 fieldMenuContent
             }
 
@@ -127,8 +128,6 @@ private extension TaskDetailSheet {
                 tint: organizationTint
             )
         }
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
     }
 
     var titleAndDescription: some View {
@@ -210,7 +209,7 @@ private extension TaskDetailSheet {
                 .background(CueInColors.divider)
 
             VStack(spacing: 0) {
-                compactPropertyRow(icon: "square.grid.2x2.fill", title: "Field") {
+                compactPropertyRow(icon: "square.grid.2x2.fill", title: "Initiative") {
                     fieldMenu
                 }
             }
@@ -531,28 +530,8 @@ private extension TaskDetailSheet {
     }
 
     var statusChip: some View {
-        Menu {
-            ForEach(editorStatuses, id: \.self) { status in
-                Button {
-                    setStatus(status)
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: status.icon)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(CueInColors.textSecondary)
-                            .frame(width: 20, alignment: .center)
-                        Text(status.label)
-                            .font(CueInTypography.body)
-                            .foregroundStyle(CueInColors.textPrimary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if draft.status == status {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(CueInColors.textSecondary)
-                        }
-                    }
-                }
-            }
+        Button {
+            isStatusPopoverPresented = true
         } label: {
             TaskEditorPropertyChip(
                 icon: draft.status.icon,
@@ -560,8 +539,13 @@ private extension TaskDetailSheet {
                 tint: draft.status.color
             )
         }
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
+        .buttonStyle(.plain)
+        .popover(isPresented: $isStatusPopoverPresented) {
+            CueInTaskStatusPopoverContent(selection: draft.status) { status in
+                isStatusPopoverPresented = false
+                setStatus(status)
+            }
+        }
     }
 
     var priorityChip: some View {
@@ -580,8 +564,6 @@ private extension TaskDetailSheet {
                 tint: draft.priority.color
             )
         }
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
     }
 
     var typeChip: some View {
@@ -608,8 +590,6 @@ private extension TaskDetailSheet {
                 .frame(height: 36)
                 .cueInEditorGlassCapsule()
         }
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
     }
 
     var projectChip: some View {
@@ -622,8 +602,6 @@ private extension TaskDetailSheet {
                 tint: projectTint
             )
         }
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
     }
 
     var fieldChip: some View {
@@ -632,12 +610,10 @@ private extension TaskDetailSheet {
         } label: {
             TaskEditorPropertyChip(
                 icon: store.field(draft.fieldID)?.resolvedIconSystemName ?? "square.grid.2x2",
-                title: store.field(draft.fieldID)?.name ?? "Field",
+                title: store.field(draft.fieldID)?.name ?? "Initiative",
                 tint: store.field(draft.fieldID)?.color ?? CueInColors.textSecondary
             )
         }
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
     }
 
     var durationChip: some View {
@@ -655,8 +631,6 @@ private extension TaskDetailSheet {
                 tint: CueInColors.textSecondary
             )
         }
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
     }
 
     var dueChip: some View {
@@ -675,8 +649,6 @@ private extension TaskDetailSheet {
                 tint: draft.dueDate == nil ? CueInColors.textSecondary : CueInColors.accentFixed
             )
         }
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
     }
 }
 
@@ -703,8 +675,6 @@ private extension TaskDetailSheet {
         } label: {
             compactValue(store.field(draft.fieldID)?.name ?? "None", tint: store.field(draft.fieldID)?.color)
         }
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
     }
 
     var scheduledDateControl: some View {
@@ -712,7 +682,9 @@ private extension TaskDetailSheet {
             if draft.scheduledDate != nil {
                 Button {
                     draft.scheduledDate = nil
-                    if draft.status == .scheduled { draft.status = .inbox }
+                    if draft.status == .scheduled || draft.status == .active || draft.status == .paused {
+                        draft.status = .inbox
+                    }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(CueInColors.textTertiary)
@@ -786,8 +758,6 @@ private extension TaskDetailSheet {
         } label: {
             compactValue(draft.recurrence.label)
         }
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
     }
 
 }
@@ -970,10 +940,6 @@ private extension TaskDetailSheet {
         !newSubtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    var editorStatuses: [TaskStatus] {
-        [.inbox, .scheduled, .active, .completed, .archived]
-    }
-
     var projectTint: Color {
         store.project(draft.projectID).map { store.color(for: $0) } ?? CueInColors.textSecondary
     }
@@ -1116,7 +1082,7 @@ private extension TaskDetailSheet {
 
     func clearStartDate() {
         draft.scheduledDate = nil
-        if draft.status == .scheduled || draft.status == .active {
+        if draft.status == .scheduled || draft.status == .active || draft.status == .paused {
             draft.status = .inbox
         }
     }
@@ -1133,6 +1099,11 @@ private extension TaskDetailSheet {
             }
             draft.completedAt = nil
         case .active:
+            if draft.scheduledDate == nil {
+                draft.scheduledDate = Calendar.current.startOfDay(for: Date())
+            }
+            draft.completedAt = nil
+        case .paused:
             if draft.scheduledDate == nil {
                 draft.scheduledDate = Calendar.current.startOfDay(for: Date())
             }
@@ -1172,6 +1143,9 @@ private extension TaskDetailSheet {
             draft.scheduledDate = draft.scheduledDate ?? Calendar.current.startOfDay(for: Date())
             draft.completedAt = nil
         case .active:
+            draft.scheduledDate = draft.scheduledDate ?? Calendar.current.startOfDay(for: Date())
+            draft.completedAt = nil
+        case .paused:
             draft.scheduledDate = draft.scheduledDate ?? Calendar.current.startOfDay(for: Date())
             draft.completedAt = nil
         case .inbox:

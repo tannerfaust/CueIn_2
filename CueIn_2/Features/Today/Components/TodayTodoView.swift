@@ -106,10 +106,10 @@ struct TodayTodoView: View {
 
     private var sectionStackSpacing: CGFloat {
         switch blockStyle {
-        case .listClassic, .minimalHairline:
+        case .listClassic:
             return CueInSpacing.md
-        case .cardElevated, .insetPanel:
-            return CueInSpacing.lg
+        case .frames:
+            return CueInSpacing.sm
         }
     }
 
@@ -144,20 +144,50 @@ private struct TodayTodoViewportPreferenceKey: PreferenceKey {
 private struct TodayTodoScrollViewResolver: UIViewRepresentable {
     @Binding var scrollView: UIScrollView?
 
-    func makeUIView(context _: Context) -> UIView {
-        let view = UIView(frame: .zero)
-        view.backgroundColor = .clear
-        view.isUserInteractionEnabled = false
+    func makeUIView(context: Context) -> UIView {
+        let view = ResolverView()
+        view.onResolve = { scrollView = $0 }
         return view
     }
 
     func updateUIView(_ uiView: UIView, context _: Context) {
-        // Resolve once; re-resolving on every SwiftUI update is unnecessary
-        // and triggers layout churn that amplifies reparenting warnings.
-        guard scrollView == nil else { return }
-        DispatchQueue.main.async {
-            guard scrollView == nil else { return }
-            scrollView = uiView.enclosingScrollView
+        (uiView as? ResolverView)?.resolveSoon()
+    }
+
+    final class ResolverView: UIView {
+        var onResolve: ((UIScrollView?) -> Void)?
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            backgroundColor = .clear
+            isUserInteractionEnabled = false
+        }
+
+        @available(*, unavailable)
+        required init?(coder _: NSCoder) {
+            nil
+        }
+
+        override func didMoveToSuperview() {
+            super.didMoveToSuperview()
+            resolveSoon()
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            resolveSoon()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            resolveSoon()
+        }
+
+        func resolveSoon() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                onResolve?(enclosingScrollView)
+            }
         }
     }
 }
@@ -183,61 +213,79 @@ private struct TodayTodoHeader: View {
     let totalMinutes: Int
 
     @AppStorage(TodayDisplayPreferences.todoViewShowInfoBlock) private var showInfoBlock = true
+    @AppStorage(TodayDisplayPreferences.todoSummaryPlacement) private var summaryPlacementRaw
+        = TodayDisplayPreferences.TodoSummaryPlacement.inList.rawValue
     @AppStorage(TodayDisplayPreferences.todoSummaryShowPlannedTime) private var summaryShowPlannedTime = true
     @AppStorage(TodayDisplayPreferences.todoSummaryShowMetricPills) private var summaryShowMetricPills = true
 
+    private var summaryPlacement: TodayDisplayPreferences.TodoSummaryPlacement {
+        TodayDisplayPreferences.migratedTodoSummaryPlacement(from: summaryPlacementRaw)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: CueInSpacing.md) {
-            if showInfoBlock {
-                VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-                    if summaryShowPlannedTime {
-                        HStack {
-                            Text("Planned time (open tasks)")
-                                .font(CueInTypography.micro)
-                                .foregroundStyle(CueInColors.textTertiary)
-                            Spacer(minLength: CueInSpacing.md)
-                            Text(Self.durationLabel(totalMinutes))
-                                .font(CueInTypography.captionMedium)
-                                .monospacedDigit()
-                                .foregroundStyle(CueInColors.textPrimary)
-                        }
-                    }
-
-                    if summaryShowMetricPills {
-                        HStack(spacing: CueInSpacing.sm) {
-                            TodayTodoMetricPill(value: "\(openCount)", label: "open")
-                            TodayTodoMetricPill(value: "\(completedCount)", label: "done")
-                            TodayTodoMetricPill(value: "\(openCount + completedCount)", label: "total")
-                        }
-                    }
-
-                    if !summaryShowPlannedTime && !summaryShowMetricPills {
-                        Text("Summary card is on, but planned time and pills are hidden. Turn one on in Settings, or turn off the whole card.")
-                            .font(CueInTypography.caption)
-                            .foregroundStyle(CueInColors.textTertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(CueInSpacing.base)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(CueInColors.surfacePrimary.opacity(0.72))
-                .clipShape(RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous)
-                        .strokeBorder(CueInColors.cardBorder, lineWidth: 0.5)
-                }
+            if showInfoBlock, summaryPlacement == .inList {
+                summaryListPill
             }
         }
         .padding(.bottom, CueInSpacing.xs)
     }
 
-    private static func durationLabel(_ minutes: Int) -> String {
-        if minutes >= 60 {
-            let hours = minutes / 60
-            let rest = minutes % 60
-            return rest == 0 ? "\(hours)h" : "\(hours)h \(rest)m"
+    private var summaryListPill: some View {
+        HStack(alignment: .center, spacing: CueInSpacing.md) {
+            if summaryShowPlannedTime, summaryShowMetricPills {
+                plannedColumn
+                Capsule()
+                    .fill(CueInColors.divider.opacity(0.5))
+                    .frame(width: 1, height: 26)
+                metricPills
+            } else if summaryShowPlannedTime {
+                plannedColumn
+                Spacer(minLength: 0)
+            } else if summaryShowMetricPills {
+                Spacer(minLength: 0)
+                metricPills
+                Spacer(minLength: 0)
+            } else {
+                Text("Turn on planned time or counts in Settings, or hide the summary.")
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(CueInColors.textTertiary)
+                    .multilineTextAlignment(.leading)
+            }
         }
-        return "\(minutes)m"
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            Capsule(style: .continuous)
+                .fill(Color.white.opacity(0.055))
+        }
+        .overlay {
+            Capsule(style: .continuous)
+                .strokeBorder(CueInColors.cardBorder.opacity(0.45), lineWidth: 0.5)
+        }
+        .modifier(CueInStableGlassCapsuleModifier())
+    }
+
+    private var plannedColumn: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Planned")
+                .font(CueInTypography.micro)
+                .foregroundStyle(CueInColors.textTertiary)
+            Text(TodayDisplayPreferences.formatTodoPlannedMinutesLine(totalMinutes))
+                .font(.system(size: 15, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(CueInColors.textPrimary)
+        }
+        .frame(minWidth: 0, alignment: .leading)
+    }
+
+    private var metricPills: some View {
+        HStack(spacing: CueInSpacing.sm) {
+            TodayTodoMetricPill(value: "\(openCount)", label: "open")
+            TodayTodoMetricPill(value: "\(completedCount)", label: "done")
+            TodayTodoMetricPill(value: "\(openCount + completedCount)", label: "total")
+        }
     }
 }
 
@@ -257,12 +305,12 @@ private struct TodayTodoMetricPill: View {
                 .font(CueInTypography.micro)
                 .foregroundStyle(CueInColors.textTertiary)
         }
-        .frame(height: 30)
-        .padding(.horizontal, 10)
-        .background(CueInColors.surfacePrimary.opacity(0.72))
+        .frame(height: 28)
+        .padding(.horizontal, 9)
+        .background(Color.white.opacity(0.06))
         .overlay {
             Capsule(style: .continuous)
-                .strokeBorder(CueInColors.cardBorder, lineWidth: 0.5)
+                .strokeBorder(CueInColors.cardBorder.opacity(0.4), lineWidth: 0.5)
         }
         .clipShape(Capsule(style: .continuous))
     }
@@ -275,6 +323,48 @@ private enum TodayTodoAutoScrollDirection: Hashable {
 
 private struct TodayTodoAutoScrollRequest {
     let deltaY: CGFloat
+}
+
+@MainActor
+private final class TodayTodoAutoScrollDriver: NSObject {
+    private var timer: Timer?
+    private var step: (() -> Bool)?
+
+    func start(step: @escaping () -> Bool) {
+        self.step = step
+        guard timer == nil else { return }
+
+        let timer = Timer(
+            timeInterval: 1.0 / 60.0,
+            target: self,
+            selector: #selector(tick),
+            userInfo: nil,
+            repeats: true
+        )
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        step = nil
+    }
+
+    deinit {
+        timer?.invalidate()
+    }
+
+    @objc private func tick() {
+        if step?() != true {
+            stop()
+        }
+    }
+}
+
+private enum TodayTodoFramesStyle {
+    /// Rounded “card” corners (clearly rounder than the old 8pt chip radius).
+    static let cornerRadius: CGFloat = CueInSpacing.cardRadius
 }
 
 // MARK: - TodayTodoTaskGroup
@@ -308,7 +398,7 @@ private struct TodayTodoTaskGroup: View {
     @State private var hasScheduledPreferenceFlush = false
     @State private var autoScrollDirection: TodayTodoAutoScrollDirection?
     @State private var autoScrollDeltaY: CGFloat = 0
-    @State private var autoScrollTaskID = UUID()
+    @State private var autoScrollDriver = TodayTodoAutoScrollDriver()
 
     private struct TaskFramePreferenceKey: PreferenceKey {
         static var defaultValue: [UUID: CGRect] = [:]
@@ -389,9 +479,6 @@ private struct TodayTodoTaskGroup: View {
             pendingPreferenceFrames = frames
             schedulePreferenceFrameFlushIfNeeded()
         }
-        .task(id: autoScrollTaskID) {
-            await runAutoScrollLoop()
-        }
         .onAppear {
             syncVisualOrder(force: true)
         }
@@ -431,33 +518,20 @@ private struct TodayTodoTaskGroup: View {
         allowsReorder: Bool
     ) -> some View {
         switch blockStyle {
-        case .listClassic, .minimalHairline:
+        case .listClassic:
             rowContent(for: task, allowsSwipe: allowsSwipe, allowsReorder: allowsReorder)
-        case .cardElevated:
+        case .frames:
             rowContent(for: task, allowsSwipe: allowsSwipe, allowsReorder: allowsReorder)
-                .padding(.horizontal, CueInSpacing.md)
-                .padding(.vertical, CueInSpacing.sm)
+                .padding(.horizontal, 2)
+                .padding(.vertical, 1)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background {
-                    RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous)
-                        .fill(CueInColors.surfacePrimary.opacity(0.88))
+                    RoundedRectangle(cornerRadius: TodayTodoFramesStyle.cornerRadius, style: .continuous)
+                        .fill(Color.white.opacity(0.048))
                 }
                 .overlay {
-                    RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous)
-                        .strokeBorder(CueInColors.cardBorder.opacity(0.75), lineWidth: 0.5)
-                }
-        case .insetPanel:
-            rowContent(for: task, allowsSwipe: allowsSwipe, allowsReorder: allowsReorder)
-                .padding(.horizontal, CueInSpacing.sm)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(CueInColors.surfaceSecondary.opacity(0.55))
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(CueInColors.cardBorder.opacity(0.55), lineWidth: 0.5)
+                    RoundedRectangle(cornerRadius: TodayTodoFramesStyle.cornerRadius, style: .continuous)
+                        .strokeBorder(CueInColors.cardBorder.opacity(0.42), lineWidth: 0.5)
                 }
         }
     }
@@ -545,9 +619,9 @@ private struct TodayTodoTaskGroup: View {
         let fallbackHeight = max(fallbackFrame.height, 1)
         let spacing: CGFloat = {
             switch blockStyle {
-            case .cardElevated, .insetPanel:
-                return rowDensity.blockSpacing
-            case .listClassic, .minimalHairline:
+            case .frames:
+                return Self.framesInterRowSpacing
+            case .listClassic:
                 return 0
             }
         }()
@@ -603,10 +677,8 @@ private struct TodayTodoTaskGroup: View {
             dragGrabOffsetY = location.y - frame.midY
             setDragCenterY(frame.midY)
             dragStartCenterY = frame.midY
+            hasActiveDragStarted = true
             updateAutoScrollDirection(for: frame.midY)
-            withAnimation(reorderAnimation) {
-                hasActiveDragStarted = true
-            }
         }
     }
 
@@ -656,51 +728,47 @@ private struct TodayTodoTaskGroup: View {
             return
         }
 
-        let activationDistance: CGFloat = 170
+        let activationDistance: CGFloat = 150
         let topTrigger = max(viewportFrame.minY + activationDistance, containerFrame.minY + 44)
         let bottomTrigger = min(viewportFrame.maxY - activationDistance, containerFrame.maxY - 44)
 
         if centerY < topTrigger {
             let intensity = min(1, max(0, (topTrigger - centerY) / activationDistance))
-            setAutoScroll(direction: .up, deltaY: -(12 + 30 * intensity))
+            setAutoScroll(direction: .up, deltaY: -(7 + 25 * intensity))
         } else if centerY > bottomTrigger {
             let intensity = min(1, max(0, (centerY - bottomTrigger) / activationDistance))
-            setAutoScroll(direction: .down, deltaY: 12 + 30 * intensity)
+            setAutoScroll(direction: .down, deltaY: 7 + 25 * intensity)
         } else {
             setAutoScroll(direction: nil, deltaY: 0)
         }
     }
 
     private func setAutoScroll(direction: TodayTodoAutoScrollDirection?, deltaY: CGFloat) {
-        let directionChanged = autoScrollDirection != direction
         autoScrollDirection = direction
         autoScrollDeltaY = deltaY
 
-        if directionChanged {
-            autoScrollTaskID = UUID()
+        if let direction {
+            autoScrollDriver.start {
+                performAutoScrollStep(direction: direction)
+            }
+        } else {
+            autoScrollDriver.stop()
         }
     }
 
-    private func runAutoScrollLoop() async {
-        while !Task.isCancelled {
-            guard let direction = autoScrollDirection,
-                  let sourceID = draggedTaskID,
-                  hasActiveDragStarted,
-                  visualTaskIDs.count > 1
-            else { return }
+    private func performAutoScrollStep(direction: TodayTodoAutoScrollDirection) -> Bool {
+        guard let sourceID = draggedTaskID,
+              hasActiveDragStarted,
+              visualTaskIDs.count > 1,
+              visualTaskIDs.contains(sourceID)
+        else { return false }
 
-            performAutoScrollStep(sourceID: sourceID, direction: direction)
-            try? await Task.sleep(for: .milliseconds(16))
-        }
-    }
-
-    private func performAutoScrollStep(sourceID: UUID, direction: TodayTodoAutoScrollDirection) {
-        guard visualTaskIDs.contains(sourceID) else { return }
         let deltaY = direction == .up ? min(autoScrollDeltaY, -1) : max(autoScrollDeltaY, 1)
         onAutoScroll(TodayTodoAutoScrollRequest(deltaY: deltaY))
         if let centerY = dragCenterY {
             updateVisualOrder(sourceID: sourceID, centerY: centerY)
         }
+        return true
     }
 
     private func updateVisualOrder(sourceID: UUID, centerY: CGFloat) {
@@ -808,7 +876,7 @@ private struct TodayTodoTaskGroup: View {
         dragStartOrderIDs = []
         autoScrollDirection = nil
         autoScrollDeltaY = 0
-        autoScrollTaskID = UUID()
+        autoScrollDriver.stop()
     }
 
     private func syncVisualOrder(force: Bool = false) {
@@ -837,14 +905,23 @@ private struct TodayTodoTaskGroup: View {
         switch blockStyle {
         case .listClassic:
             listClassicStack
-        case .minimalHairline:
-            minimalHairlineStack
-        case .cardElevated:
-            cardStack(elevated: true)
-        case .insetPanel:
-            cardStack(elevated: false)
+        case .frames:
+            framesStack
         }
     }
+
+    private var framesStack: some View {
+        VStack(spacing: Self.framesInterRowSpacing) {
+            ForEach(displayTasks) { task in
+                reorderableCell(for: task) {
+                    cellContent(for: task, allowsSwipe: true, allowsReorder: allowsReordering)
+                }
+            }
+        }
+    }
+
+    /// Tight vertical rhythm between frame cards.
+    private static let framesInterRowSpacing: CGFloat = 2
 
     private var listClassicStack: some View {
         VStack(spacing: 0) {
@@ -860,35 +937,6 @@ private struct TodayTodoTaskGroup: View {
                             .frame(height: 1)
                             .padding(.leading, rowShowCheckbox ? 32 : 8)
                     }
-                }
-            }
-        }
-    }
-
-    private var minimalHairlineStack: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(displayTasks.enumerated()), id: \.element.id) { index, task in
-                VStack(alignment: .leading, spacing: 0) {
-                    reorderableCell(for: task) {
-                        cellContent(for: task, allowsSwipe: true, allowsReorder: allowsReordering)
-                    }
-
-                    if index < displayTasks.count - 1 {
-                        Rectangle()
-                            .fill(CueInColors.divider.opacity(0.38))
-                            .frame(height: 1)
-                    }
-                }
-            }
-        }
-    }
-
-    private func cardStack(elevated _: Bool) -> some View {
-        let spacing = rowDensity.blockSpacing
-        return VStack(spacing: spacing) {
-            ForEach(displayTasks) { task in
-                reorderableCell(for: task) {
-                    cellContent(for: task, allowsSwipe: true, allowsReorder: allowsReordering)
                 }
             }
         }

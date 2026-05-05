@@ -9,9 +9,13 @@ enum TodayDisplayPreferences {
     static let pullsTasksFromExecutionPool = "today.schedule.pullsTasksFromExecutionPool"
     /// Task-led Today presentation: timeline calendar or execution-pool to-do list.
     static let taskLedViewMode       = "today.taskLed.viewMode"
-    /// When `true`, To-do view shows the summary card (counts, planned duration). When `false`, task lists only.
+    /// When `true`, To-do view shows summary info (placement set by ``todoSummaryPlacement``).
     static let todoViewShowInfoBlock = "today.taskLed.todo.showInfoBlock"
-    /// Visual treatment for each task in To-do view (`listClassic` matches the original design).
+    /// Large pill under the title vs compact pill in the top chrome (left of the menu).
+    static let todoSummaryPlacement = "today.taskLed.todo.summary.placement"
+    /// Which single metric the top-bar summary pill shows when placement is chrome.
+    static let todoChromeSummaryMetric = "today.taskLed.todo.summary.chromeMetric"
+    /// Visual treatment for each task in To-do view: classic list or soft framed rows.
     static let todoTaskBlockStyle = "today.taskLed.todo.taskBlockStyle"
     /// Vertical padding inside each task row.
     static let todoRowDensity = "today.taskLed.todo.rowDensity"
@@ -38,6 +42,8 @@ enum TodayDisplayPreferences {
     /// Keys for To-do appearance in ``TodayTodoSettingsSection`` (used when discarding the Today settings sheet).
     static let todoAppearanceStorageKeys: [String] = [
         todoViewShowInfoBlock,
+        todoSummaryPlacement,
+        todoChromeSummaryMetric,
         todoTaskBlockStyle,
         todoRowDensity,
         todoSummaryShowPlannedTime,
@@ -129,6 +135,8 @@ enum TodayDisplayPreferences {
         pullsTasksFromExecutionPool,
         taskLedViewMode,
         todoViewShowInfoBlock,
+        todoSummaryPlacement,
+        todoChromeSummaryMetric,
         todoTaskBlockStyle,
         todoRowDensity,
         todoSummaryShowPlannedTime,
@@ -248,7 +256,7 @@ enum TodayDisplayPreferences {
         var title: String {
             switch self {
             case .timeline: return "Timeline"
-            case .todo: return "To-do view"
+            case .todo: return "To-do"
             }
         }
 
@@ -260,48 +268,70 @@ enum TodayDisplayPreferences {
         }
     }
 
-    // MARK: Today to-do list
+    // MARK: Today to-do summary placement
 
-    enum TodoTaskBlockStyle: String, CaseIterable, Identifiable {
-        /// Original: continuous list with inset dividers between tasks.
-        case listClassic = "listClassic"
-        /// Each task sits on its own elevated card with gap between.
-        case cardElevated = "cardElevated"
-        /// Flat rows, full-width hairlines, optional leading field accent.
-        case minimalHairline = "minimalHairline"
-        /// Rounded inset panels on the page background (Settings-style groups).
-        case insetPanel = "insetPanel"
+    enum TodoSummaryPlacement: String, CaseIterable, Identifiable {
+        case inList = "inList"
+        case inChrome = "inChrome"
 
         var id: String { rawValue }
 
         var title: String {
             switch self {
-            case .listClassic: return "Classic list"
-            case .cardElevated: return "Separate cards"
-            case .minimalHairline: return "Minimal"
-            case .insetPanel: return "Inset panels"
+            case .inList: return "In list"
+            case .inChrome: return "Top bar"
+            }
+        }
+    }
+
+    enum TodoChromeSummaryMetric: String, CaseIterable, Identifiable {
+        case plannedTime = "plannedTime"
+        case openCount = "openCount"
+        case completedCount = "completedCount"
+        case totalCount = "totalCount"
+        case openAndPlanned = "openAndPlanned"
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .plannedTime: return "Planned time"
+            case .openCount: return "Open tasks"
+            case .completedCount: return "Done"
+            case .totalCount: return "Total tasks"
+            case .openAndPlanned: return "Open + time"
+            }
+        }
+    }
+
+    enum TodoTaskBlockStyle: String, CaseIterable, Identifiable {
+        /// Continuous list with inset dividers between tasks.
+        case listClassic = "listClassic"
+        /// Soft rounded blocks on a whisper-lifted surface - no borders (iOS-style grouping).
+        case frames = "frames"
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .listClassic: return "Classic"
+            case .frames: return "Frames"
             }
         }
 
         var subtitle: String {
             switch self {
             case .listClassic:
-                return "One list with hairline dividers — closest to the original To-do view."
-            case .cardElevated:
-                return "Each task is its own card; more air and separation."
-            case .minimalHairline:
-                return "Edge-to-edge rows with a slim field-color accent when enabled."
-            case .insetPanel:
-                return "Grouped panels that float slightly inset from the screen edges."
+                return "Hairline dividers between tasks."
+            case .frames:
+                return "Each task on a slightly lighter rounded surface, no outlines."
             }
         }
 
         var icon: String {
             switch self {
             case .listClassic: return "list.bullet"
-            case .cardElevated: return "square.stack"
-            case .minimalHairline: return "line.3.horizontal"
-            case .insetPanel: return "rectangle.inset.filled"
+            case .frames: return "rectangle.fill"
             }
         }
     }
@@ -340,11 +370,32 @@ enum TodayDisplayPreferences {
     }
 
     static func migratedTodoTaskBlockStyle(from raw: String) -> TodoTaskBlockStyle {
-        TodoTaskBlockStyle(rawValue: raw) ?? .listClassic
+        if raw == TodoTaskBlockStyle.frames.rawValue { return .frames }
+        if raw == TodoTaskBlockStyle.listClassic.rawValue { return .listClassic }
+        // Legacy: separate cards, minimal, inset — fold into Classic.
+        return .listClassic
     }
 
     static func migratedTodoRowDensity(from raw: String) -> TodoRowDensity {
         TodoRowDensity(rawValue: raw) ?? .regular
+    }
+
+    static func migratedTodoSummaryPlacement(from raw: String) -> TodoSummaryPlacement {
+        TodoSummaryPlacement(rawValue: raw) ?? .inList
+    }
+
+    static func migratedTodoChromeSummaryMetric(from raw: String) -> TodoChromeSummaryMetric {
+        TodoChromeSummaryMetric(rawValue: raw) ?? .openAndPlanned
+    }
+
+    /// Short label for total planned minutes on open Today tasks (To-do summary).
+    static func formatTodoPlannedMinutesLine(_ minutes: Int) -> String {
+        if minutes >= 60 {
+            let hours = minutes / 60
+            let rest = minutes % 60
+            return rest == 0 ? "\(hours)h" : "\(hours)h \(rest)m"
+        }
+        return "\(minutes)m"
     }
 
     // MARK: Schedule

@@ -35,6 +35,7 @@ struct FieldDetailView: View {
             .padding(.bottom, CueInSpacing.huge)
         }
         .background(CueInColors.background)
+        .devNotebookScreen(field.map { "Field: \($0.name)" } ?? "Field")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -59,12 +60,10 @@ struct FieldDetailView: View {
                     } label: { Label("Add project", systemImage: "folder.badge.plus") }
                     Button {
                         editingField = true
-                    } label: { Label("Edit field", systemImage: "pencil") }
+                    } label: { Label("Edit initiative", systemImage: "pencil") }
                 } label: {
                     CueInOverflowMenuGlyph()
                 }
-                .menuStyle(.borderlessButton)
-                .cueInMenuInteractionStability()
             }
         }
         .sheet(isPresented: $creatingTask) {
@@ -289,7 +288,7 @@ struct FieldDetailView: View {
         switch filter {
         case .all:    return all
         case .active: return all.filter { !$0.isCompleted && $0.status != .archived }
-        case .today:  return all.filter { $0.isScheduledToday || $0.status == .active }
+        case .today:  return all.filter { $0.isScheduledToday || $0.status == .active || $0.status == .paused }
         case .done:   return all.filter(\.isCompleted)
         }
     }

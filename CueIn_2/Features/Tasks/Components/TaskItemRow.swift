@@ -132,7 +132,7 @@ struct TaskItemRow: View {
 
     private var dateLabel: String? {
         if task.isCompleted { return "Done" }
-        if task.status == .active { return "Doing" }
+        if task.status == .paused { return "Paused" }
         if task.isOverdue { return "Overdue" }
         if let due = task.dueDate {
             guard let label = Self.shortDateLabel(due) else { return nil }
@@ -363,8 +363,6 @@ struct TaskItemRow: View {
         } label: {
             Label("Schedule", systemImage: "calendar")
         }
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
 
         Divider()
 

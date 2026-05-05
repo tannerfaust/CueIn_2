@@ -77,8 +77,7 @@ struct TodaySettingsSheet: View {
             },
             editorPrincipalIcon: taskLedViewMode == .todo ? nil : "gearshape.fill",
             editorSaveForeground: taskLedViewMode == .todo ? CueInColors.textPrimary : CueInColors.accentFocus,
-            floatingAccessory: taskLedViewMode == .todo ? AnyView(TodayTodoSettingsFloatingPreview()) : nil,
-            floatingAccessoryThreshold: 210
+            floatingAccessory: nil
         ) {
             VStack(alignment: .leading, spacing: CueInSpacing.lg) {
                 if isTaskLedMode {

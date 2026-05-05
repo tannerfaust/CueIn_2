@@ -128,8 +128,6 @@ struct ScheduleQuickAddTaskSheet: View {
             .background(CueInColors.surfaceSecondary, in: RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous))
         }
         .buttonStyle(.plain)
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
     }
 
     private var taskTitleField: some View {

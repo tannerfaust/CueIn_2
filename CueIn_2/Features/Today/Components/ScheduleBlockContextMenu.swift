@@ -111,6 +111,7 @@ private struct MenuGlassBackground: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
             content
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .glassEffect(
                     interactive
                         ? .regular.tint(Color.white.opacity(0.16)).interactive()
@@ -119,6 +120,7 @@ private struct MenuGlassBackground: ViewModifier {
                 )
         } else {
             content
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 22, style: .continuous)

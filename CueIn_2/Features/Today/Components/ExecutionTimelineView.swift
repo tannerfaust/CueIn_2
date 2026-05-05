@@ -212,6 +212,7 @@ private struct DayPillGlassModifier: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
             content
+                .clipShape(Capsule(style: .continuous))
                 .glassEffect(
                     .regular.tint(isToday
                         ? CueInColors.accentFocus.opacity(0.10)
@@ -221,6 +222,7 @@ private struct DayPillGlassModifier: ViewModifier {
                 )
         } else {
             content
+                .clipShape(Capsule(style: .continuous))
                 .background(
                     Capsule(style: .continuous)
                         .fill(.ultraThinMaterial)
@@ -1030,6 +1032,7 @@ private struct NowPillGlassModifier: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
             content
+                .clipShape(Capsule(style: .continuous))
                 .glassEffect(
                     .regular.tint(Color.white.opacity(0.08)),
                     in: .capsule
@@ -1040,6 +1043,7 @@ private struct NowPillGlassModifier: ViewModifier {
                 )
         } else {
             content
+                .clipShape(Capsule(style: .continuous))
                 .background(
                     Capsule(style: .continuous).fill(.ultraThinMaterial)
                 )

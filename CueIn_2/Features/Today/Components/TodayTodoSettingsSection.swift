@@ -11,6 +11,10 @@ struct TodayTodoSettingsSection: View {
         = TodayDisplayPreferences.TodoRowDensity.regular.rawValue
 
     @AppStorage(TodayDisplayPreferences.todoViewShowInfoBlock) private var showSummaryCard = true
+    @AppStorage(TodayDisplayPreferences.todoSummaryPlacement) private var summaryPlacementRaw
+        = TodayDisplayPreferences.TodoSummaryPlacement.inList.rawValue
+    @AppStorage(TodayDisplayPreferences.todoChromeSummaryMetric) private var todoChromeSummaryMetricRaw
+        = TodayDisplayPreferences.TodoChromeSummaryMetric.openAndPlanned.rawValue
     @AppStorage(TodayDisplayPreferences.todoSummaryShowPlannedTime) private var summaryShowPlannedTime = true
     @AppStorage(TodayDisplayPreferences.todoSummaryShowMetricPills) private var summaryShowMetricPills = true
 
@@ -37,50 +41,16 @@ struct TodayTodoSettingsSection: View {
         TodayDisplayPreferences.migratedTodoTaskBlockStyle(from: taskBlockStyleRaw)
     }
 
+    private var summaryPlacement: TodayDisplayPreferences.TodoSummaryPlacement {
+        TodayDisplayPreferences.migratedTodoSummaryPlacement(from: summaryPlacementRaw)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: CueInSpacing.lg) {
-            previewCard
             appearanceCard
             pageCard
             rowCard
             activeTaskCard
-        }
-    }
-
-    private var previewCard: some View {
-        CueInEditorSettingsCard(title: "Preview") {
-            VStack(alignment: .leading, spacing: CueInSpacing.md) {
-                HStack(spacing: CueInSpacing.sm) {
-                    Image(systemName: blockStyle.icon)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(CueInColors.textPrimary)
-                        .frame(width: 34, height: 34)
-                        .cueInEditorGlassCapsule()
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(blockStyle.title)
-                            .font(CueInTypography.bodyMedium)
-                            .foregroundStyle(CueInColors.textPrimary)
-                        Text(currentSummary)
-                            .font(CueInTypography.caption)
-                            .foregroundStyle(CueInColors.textTertiary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer(minLength: CueInSpacing.sm)
-                }
-
-                VStack(spacing: 0) {
-                    previewTaskRow(title: "Finish API integration", meta: previewMeta, selected: true)
-                    Divider()
-                        .background(CueInColors.divider.opacity(0.55))
-                        .padding(.leading, rowShowCheckbox ? 44 : 12)
-                    previewTaskRow(title: "Write launch notes", meta: "CueIn · 20m", selected: false)
-                }
-                .padding(.horizontal, CueInSpacing.sm)
-                .padding(.vertical, CueInSpacing.xs)
-                .background(CueInColors.surfaceSecondary.opacity(0.50), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            }
         }
     }
 
@@ -112,15 +82,23 @@ struct TodayTodoSettingsSection: View {
     private var pageCard: some View {
         CueInEditorSettingsCard(title: "Page") {
             VStack(spacing: 0) {
-                settingsToggleRow(icon: "rectangle.portrait.topthird.inset.filled", title: "Summary card", isOn: $showSummaryCard)
-                settingsDivider
-                settingsToggleRow(icon: "clock", title: "Planned time", isOn: $summaryShowPlannedTime)
-                    .disabled(!showSummaryCard)
-                    .opacity(showSummaryCard ? 1 : 0.42)
-                settingsDivider
-                settingsToggleRow(icon: "chart.bar.xaxis", title: "Metric pills", isOn: $summaryShowMetricPills)
-                    .disabled(!showSummaryCard)
-                    .opacity(showSummaryCard ? 1 : 0.42)
+                settingsToggleRow(icon: "rectangle.portrait.topthird.inset.filled", title: "Show summary", isOn: $showSummaryCard)
+
+                if showSummaryCard {
+                    settingsDivider
+                    summaryPlacementSegment
+                    if summaryPlacement == .inList {
+                        settingsDivider
+                        settingsToggleRow(icon: "clock", title: "Planned time (in list)", isOn: $summaryShowPlannedTime)
+                        settingsDivider
+                        settingsToggleRow(icon: "chart.bar.xaxis", title: "Metric pills (in list)", isOn: $summaryShowMetricPills)
+                    }
+                    if summaryPlacement == .inChrome {
+                        settingsDivider
+                        chromeSummaryMetricPicker
+                    }
+                }
+
                 settingsDivider
                 settingsToggleRow(icon: "checkmark.circle", title: "Done section", isOn: $showCompletedSection)
                 settingsDivider
@@ -129,6 +107,49 @@ struct TodayTodoSettingsSection: View {
                 settingsToggleRow(icon: "tray", title: "Empty state tips", isOn: $showEmptyStateMessage)
             }
         }
+    }
+
+    private var summaryPlacementSegment: some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.sm) {
+            Text("Summary placement")
+                .font(CueInTypography.caption)
+                .foregroundStyle(CueInColors.textTertiary)
+                .padding(.leading, 44)
+
+            Picker("Summary placement", selection: $summaryPlacementRaw) {
+                ForEach(TodayDisplayPreferences.TodoSummaryPlacement.allCases) { p in
+                    Text(p.title).tag(p.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, CueInSpacing.md)
+            .padding(.vertical, CueInSpacing.sm)
+        }
+    }
+
+    private var chromeSummaryMetricPicker: some View {
+        HStack(spacing: CueInSpacing.sm) {
+            Image(systemName: "capsule.portrait")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(CueInColors.textPrimary)
+                .frame(width: 30, height: 30)
+                .background(CueInColors.surfaceSecondary.opacity(0.58), in: Circle())
+
+            Text("Top bar shows")
+                .font(CueInTypography.body)
+                .foregroundStyle(CueInColors.textPrimary)
+
+            Spacer(minLength: CueInSpacing.sm)
+
+            Picker("Top bar summary", selection: $todoChromeSummaryMetricRaw) {
+                ForEach(TodayDisplayPreferences.TodoChromeSummaryMetric.allCases) { m in
+                    Text(m.title).tag(m.rawValue)
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(CueInColors.accentFocus)
+        }
+        .padding(.vertical, 9)
     }
 
     private var rowCard: some View {
@@ -214,93 +235,6 @@ struct TodayTodoSettingsSection: View {
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
-    private var currentSummary: String {
-        "\(TodayDisplayPreferences.migratedTodoRowDensity(from: rowDensityRaw).title) rows · \(enabledRowSignals) row signals"
-    }
-
-    private var enabledRowSignals: Int {
-        [
-            rowShowCheckbox,
-            rowShowPriorityIcon,
-            rowShowOverdueIcon,
-            rowShowProjectOrFieldPill,
-            rowShowPlannedMinutes,
-            rowShowDueDate,
-            rowShowTags,
-            rowShowNotesPreview,
-            rowShowLeadingFieldAccent
-        ].filter { $0 }.count
-    }
-
-    private var previewMeta: String {
-        var parts: [String] = []
-        if rowShowDueDate { parts.append("Due May 6") }
-        if rowShowPlannedMinutes { parts.append("45m") }
-        if rowShowTags { parts.append("#launch") }
-        if rowShowNotesPreview { parts.append("API docs ready") }
-        return parts.isEmpty ? "CueIn · Deep work" : parts.joined(separator: " · ")
-    }
-
-    private func previewTaskRow(title: String, meta: String, selected: Bool) -> some View {
-        HStack(spacing: 10) {
-            if rowShowLeadingFieldAccent {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(CueInColors.textSecondary.opacity(0.9))
-                    .frame(width: 3, height: 34)
-            }
-
-            if rowShowCheckbox {
-                Circle()
-                    .strokeBorder(CueInColors.textTertiary.opacity(0.55), lineWidth: 1.4)
-                    .frame(width: 18, height: 18)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 5) {
-                    Text(title)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(CueInColors.textPrimary)
-                        .lineLimit(1)
-                    if rowShowPriorityIcon && selected {
-                        Image(systemName: "exclamationmark.2")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(CueInColors.accentFixed)
-                    }
-                    if rowShowOverdueIcon && !selected {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(CueInColors.danger)
-                    }
-                }
-
-                Text(meta)
-                    .font(CueInTypography.micro)
-                    .foregroundStyle(CueInColors.textTertiary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: CueInSpacing.sm)
-
-            if rowShowProjectOrFieldPill {
-                HStack(spacing: rowProjectOrFieldPillIconOnly ? 0 : 5) {
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(CueInColors.textSecondary)
-                    if !rowProjectOrFieldPillIconOnly {
-                        Text("iOS App")
-                            .font(CueInTypography.micro)
-                            .foregroundStyle(CueInColors.textSecondary)
-                    }
-                }
-                .padding(.horizontal, rowProjectOrFieldPillIconOnly ? 8 : 9)
-                .frame(height: 26)
-                .background(CueInColors.surfacePrimary.opacity(0.62), in: Capsule(style: .continuous))
-            }
-        }
-        .padding(.vertical, TodayDisplayPreferences.migratedTodoRowDensity(from: rowDensityRaw).verticalPadding)
-        .contentShape(Rectangle())
-    }
-
     private var settingsDivider: some View {
         Divider()
             .background(CueInColors.divider.opacity(0.55))
@@ -326,108 +260,11 @@ struct TodayTodoSettingsSection: View {
     }
 }
 
-struct TodayTodoSettingsFloatingPreview: View {
-    @AppStorage(TodayDisplayPreferences.todoTaskBlockStyle) private var taskBlockStyleRaw
-        = TodayDisplayPreferences.TodoTaskBlockStyle.listClassic.rawValue
-    @AppStorage(TodayDisplayPreferences.todoRowDensity) private var rowDensityRaw
-        = TodayDisplayPreferences.TodoRowDensity.regular.rawValue
-    @AppStorage(TodayDisplayPreferences.todoRowShowCheckbox) private var rowShowCheckbox = true
-    @AppStorage(TodayDisplayPreferences.todoRowShowPriorityIcon) private var rowShowPriorityIcon = true
-    @AppStorage(TodayDisplayPreferences.todoRowShowProjectOrFieldPill) private var rowShowProjectOrFieldPill = true
-    @AppStorage(TodayDisplayPreferences.todoRowProjectOrFieldPillIconOnly) private var rowProjectOrFieldPillIconOnly = false
-    @AppStorage(TodayDisplayPreferences.todoRowShowPlannedMinutes) private var rowShowPlannedMinutes = false
-    @AppStorage(TodayDisplayPreferences.todoRowShowDueDate) private var rowShowDueDate = false
-    @AppStorage(TodayDisplayPreferences.todoRowShowTags) private var rowShowTags = false
-
-    private var blockStyle: TodayDisplayPreferences.TodoTaskBlockStyle {
-        TodayDisplayPreferences.migratedTodoTaskBlockStyle(from: taskBlockStyleRaw)
-    }
-
-    private var rowDensity: TodayDisplayPreferences.TodoRowDensity {
-        TodayDisplayPreferences.migratedTodoRowDensity(from: rowDensityRaw)
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            if rowShowCheckbox {
-                Circle()
-                    .strokeBorder(CueInColors.textTertiary.opacity(0.55), lineWidth: 1.35)
-                    .frame(width: 17, height: 17)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 5) {
-                    Text("Finish API integration")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(CueInColors.textPrimary)
-                        .lineLimit(1)
-                    if rowShowPriorityIcon {
-                        Image(systemName: "exclamationmark.2")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(CueInColors.textSecondary)
-                    }
-                }
-
-                Text(meta)
-                    .font(CueInTypography.micro)
-                    .foregroundStyle(CueInColors.textTertiary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: CueInSpacing.sm)
-
-            if rowShowProjectOrFieldPill {
-                HStack(spacing: rowProjectOrFieldPillIconOnly ? 0 : 5) {
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(CueInColors.textSecondary)
-                    if !rowProjectOrFieldPillIconOnly {
-                        Text("iOS App")
-                            .font(CueInTypography.micro)
-                            .foregroundStyle(CueInColors.textSecondary)
-                    }
-                }
-                .padding(.horizontal, rowProjectOrFieldPillIconOnly ? 8 : 9)
-                .frame(height: 25)
-                .background(CueInColors.surfacePrimary.opacity(0.64), in: Capsule(style: .continuous))
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, max(7, rowDensity.verticalPadding))
-        .background {
-            LinearGradient(
-                colors: [
-                    CueInColors.surfacePrimary.opacity(0.88),
-                    CueInColors.surfaceSecondary.opacity(0.74)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.55)
-        }
-        .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 10)
-    }
-
-    private var meta: String {
-        var parts: [String] = [blockStyle.title]
-        if rowShowDueDate { parts.append("May 6") }
-        if rowShowPlannedMinutes { parts.append("45m") }
-        if rowShowTags { parts.append("#launch") }
-        return parts.joined(separator: " · ")
-    }
-}
-
 private extension TodayDisplayPreferences.TodoTaskBlockStyle {
     var shortSettingsLabel: String {
         switch self {
-        case .listClassic: return "Clean list"
-        case .cardElevated: return "Separated"
-        case .minimalHairline: return "Quiet rows"
-        case .insetPanel: return "Grouped"
+        case .listClassic: return "Dividers"
+        case .frames: return "Soft blocks"
         }
     }
 }

@@ -75,7 +75,7 @@ struct CreateFieldSheet: View {
                         .disabled(!canSave)
                 }
             }
-            .alert("Delete field?", isPresented: $showingDelete) {
+            .alert("Delete initiative?", isPresented: $showingDelete) {
                 Button("Cancel", role: .cancel) { }
                 Button("Delete", role: .destructive) { deleteField() }
             } message: {
@@ -88,8 +88,8 @@ struct CreateFieldSheet: View {
     // MARK: UI blocks
 
     private var title: String {
-        if case .create = mode { return "New Field" }
-        return "Edit Field"
+        if case .create = mode { return "New Initiative" }
+        return "Edit Initiative"
     }
 
     private var canSave: Bool {
@@ -108,7 +108,7 @@ struct CreateFieldSheet: View {
                     .font(.system(size: 30, weight: .semibold))
                     .foregroundStyle(previewColor)
             }
-            Text(name.isEmpty ? "Field name" : name)
+            Text(name.isEmpty ? "Initiative name" : name)
                 .font(CueInTypography.title)
                 .foregroundStyle(name.isEmpty ? CueInColors.textTertiary : CueInColors.textPrimary)
         }
@@ -210,7 +210,7 @@ struct CreateFieldSheet: View {
             HStack {
                 Spacer()
                 Image(systemName: "trash")
-                Text("Delete field")
+                Text("Delete initiative")
                     .fontWeight(.medium)
                 Spacer()
             }

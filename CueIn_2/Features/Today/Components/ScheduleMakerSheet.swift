@@ -104,8 +104,6 @@ struct ScheduleMakerSheet: View {
                     .background(CueInColors.surfaceSecondary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
-            .menuStyle(.borderlessButton)
-            .cueInMenuInteractionStability()
 
             TextField("Schedule name", text: $name)
                 .font(CueInTypography.title)
@@ -203,8 +201,6 @@ struct ScheduleMakerSheet: View {
             .background(Capsule(style: .continuous).fill(CueInColors.surfaceSecondary))
         }
         .buttonStyle(.plain)
-        .menuStyle(.borderlessButton)
-        .cueInMenuInteractionStability()
     }
 
     // MARK: - Save bar

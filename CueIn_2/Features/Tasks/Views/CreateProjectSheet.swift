@@ -185,7 +185,7 @@ struct CreateProjectSheet: View {
 
     private var organizationSection: some View {
         SheetSection("Details") {
-            PickerRow(icon: "square.grid.2x2.fill", label: "Field") {
+            PickerRow(icon: "square.grid.2x2.fill", label: "Initiative") {
                 Menu {
                     ForEach(store.fields) { f in
                         Button {
@@ -198,7 +198,7 @@ struct CreateProjectSheet: View {
                             Circle().fill(f.color).frame(width: 7, height: 7)
                             Text(f.name)
                         } else {
-                            Text("Choose a field")
+                            Text("Choose an initiative")
                                 .foregroundStyle(CueInColors.textTertiary)
                         }
                         Image(systemName: "chevron.up.chevron.down")
@@ -208,8 +208,6 @@ struct CreateProjectSheet: View {
                     .font(CueInTypography.body)
                     .foregroundStyle(CueInColors.textPrimary)
                 }
-                .menuStyle(.borderlessButton)
-                .cueInMenuInteractionStability()
             }
             SheetRowDivider()
             PickerRow(icon: status.icon, label: "Status", iconColor: status.tint) {
@@ -227,8 +225,6 @@ struct CreateProjectSheet: View {
                             .foregroundStyle(CueInColors.textTertiary)
                     }
                 }
-                .menuStyle(.borderlessButton)
-                .cueInMenuInteractionStability()
             }
             SheetRowDivider()
             HStack(spacing: CueInSpacing.md) {

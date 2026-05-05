@@ -5,6 +5,7 @@ import SwiftUI
 
 struct HubView: View {
     @State private var showSettings = false
+    @State private var showDevNotebook = false
     @Bindable private var todayViewModel = TodayViewModel.shared
 
     var body: some View {
@@ -61,6 +62,38 @@ struct HubView: View {
                 .padding(.horizontal, CueInSpacing.screenHorizontal)
 
                 Button {
+                    showDevNotebook = true
+                } label: {
+                    CueInCard {
+                        HStack(spacing: CueInSpacing.md) {
+                            Image(systemName: "note.text.badge.plus")
+                                .font(.system(size: 16))
+                                .foregroundStyle(CueInColors.textSecondary)
+                                .frame(width: 34, height: 34)
+                                .background(CueInColors.surfaceSecondary)
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Dev notebook")
+                                    .font(CueInTypography.bodyMedium)
+                                    .foregroundStyle(CueInColors.textPrimary)
+                                Text("Ideas, bugs, and design notes (stored on this device)")
+                                    .font(CueInTypography.caption)
+                                    .foregroundStyle(CueInColors.textTertiary)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(CueInColors.textTertiary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, CueInSpacing.screenHorizontal)
+
+                Button {
                     showSettings = true
                 } label: {
                     CueInCard {
@@ -93,6 +126,14 @@ struct HubView: View {
                 .padding(.horizontal, CueInSpacing.screenHorizontal)
             }
             .padding(.bottom, CueInLayout.scrollBottomInset)
+        }
+        .sheet(isPresented: $showDevNotebook) {
+            NavigationStack {
+                DevNotebookView()
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }
         .sheet(isPresented: $showSettings) {
             NavigationStack {

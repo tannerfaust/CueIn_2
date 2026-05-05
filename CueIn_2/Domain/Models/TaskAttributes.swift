@@ -118,6 +118,8 @@ enum TaskStatus: String, Codable, CaseIterable, Identifiable, Hashable {
     case scheduled
     /// Doing — actively in progress (Linear “In Progress”).
     case active
+    /// Still on today’s plan but intentionally stopped (distinct from Waiting / Done).
+    case paused
     case completed
     case archived
 
@@ -129,6 +131,7 @@ enum TaskStatus: String, Codable, CaseIterable, Identifiable, Hashable {
         case .inbox:      return "Waiting"
         case .scheduled:  return "On execution"
         case .active:     return "In progress"
+        case .paused:     return "Paused"
         case .completed:  return "Done"
         case .archived:   return "Archived"
         }
@@ -139,6 +142,7 @@ enum TaskStatus: String, Codable, CaseIterable, Identifiable, Hashable {
         case .inbox:      return "circle.dashed"
         case .scheduled:  return "circle"
         case .active:     return "play.circle.fill"
+        case .paused:     return "pause.circle.fill"
         case .completed:  return "checkmark.circle.fill"
         case .archived:   return "archivebox.fill"
         }
@@ -149,14 +153,20 @@ enum TaskStatus: String, Codable, CaseIterable, Identifiable, Hashable {
         case .inbox:      return CueInColors.textTertiary
         case .scheduled: return CueInColors.textSecondary
         case .active:     return CueInColors.accentFocus
+        case .paused:     return CueInColors.warning
         case .completed:  return CueInColors.success
         case .archived:   return CueInColors.textTertiary
         }
     }
 
-    /// Open workflow states for Today’s execution pool and status pickers (excluding Done). Inbox removes the task from today’s list.
+    /// Open workflow states for Today’s execution pool (excluding Done / Archived).
     static var executionPoolOpenStatuses: [TaskStatus] {
-        [.inbox, .scheduled, .active]
+        [.inbox, .scheduled, .active, .paused]
+    }
+
+    /// Full picker order (shared popover everywhere).
+    static var statusPickerOrdering: [TaskStatus] {
+        [.inbox, .scheduled, .active, .paused, .completed, .archived]
     }
 
     /// Title when moving out of Done back into an open state.
@@ -165,6 +175,7 @@ enum TaskStatus: String, Codable, CaseIterable, Identifiable, Hashable {
         case .inbox:      return "Re-open as Waiting"
         case .scheduled:  return "Re-open on execution"
         case .active:     return "Re-open in progress"
+        case .paused:     return "Re-open paused"
         case .completed:  return "Done"
         case .archived:   return "Archived"
         }
