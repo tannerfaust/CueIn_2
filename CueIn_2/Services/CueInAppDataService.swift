@@ -20,6 +20,7 @@ enum CueInAppDataService {
     static func removeGimmickDemoData() {
         UserDefaults.standard.set(true, forKey: CueInAppDataKeys.gimmickDemoRemoved)
         TasksStore.shared.clearAllTasksData()
+        GoalStrategyStore.shared.clearAllGoalsData()
         TodayViewModel.shared.resetSchedulePersistenceAndBlocks(useGimmickTaskLedSample: false)
     }
 
@@ -27,6 +28,7 @@ enum CueInAppDataService {
     static func restoreGimmickDemoData() {
         UserDefaults.standard.set(false, forKey: CueInAppDataKeys.gimmickDemoRemoved)
         TasksStore.shared.replaceWithGimmickSeed()
+        GoalStrategyStore.shared.replaceWithGimmickSeed()
         TodayViewModel.shared.resetSchedulePersistenceAndBlocks(useGimmickTaskLedSample: true)
     }
 
@@ -48,15 +50,22 @@ enum CueInAppDataService {
         TodayViewModel.shared.syncExecutionTimelineAfterExternalTaskEdit()
     }
 
+    @MainActor
+    static func clearGoalsDataOnly() {
+        GoalStrategyStore.shared.clearAllGoalsData()
+    }
+
     /// Removes Tasks data, Today schedule snapshots, custom formulas, display prefs, and engine mode — then reapplies bundled demo + defaults like a new install.
     @MainActor
     static func eraseAllLocalData() {
         let defaults = UserDefaults.standard
         TodayDisplayPreferences.removeAllStoredPreferenceKeys(from: defaults)
         defaults.removeObject(forKey: DayEngineMode.storageKey)
+        defaults.removeObject(forKey: AppTab.storageKey)
         defaults.removeObject(forKey: CueInAppDataKeys.gimmickDemoRemoved)
         FormulaLibraryService.clearUserSavedTemplates()
         TasksStore.shared.replaceWithGimmickSeed()
+        GoalStrategyStore.shared.replaceWithGimmickSeed()
         defaults.set(false, forKey: CueInAppDataKeys.gimmickDemoRemoved)
         TodayViewModel.shared.performFreshInstallReset()
     }

@@ -137,6 +137,7 @@ final class TasksStore {
 
     func addTask(_ task: TaskItem) {
         tasks.append(task)
+        recordSyncSnapshot()
     }
 
     func restoreTask(_ task: TaskItem, listKey: String? = nil) {
@@ -148,6 +149,7 @@ final class TasksStore {
             order.insert(task.id, at: 0)
             taskListOrder[listKey] = order
         }
+        recordSyncSnapshot()
     }
 
     func updateTask(_ task: TaskItem) {
@@ -155,6 +157,7 @@ final class TasksStore {
         var next = task
         next.updatedAt = Date()
         tasks[i] = next
+        recordSyncSnapshot()
     }
 
     func deleteTask(_ id: UUID) {
@@ -162,6 +165,7 @@ final class TasksStore {
         for key in Array(taskListOrder.keys) {
             taskListOrder[key]?.removeAll { $0 == id }
         }
+        recordSyncSnapshot()
     }
 
     // MARK: - Task list ordering (drag to reorder)
@@ -214,6 +218,7 @@ final class TasksStore {
         guard tasks[i].priority != priority else { return }
         tasks[i].priority = priority
         tasks[i].updatedAt = Date()
+        recordSyncSnapshot()
     }
 
     func toggleComplete(_ id: UUID) {
@@ -226,6 +231,7 @@ final class TasksStore {
             tasks[i].completedAt = Date()
         }
         tasks[i].updatedAt = Date()
+        recordSyncSnapshot()
     }
 
     /// Sets completion without toggling (used when Today execution timeline updates a queued row).
@@ -240,6 +246,7 @@ final class TasksStore {
             tasks[i].completedAt = nil
         }
         tasks[i].updatedAt = Date()
+        recordSyncSnapshot()
     }
 
     func scheduleTask(_ id: UUID, on date: Date?) {
@@ -249,6 +256,7 @@ final class TasksStore {
             ? (tasks[i].isCompleted ? .completed : .inbox)
             : (tasks[i].isCompleted ? .completed : .scheduled)
         tasks[i].updatedAt = Date()
+        recordSyncSnapshot()
     }
 
     /// Today to-do row status menu — keeps tasks coherent with the execution pool.
@@ -279,6 +287,7 @@ final class TasksStore {
             tasks[i].status = .archived
         }
         tasks[i].updatedAt = Date()
+        recordSyncSnapshot()
     }
 
     func toggleTodayTodoSubtask(taskID: UUID, subtaskID: UUID) {
@@ -286,15 +295,20 @@ final class TasksStore {
         guard let si = tasks[ti].subtasks.firstIndex(where: { $0.id == subtaskID }) else { return }
         tasks[ti].subtasks[si].isCompleted.toggle()
         tasks[ti].updatedAt = Date()
+        recordSyncSnapshot()
     }
 
     // MARK: - Field CRUD
 
-    func addField(_ f: Field) { fields.append(f) }
+    func addField(_ f: Field) {
+        fields.append(f)
+        recordSyncSnapshot()
+    }
 
     func updateField(_ f: Field) {
         guard let i = fields.firstIndex(where: { $0.id == f.id }) else { return }
         fields[i] = f
+        recordSyncSnapshot()
     }
 
     /// Removes the field, its projects, and clears `fieldID` on any orphaned tasks.
@@ -308,15 +322,20 @@ final class TasksStore {
                 tasks[i].projectID = nil
             }
         }
+        recordSyncSnapshot()
     }
 
     // MARK: - Project CRUD
 
-    func addProject(_ p: Project) { projects.append(p) }
+    func addProject(_ p: Project) {
+        projects.append(p)
+        recordSyncSnapshot()
+    }
 
     func updateProject(_ p: Project) {
         guard let i = projects.firstIndex(where: { $0.id == p.id }) else { return }
         projects[i] = p
+        recordSyncSnapshot()
     }
 
     /// Removes the project and clears `projectID` on its tasks (tasks stay on the field).
@@ -325,6 +344,7 @@ final class TasksStore {
         for i in tasks.indices where tasks[i].projectID == id {
             tasks[i].projectID = nil
         }
+        recordSyncSnapshot()
     }
 
     // MARK: - Progress helpers
@@ -580,6 +600,7 @@ final class TasksStore {
         projects = seed.projects
         tasks = seed.tasks
         taskListOrder = [:]
+        recordSyncSnapshot()
     }
 
     /// Clears fields, projects, tasks, and manual list ordering.
@@ -588,5 +609,10 @@ final class TasksStore {
         projects = []
         tasks = []
         taskListOrder = [:]
+        recordSyncSnapshot()
+    }
+
+    private func recordSyncSnapshot() {
+        CueInSyncRuntimeBridge.shared.recordTasksSnapshot()
     }
 }

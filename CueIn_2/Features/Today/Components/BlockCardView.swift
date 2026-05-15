@@ -165,12 +165,13 @@ struct BlockCardView: View {
                 }
 
                 GeometryReader { geo in
+                    let accent = CueInColors.resolvedTimelineAccent(blockType: block.type, hex: block.timelineAccentHex)
                     ZStack(alignment: .leading) {
                         Capsule()
                             .fill(CueInColors.surfaceTertiary)
 
                         Capsule()
-                            .fill(Color.white.opacity(0.28))
+                            .fill(accent.opacity(0.92))
                             .frame(width: max(4, geo.size.width * progress))
                     }
                 }

@@ -10,33 +10,57 @@ import SwiftUI
 final class DevNotebookContext {
     static let shared = DevNotebookContext()
 
-    var selectedTab: AppTab = .today
+    var selectedTab: AppTab = .taskLed
     var screenLabel: String?
+    /// True while Hub presents the full-screen Dev notebook (hide shell floating capture to avoid stacked sheets).
+    var hubNotebookSheetPresented = false
 
     private init() {}
 
     /// Builds module + context strings from the current tab, optional screen label, and persisted Today prefs.
     func makeSnapshot() -> (moduleLabel: String, contextLine: String) {
-        let moduleLabel = selectedTab.label
+        let moduleLabel = captureModuleLabel
 
-        var parts: [String] = [moduleLabel]
+        var segments: [String] = []
 
-        if selectedTab == .today {
+        if selectedTab.preferredTodayMode != nil {
             let modeRaw = UserDefaults.standard.string(forKey: DayEngineMode.storageKey) ?? DayEngineMode.taskLed.rawValue
-            let mode = DayEngineMode(rawValue: modeRaw) ?? .taskLed
-            parts.append(mode.label)
-            if mode == .taskLed {
+            let engine = DayEngineMode(rawValue: modeRaw) ?? .taskLed
+            switch engine {
+            case .formulaBased:
+                segments.append("Algorithm")
+            case .taskLed:
                 let vmRaw = UserDefaults.standard.string(forKey: TodayDisplayPreferences.taskLedViewMode)
                     ?? TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue
                 let vm = TodayDisplayPreferences.TaskLedViewMode(rawValue: vmRaw) ?? .timeline
-                parts.append(vm.title)
+                segments.append(vm.title)
             }
+        } else {
+            segments.append(moduleLabel)
         }
 
         if let s = screenLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
-            parts.append(s)
+            segments.append(s)
         }
 
-        return (moduleLabel, parts.joined(separator: " · "))
+        let deduped = segments.reduce(into: [String]()) { acc, s in
+            if acc.last != s { acc.append(s) }
+        }
+
+        return (moduleLabel, deduped.joined(separator: " · "))
+    }
+
+    private var captureModuleLabel: String {
+        switch selectedTab {
+        case .schedule:
+            return "Algorithm"
+        case .taskLed:
+            let vmRaw = UserDefaults.standard.string(forKey: TodayDisplayPreferences.taskLedViewMode)
+                ?? TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue
+            let vm = TodayDisplayPreferences.TaskLedViewMode(rawValue: vmRaw) ?? .timeline
+            return vm.title
+        default:
+            return selectedTab.label
+        }
     }
 }

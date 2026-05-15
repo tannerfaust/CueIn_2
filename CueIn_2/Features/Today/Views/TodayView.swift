@@ -87,6 +87,16 @@ struct TodayView: View {
         TodayDisplayPreferences.migratedScheduleBlockTimerStyle(from: scheduleBlockTimerStyleRaw)
     }
 
+    private var todayChromeTitle: String {
+        if viewModel.isFormulaMode {
+            return "Algorithm"
+        }
+        if viewModel.isTaskLedMode {
+            return taskLedViewMode.title
+        }
+        return "Today"
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -107,8 +117,8 @@ struct TodayView: View {
                                             remainingLabel: viewModel.runningLineRemainingLabel,
                                             currentBlockTitle: viewModel.runningLineTitle,
                                             style: runningLineStyle,
-                                            accentColors: viewModel.runningLineAccentColors,
-                                            blockSegments: viewModel.runningLineBlockSegments,
+                                            accentColors: viewModel.runningLineProgressAccentPalette,
+                                            blockSegments: [],
                                             greyFillWhilePausedReplan: runningLineGreyFillWhilePausedReplan,
                                             isStopped: viewModel.isFormulaRunStopped
                                         )
@@ -224,7 +234,7 @@ struct TodayView: View {
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {
                 TodayTopChromeBar(
-                    title: (viewModel.isTaskLedMode && taskLedViewMode == .todo) ? "To-do" : "Today",
+                    title: todayChromeTitle,
                     prominentTitle: viewModel.isTaskLedMode && taskLedViewMode == .todo,
                     showsStart: viewModel.hasFormulaTemplate && viewModel.isFormulaPreviewing,
                     onStart: {
@@ -243,7 +253,7 @@ struct TodayView: View {
                 )
             }
         }
-        .devNotebookScreen("Today")
+        .devNotebookScreen(todayChromeTitle)
         .tint(CueInColors.textPrimary)
         .sheet(isPresented: $showFormulaPickerSheet) {
                 FormulaPickerSheet(
@@ -513,21 +523,7 @@ struct TodayView: View {
                 } label: {
                     Label("Settings", systemImage: "gearshape")
                 }
-
-                Button {
-                    viewModel.setDayEngineMode(.formulaBased)
-                } label: {
-                    Label("Switch to Schedule", systemImage: "list.bullet.rectangle")
-                }
             } else {
-                Button {
-                    viewModel.setDayEngineMode(.taskLed)
-                } label: {
-                    Label("Switch to Timeline", systemImage: "calendar.day.timeline.left")
-                }
-            }
-
-            if viewModel.isFormulaMode {
                 Button("Choose schedule…") {
                     showFormulaPickerSheet = true
                 }
@@ -554,9 +550,7 @@ struct TodayView: View {
                 Toggle(isOn: $scheduleShowsPagePlaybackControl) {
                     Label("Show play/pause on page", systemImage: "playpause.fill")
                 }
-            }
 
-            if !viewModel.isTaskLedMode {
                 Button {
                     showSettingsSheet = true
                 } label: {

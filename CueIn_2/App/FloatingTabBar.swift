@@ -5,8 +5,15 @@ import SwiftUI
 
 struct FloatingTabBar: View {
     @Binding var selectedTab: AppTab
-    var todayPresentation: TodayTabBarPresentation
+    let tabs: [AppTab]
     @Namespace private var indicatorNamespace
+
+    @AppStorage(TodayDisplayPreferences.taskLedViewMode) private var taskLedViewModeRaw
+        = TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue
+
+    private var taskLedPresentation: TodayDisplayPreferences.TaskLedViewMode {
+        TodayDisplayPreferences.TaskLedViewMode(rawValue: taskLedViewModeRaw) ?? .timeline
+    }
 
     private var barHeight: CGFloat { CueInLayout.floatingBarHeight }
     /// Selection pill stays slightly shorter than the bar for glass margins.
@@ -14,7 +21,7 @@ struct FloatingTabBar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            ForEach(AppTab.allCases) { tab in
+            ForEach(tabs) { tab in
                 tabItem(for: tab)
             }
         }
@@ -29,10 +36,8 @@ struct FloatingTabBar: View {
     @ViewBuilder
     private func tabItem(for tab: AppTab) -> some View {
         let isSelected = selectedTab == tab
-        let activeSymbol = tab == .today
-            ? (isSelected ? todayPresentation.icon : todayPresentation.iconInactive)
-            : (isSelected ? tab.icon : tab.iconInactive)
-        let title = tab == .today ? todayPresentation.title : tab.label
+        let activeSymbol = tabBarSymbol(for: tab, isSelected: isSelected)
+        let title = tabBarTitleString(for: tab)
 
         Button {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
@@ -47,8 +52,8 @@ struct FloatingTabBar: View {
                 }
 
                 VStack(spacing: 3) {
-                    tabBarIcon(tab: tab, isSelected: isSelected, systemName: activeSymbol)
-                    tabBarTitle(tab: tab, title: title)
+                    tabBarIcon(isSelected: isSelected, systemName: activeSymbol)
+                    tabBarTitle(title: title)
                 }
                 .foregroundStyle(isSelected ? .white : Color.white.opacity(0.40))
             }
@@ -58,32 +63,32 @@ struct FloatingTabBar: View {
         .buttonStyle(.plain)
     }
 
-    @ViewBuilder
-    private func tabBarIcon(tab: AppTab, isSelected: Bool, systemName: String) -> some View {
-        let base = Image(systemName: systemName)
-            .font(.system(size: 22, weight: isSelected ? .semibold : .regular))
-            .frame(width: 26, height: 26)
-        if tab == .today {
-            base
-                .contentTransition(.symbolEffect(.replace.downUp))
-                .animation(.smooth(duration: 0.28), value: todayPresentation)
-        } else {
-            base
+    private func tabBarSymbol(for tab: AppTab, isSelected: Bool) -> String {
+        if tab == .taskLed {
+            return taskLedPresentation.icon
         }
+        return isSelected ? tab.icon : tab.iconInactive
+    }
+
+    private func tabBarTitleString(for tab: AppTab) -> String {
+        if tab == .taskLed {
+            return taskLedPresentation.title
+        }
+        return tab.label
     }
 
     @ViewBuilder
-    private func tabBarTitle(tab: AppTab, title: String) -> some View {
-        let base = Text(title)
+    private func tabBarIcon(isSelected: Bool, systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 22, weight: isSelected ? .semibold : .regular))
+            .frame(width: 26, height: 26)
+    }
+
+    @ViewBuilder
+    private func tabBarTitle(title: String) -> some View {
+        Text(title)
             .font(.system(size: 11, weight: .medium))
             .fixedSize()
-        if tab == .today {
-            base
-                .contentTransition(.interpolate)
-                .animation(.smooth(duration: 0.28), value: todayPresentation)
-        } else {
-            base
-        }
     }
 
     @ViewBuilder
@@ -141,8 +146,8 @@ private struct TabBarGlassModifier: ViewModifier {
             Spacer()
             HStack(alignment: .center, spacing: 10) {
                 FloatingTabBar(
-                    selectedTab: .constant(.today),
-                    todayPresentation: .resolved(dayEngine: .taskLed, taskLedViewMode: .timeline)
+                    selectedTab: .constant(.taskLed),
+                    tabs: AppTab.defaultTabs
                 )
                 FloatingPlusButton {}
             }

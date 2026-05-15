@@ -1098,11 +1098,18 @@ struct ScheduleBlockEditorForm: View {
             seconds: durationSecondComponent
         )
         syncPickerToDraftMinutes()
-        resetDurationPickerFromBlock()
     }
 
     private func resetDurationPickerFromBlock() {
-        durationPickerTotalSeconds = max(5, min(960, block.durationMinutes)) * 60
+        if let live = block.liveDurationOverrideSeconds {
+            durationPickerTotalSeconds = clampDurationTotalSeconds(
+                hours: live / 3600,
+                minutes: (live % 3600) / 60,
+                seconds: live % 60
+            )
+        } else {
+            durationPickerTotalSeconds = max(5, min(960, block.durationMinutes)) * 60
+        }
         if block.liveDurationOverrideSeconds == nil {
             block.liveDurationOverrideSeconds = durationPickerTotalSeconds
         }

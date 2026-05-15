@@ -13,7 +13,8 @@ struct AppShellView: View {
     @AppStorage(DayEngineMode.storageKey) private var todayModeRawValue = DayEngineMode.taskLed.rawValue
     @AppStorage(TodayDisplayPreferences.taskLedViewMode) private var taskLedViewModeRaw
         = TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue
-    @State private var selectedTab: AppTab = .today
+    @AppStorage(AppTab.storageKey) private var storedTabsRaw = AppTab.storageValue(for: AppTab.defaultTabs)
+    @State private var selectedTab: AppTab = .taskLed
     @State private var showAddSheet = false
     @State private var showExecutionSheet = false
     @State private var showTimelineCapture = false
@@ -24,6 +25,7 @@ struct AppShellView: View {
     @AppStorage("cuein.devNotebook.showCaptureButton") private var showDevNotebookCaptureButton = false
     @Bindable private var toastCenter = CueInToastCenter.shared
     @Bindable private var todayViewModel = TodayViewModel.shared
+    @Bindable private var devNotebookContext = DevNotebookContext.shared
 
     var body: some View {
         ZStack {
@@ -46,11 +48,18 @@ struct AppShellView: View {
             devNotebookFloatingControl
         }
         .onAppear {
+            selectedTab = resolvedSelectedTab
+            applyNavigationSideEffects(for: selectedTab)
             DevNotebookContext.shared.selectedTab = selectedTab
         }
         .onChange(of: selectedTab) { _, newValue in
+            applyNavigationSideEffects(for: newValue)
             DevNotebookContext.shared.selectedTab = newValue
             DevNotebookContext.shared.screenLabel = nil
+        }
+        .onChange(of: visibleTabs) { _, tabs in
+            guard !tabs.contains(selectedTab) else { return }
+            selectedTab = tabs.first ?? .hub
         }
         .sheet(isPresented: $showAddSheet, onDismiss: handleAddSheetDismiss) {
             sheetContent
@@ -108,10 +117,18 @@ struct AppShellView: View {
     @ViewBuilder
     private var tabContent: some View {
         switch selectedTab {
-        case .today:  TodayView()
-        case .tasks:  TasksView()
-        case .stats:  StatsView()
-        case .hub:    HubView()
+        case .schedule, .taskLed:
+            TodayView()
+        case .tasks:
+            TasksView()
+        case .projects:
+            ProjectsTabView()
+        case .stats:
+            StatsView()
+        case .goals:
+            GoalsTabView()
+        case .hub, .more:
+            HubView()
         }
     }
 
@@ -136,7 +153,10 @@ struct AppShellView: View {
 
     private var devNotebookFloatingControl: some View {
         Group {
-            if showDevNotebookCaptureButton && !shellSheetsBlockDevCapture && !showDevCaptureSheet {
+            if showDevNotebookCaptureButton
+                && !shellSheetsBlockDevCapture
+                && !showDevCaptureSheet
+                && !devNotebookContext.hubNotebookSheetPresented {
                 DevNotebookFloatingButton {
                     showDevCaptureSheet = true
                 }
@@ -190,21 +210,24 @@ struct AppShellView: View {
 
     private var barContents: some View {
         HStack(alignment: .bottom, spacing: 12) {
-            FloatingTabBar(selectedTab: $selectedTab, todayPresentation: todayTabBarPresentation)
+            FloatingTabBar(selectedTab: $selectedTab, tabs: visibleTabs)
             floatingFabColumn
         }
     }
 
-    private var todayTabBarPresentation: TodayTabBarPresentation {
-        let taskLedMode = TodayDisplayPreferences.TaskLedViewMode(rawValue: taskLedViewModeRaw) ?? .timeline
-        return .resolved(dayEngine: todayMode, taskLedViewMode: taskLedMode)
+    private var visibleTabs: [AppTab] {
+        AppTab.storedTabs(from: storedTabsRaw)
+    }
+
+    private var resolvedSelectedTab: AppTab {
+        visibleTabs.contains(selectedTab) ? selectedTab : (visibleTabs.first ?? .hub)
     }
 
     /// Trailing **two separate** circular actions: execution (Today only) above add.
     /// Formula preview starts from Today chrome; after a schedule starts, the floating bolt
     /// becomes the schedule action entry point above add.
     private var floatingFabColumn: some View {
-        let showExecution = selectedTab == .today && shouldShowFloatingExecutionButton
+        let showExecution = isTodayDestination(selectedTab) && shouldShowFloatingExecutionButton
         return VStack(spacing: CueInLayout.floatingFabVerticalSpacing) {
             if showExecution {
                 FloatingLightningButton { showExecutionSheet = true }
@@ -242,7 +265,7 @@ struct AppShellView: View {
     @ViewBuilder
     private var sheetContent: some View {
         switch selectedTab {
-        case .today:
+        case .schedule, .taskLed:
             if todayMode == .taskLed {
                 TimelineActionSheet(
                     onAddTask: {
@@ -295,7 +318,7 @@ struct AppShellView: View {
                     onDismiss: { showAddSheet = false }
                 )
             }
-        case .tasks:
+        case .tasks, .projects:
             QuickCaptureSheet(
                 onDismiss: { showAddSheet = false },
                 onExpand:  { _ in showAddSheet = false }
@@ -305,12 +328,39 @@ struct AppShellView: View {
                 ("square.and.pencil", "Quick Log",  "Record a data point"),
                 ("note.text",         "Add Note",   "Attach a note to today"),
             ])
-        case .hub:
-            placeholderSheet(title: "Create", items: [
-                ("target",        "New Goal",    "Define a goal"),
-                ("doc.text.fill", "New Schedule", "Build a day template"),
-                ("gearshape.fill","Settings",    "App preferences"),
-            ])
+        case .goals, .hub, .more:
+            hubCreateSheet
+        }
+    }
+
+    private var hubCreateSheet: some View {
+        CueInBottomSheet(title: "Create", onDismiss: { showAddSheet = false }) {
+            VStack(alignment: .leading, spacing: CueInSpacing.sm) {
+                SheetActionRow(
+                    icon: "target",
+                    title: "New Goal",
+                    subtitle: "Define a grand goal and strategy"
+                ) {
+                    showAddSheet = false
+                    NotificationCenter.default.post(name: .cueInShowCreateGoal, object: nil)
+                }
+
+                SheetActionRow(
+                    icon: "doc.text.fill",
+                    title: "New Schedule",
+                    subtitle: "Build a day template"
+                ) {
+                    showAddSheet = false
+                }
+
+                SheetActionRow(
+                    icon: "gearshape.fill",
+                    title: "Settings",
+                    subtitle: "App preferences"
+                ) {
+                    showAddSheet = false
+                }
+            }
         }
     }
 
@@ -328,7 +378,7 @@ struct AppShellView: View {
     }
 
     private func handleAddSheetDismiss() {
-        guard selectedTab == .today, let route = pendingTodaySheetRoute else { return }
+        guard isTodayDestination(selectedTab), let route = pendingTodaySheetRoute else { return }
         pendingTodaySheetRoute = nil
 
         switch route {
@@ -366,7 +416,21 @@ struct AppShellView: View {
     }
 
     private var sheetDetents: Set<PresentationDetent> {
-        selectedTab == .tasks ? [.medium, .large] : [.medium]
+        (selectedTab == .tasks || selectedTab == .projects) ? [.medium, .large] : [.medium]
+    }
+
+    private func isTodayDestination(_ tab: AppTab) -> Bool {
+        tab.preferredTodayMode != nil
+    }
+
+    private func applyNavigationSideEffects(for tab: AppTab) {
+        guard let mode = tab.preferredTodayMode else { return }
+        if let taskLedViewMode = mode.taskLedViewMode {
+            taskLedViewModeRaw = taskLedViewMode.rawValue
+        }
+        // Single source of truth with tab choice: keep the shared VM aligned with the shell tab,
+        // not only `@AppStorage` (otherwise the menu / stale VM fights the navbar).
+        todayViewModel.setDayEngineMode(mode.dayEngine)
     }
 }
 

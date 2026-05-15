@@ -608,6 +608,29 @@ final class TodayViewModel {
         return colors
     }
 
+    /// Running-line fill: follow the **current** block’s accent through the day instead of a multi-color strip.
+    var runningLineProgressAccentPalette: [Color] {
+        guard dayEngineMode == .formulaBased, hasFormulaRunStarted else {
+            return runningLineAccentColors
+        }
+        let primary = runningLineCurrentProgressAccent
+        return [primary]
+    }
+
+    /// Accent for the filled portion of the schedule running line (active block, else next upcoming slice).
+    private var runningLineCurrentProgressAccent: Color {
+        if let b = currentBlock {
+            return CueInColors.resolvedTimelineAccent(blockType: b.type, hex: b.timelineAccentHex)
+        }
+        if let next = blocks.first(where: { $0.state == .upcoming }) {
+            return CueInColors.resolvedTimelineAccent(blockType: next.type, hex: next.timelineAccentHex)
+        }
+        if let last = blocks.last {
+            return CueInColors.resolvedTimelineAccent(blockType: last.type, hex: last.timelineAccentHex)
+        }
+        return runningLineAccentColors.first ?? CueInColors.accentFocus
+    }
+
     /// Schedule running line: each block’s share of the formula timeline, for segmented fills.
     var runningLineBlockSegments: [RunningLineBlockSegment] {
         guard dayEngineMode == .formulaBased, hasFormulaRunStarted,
@@ -2019,10 +2042,18 @@ final class TodayViewModel {
         let isDurationOverrideLocked = blocks[index].isAnchorBlock || hasPinnedSourceTask
 
         let wasActive = isFormulaRunLive && blocks[index].state == .active
-        let existingSeconds = max(5 * 60, min(blocks[index].durationMinutes * 60, 16 * 60 * 60))
+        let plannedSecondsFromMinutes = max(5 * 60, min(blocks[index].durationMinutes * 60, 16 * 60 * 60))
+        let existingWindowSeconds = max(
+            5 * 60,
+            min(Int(round(blocks[index].endTime.timeIntervalSince(blocks[index].startTime))), 16 * 60 * 60)
+        )
+        let existingSeconds = plannedSecondsFromMinutes
         let incomingSeconds = max(5 * 60, min(effective.liveDurationOverrideSeconds ?? (effective.durationMinutes * 60), 16 * 60 * 60))
         let attemptedDurationOverrideWhileLocked = isDurationOverrideLocked && incomingSeconds != existingSeconds
         let requestedSeconds = attemptedDurationOverrideWhileLocked ? existingSeconds : incomingSeconds
+        let preserveActiveClockWindow = wasActive
+            && !attemptedDurationOverrideWhileLocked
+            && abs(requestedSeconds - existingWindowSeconds) <= 1
         let minutes = max(5, min(Int(round(Double(requestedSeconds) / 60.0)), 24 * 60))
         let previousTasks = blocks[index].tasks
         let newSource = effective.resolvedTaskSource
@@ -2060,13 +2091,14 @@ final class TodayViewModel {
 
             if effective.pinsToClock,
                let clockMins = effective.fixedClockMinutesFromDayStart,
-               !blocks[index].isAnchorBlock {
+               !blocks[index].isAnchorBlock,
+               !preserveActiveClockWindow {
                 let dayStart = calendar.startOfDay(for: effective.fixedClockDate ?? blocks[index].startTime)
                 blocks[index].startTime = calendar.date(byAdding: .minute, value: clockMins, to: dayStart)
                     ?? blocks[index].startTime
             }
 
-            if isFixedTimeScheduleBlock(blocks[index]) {
+            if isFixedTimeScheduleBlock(blocks[index]), !preserveActiveClockWindow {
                 blocks[index].endTime = calendar.date(
                     byAdding: .minute,
                     value: minutes,
@@ -2077,31 +2109,37 @@ final class TodayViewModel {
 
             if isFormulaRunLive {
                 if wasActive {
-                    // Keep the edited running block at the exact user-selected duration.
-                    // Reflow only the tail afterwards so the active block doesn't get
-                    // proportionally compressed back to an unexpected value.
-                    let now = Date()
-                    currentTime = now
-                    blocks[index].state = .active
-                    blocks[index].startTime = now
-                    blocks[index].endTime = calendar.date(
-                        byAdding: .second,
-                        value: requestedSeconds,
-                        to: now
-                    ) ?? blocks[index].endTime
+                    if preserveActiveClockWindow {
+                        // Metadata-only edit (e.g. blocking → flowing): keep the live clock window so the day
+                        // doesn’t snap back to “fresh hour” starts or reshuffle the tail.
+                        blocks[index].state = .active
+                    } else {
+                        // Keep the edited running block at the exact user-selected duration.
+                        // Reflow only the tail afterwards so the active block doesn't get
+                        // proportionally compressed back to an unexpected value.
+                        let now = Date()
+                        currentTime = now
+                        blocks[index].state = .active
+                        blocks[index].startTime = now
+                        blocks[index].endTime = calendar.date(
+                            byAdding: .second,
+                            value: requestedSeconds,
+                            to: now
+                        ) ?? blocks[index].endTime
 
-                    let tail = blocks.indices.filter { tailIndex in
-                        tailIndex > index
-                            && blocks[tailIndex].state != .completed
-                            && blocks[tailIndex].state != .skipped
-                    }
+                        let tail = blocks.indices.filter { tailIndex in
+                            tailIndex > index
+                                && blocks[tailIndex].state != .completed
+                                && blocks[tailIndex].state != .skipped
+                        }
 
-                    if !tail.isEmpty {
-                        reflowFormulaBlocksAroundFixedTimes(
-                            plannedBlockIndices: Array(tail),
-                            runStart: blocks[index].endTime,
-                            targetEnd: effectiveFormulaTargetEnd(from: now)
-                        )
+                        if !tail.isEmpty {
+                            reflowFormulaBlocksAroundFixedTimes(
+                                plannedBlockIndices: Array(tail),
+                                runStart: blocks[index].endTime,
+                                targetEnd: effectiveFormulaTargetEnd(from: now)
+                            )
+                        }
                     }
                 } else {
                     rechainFormulaTimesAfterStructuralEdit()
@@ -3371,30 +3409,8 @@ final class TodayViewModel {
     }
 
     private func recalibrateOverdueBlockingFormulaRun() {
-        guard TodayDisplayPreferences.liveOverrunRecalibrationPreference() else { return }
-        guard isFormulaRunLive else { return }
-        guard formulaSchedulePausedAt == nil else { return }
-
-        let now = currentTime
-        guard let targetEnd = effectiveFormulaTargetEnd(from: now) else { return }
-        guard now < targetEnd else { return }
-        guard let activeIndex = blocks.firstIndex(where: { $0.state == .active }) else { return }
-        guard blocks[activeIndex].flowMode == .blocking, now > blocks[activeIndex].endTime else { return }
-
-        blocks[activeIndex].endTime = now
-
-        let tail = blocks.indices.filter { index in
-            index > activeIndex
-                && blocks[index].state != .completed
-                && blocks[index].state != .skipped
-        }
-        guard !tail.isEmpty else { return }
-
-        reflowFormulaBlocksAroundFixedTimes(
-            plannedBlockIndices: Array(tail),
-            runStart: now,
-            targetEnd: targetEnd
-        )
+        // Legacy path collapsed overdue blocking `endTime` to “now” and reflowed the tail, which destroyed the
+        // planned slice duration on cards and compressed later blocks. Overdue blocking runs until Done; no auto-shrink.
     }
 
     private func restartLiveTimelessFlowFromCurrentOrder() {
@@ -3804,18 +3820,43 @@ final class TodayViewModel {
 
     private func persistFormulaRuntimeState() {
         guard dayEngineMode == .formulaBased else { return }
-        guard formulaRunStartedAt != nil || isFormulaRunStopped else {
+
+        if formulaRunStartedAt != nil || isFormulaRunStopped {
+            let state = PersistedScheduleRunState(
+                selectedFormulaID: selectedFormulaID,
+                blocks: blocks,
+                formulaRunStartedAt: formulaRunStartedAt,
+                formulaStoppedAt: formulaStoppedAt,
+                formulaSchedulePausedAt: formulaSchedulePausedAt,
+                formulaTargetDayEnd: formulaTargetDayEnd,
+                nominalMinutes: formulaNominalMinutesByBlockID.map {
+                    PersistedScheduleNominalMinutes(blockID: $0.key, minutes: $0.value)
+                },
+                futurePinnedBlocks: futurePinnedFormulaBlocks,
+                savedAt: Date()
+            )
+
+            guard let data = try? JSONEncoder().encode(state) else { return }
+            if data == lastPersistedScheduleData { return }
+            lastPersistedScheduleData = data
+            UserDefaults.standard.set(data, forKey: Self.persistedScheduleRunKey)
+            return
+        }
+
+        // Preview / unstarted schedule: persist so force-quitting before Start doesn’t discard edits.
+        let hasPreviewWork = selectedFormulaID != nil || !blocks.isEmpty
+        guard hasPreviewWork else {
             clearPersistedFormulaRuntimeState()
             return
         }
 
-        let state = PersistedScheduleRunState(
+        let previewState = PersistedScheduleRunState(
             selectedFormulaID: selectedFormulaID,
             blocks: blocks,
-            formulaRunStartedAt: formulaRunStartedAt,
-            formulaStoppedAt: formulaStoppedAt,
-            formulaSchedulePausedAt: formulaSchedulePausedAt,
-            formulaTargetDayEnd: formulaTargetDayEnd,
+            formulaRunStartedAt: nil,
+            formulaStoppedAt: nil,
+            formulaSchedulePausedAt: nil,
+            formulaTargetDayEnd: nil,
             nominalMinutes: formulaNominalMinutesByBlockID.map {
                 PersistedScheduleNominalMinutes(blockID: $0.key, minutes: $0.value)
             },
@@ -3823,7 +3864,7 @@ final class TodayViewModel {
             savedAt: Date()
         )
 
-        guard let data = try? JSONEncoder().encode(state) else { return }
+        guard let data = try? JSONEncoder().encode(previewState) else { return }
         if data == lastPersistedScheduleData { return }
         lastPersistedScheduleData = data
         UserDefaults.standard.set(data, forKey: Self.persistedScheduleRunKey)

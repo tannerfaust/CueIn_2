@@ -10,7 +10,7 @@ struct TodayModeToggleView: View {
 
     @Namespace private var thumbNamespace
 
-    private static let segmentWidth: CGFloat = 90
+    private static let segmentWidth: CGFloat = 98
     private static let segmentHeight: CGFloat = 36
 
     var body: some View {

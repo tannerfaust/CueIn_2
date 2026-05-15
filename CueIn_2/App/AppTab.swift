@@ -1,70 +1,137 @@
 import SwiftUI
 
 // MARK: - AppTab
-/// The four primary navigation tabs in CueIn.
+/// Primary destinations that can appear in CueIn's bottom navigation.
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case today
+    /// Former formula / day-schedule surface ("Algorithm").
+    case schedule
+    /// Unified task-led day (To-do vs Timeline follows ``TodayDisplayPreferences.taskLedViewMode``).
+    case taskLed
     case tasks
+    case projects
     case stats
+    case goals
     case hub
+    case more
 
     var id: String { rawValue }
 
+    static let storageKey = "cuein.app.nav.tabs.v1"
+    static let maximumVisibleTabs = 5
+    /// Shows both day-engine tabs plus Tasks, Stats, and Hub (five slots).
+    static let defaultTabs: [AppTab] = [.schedule, .taskLed, .tasks, .stats, .hub]
+
+    static var editableTabs: [AppTab] {
+        [.schedule, .taskLed, .tasks, .projects, .stats, .goals, .more, .hub]
+    }
+
+    /// Maps legacy persisted ids (`timeline`, `todo`) onto ``taskLed``.
+    static func migrateLegacyTabToken(_ raw: String) -> String {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines) {
+        case "timeline", "todo": return AppTab.taskLed.rawValue
+        default: return raw
+        }
+    }
+
+    static func storedTabs(from rawValue: String) -> [AppTab] {
+        let tokens = rawValue.split(separator: ",").map { migrateLegacyTabToken(String($0)) }
+        return sanitize(tokens.compactMap { AppTab(rawValue: $0) })
+    }
+
+    static func storageValue(for tabs: [AppTab]) -> String {
+        sanitize(tabs).map(\.rawValue).joined(separator: ",")
+    }
+
+    static func sanitize(_ tabs: [AppTab]) -> [AppTab] {
+        var result: [AppTab] = []
+        for tab in tabs where !result.contains(tab) {
+            result.append(tab)
+        }
+
+        if result.isEmpty {
+            result = defaultTabs
+        }
+
+        if !result.contains(.hub) {
+            result.append(.hub)
+        }
+
+        if result.count > maximumVisibleTabs {
+            if let hubIndex = result.firstIndex(of: .hub), hubIndex >= maximumVisibleTabs {
+                result.remove(at: hubIndex)
+                result.insert(.hub, at: maximumVisibleTabs - 1)
+            }
+            result = Array(result.prefix(maximumVisibleTabs))
+            if !result.contains(.hub) {
+                result[result.count - 1] = .hub
+            }
+        }
+
+        return result
+    }
+
     var label: String {
         switch self {
-        case .today: return "Today"
+        case .schedule: return "Algorithm"
+        /// Fallback only; the tab bar reads ``TodayDisplayPreferences.TaskLedViewMode`` for the live title.
+        case .taskLed: return "Timeline"
         case .tasks: return "Tasks"
+        case .projects: return "Projects"
         case .stats: return "Stats"
-        case .hub:   return "Hub"
+        case .goals: return "Goals"
+        case .hub: return "Hub"
+        case .more: return "More"
+        }
+    }
+
+    /// Short titles for the navbar customization list (static; task-led tab covers both To-do and Timeline).
+    var rearrangementPickerLabel: String {
+        switch self {
+        case .schedule: return "Algorithm"
+        case .taskLed: return "To-do / Timeline"
+        default: return label
         }
     }
 
     var icon: String {
         switch self {
-        case .today: return "sun.max.fill"
+        case .schedule: return "arrow.triangle.branch"
+        case .taskLed: return "calendar.day.timeline.left"
         case .tasks: return "checkmark.circle.fill"
+        case .projects: return "folder.fill"
         case .stats: return "chart.bar.fill"
-        case .hub:   return "square.grid.2x2.fill"
+        case .goals: return "target"
+        case .hub: return "square.grid.2x2.fill"
+        case .more: return "ellipsis.circle.fill"
         }
     }
 
     var iconInactive: String {
         switch self {
-        case .today: return "sun.max"
+        case .schedule: return "arrow.triangle.branch"
+        case .taskLed: return "calendar.day.timeline.left"
         case .tasks: return "checkmark.circle"
+        case .projects: return "folder"
         case .stats: return "chart.bar"
-        case .hub:   return "square.grid.2x2"
+        case .goals: return "target"
+        case .hub: return "square.grid.2x2"
+        case .more: return "ellipsis.circle"
         }
     }
-}
 
-// MARK: - TodayTabBarPresentation
-/// First shell tab label + icons mirror the active Today engine (schedule vs task-led) and task-led sub-mode.
-
-struct TodayTabBarPresentation: Equatable {
-    var title: String
-    var icon: String
-    var iconInactive: String
-
-    static func resolved(
-        dayEngine: DayEngineMode,
-        taskLedViewMode: TodayDisplayPreferences.TaskLedViewMode
-    ) -> Self {
-        switch dayEngine {
-        case .formulaBased:
-            Self(title: "Schedule", icon: "calendar.circle.fill", iconInactive: "calendar.circle")
+    var preferredTodayMode: (dayEngine: DayEngineMode, taskLedViewMode: TodayDisplayPreferences.TaskLedViewMode?)? {
+        switch self {
+        case .schedule:
+            return (.formulaBased, nil)
         case .taskLed:
-            switch taskLedViewMode {
-            case .todo:
-                Self(title: "To do", icon: "checklist", iconInactive: "checklist")
-            case .timeline:
-                Self(
-                    title: "Timeline",
-                    icon: "calendar.day.timeline.left",
-                    iconInactive: "calendar.day.timeline.left"
-                )
-            }
+            return (.taskLed, nil)
+        default:
+            return nil
         }
+    }
+
+    var canRemoveFromNavigation: Bool {
+        self != .hub
     }
 }

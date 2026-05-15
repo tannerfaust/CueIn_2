@@ -14,14 +14,14 @@ enum DayEngineMode: String, CaseIterable, Identifiable, Codable {
 
     var label: String {
         switch self {
-        case .formulaBased: return "Schedule"
+        case .formulaBased: return "Algorithm"
         case .taskLed: return "Timeline"
         }
     }
 
     var compactLabel: String {
         switch self {
-        case .formulaBased: return "Schedule"
+        case .formulaBased: return "Algorithm"
         case .taskLed: return "Timeline"
         }
     }
