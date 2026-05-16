@@ -18,6 +18,7 @@ final class CueInSyncEngine {
     private let client: SupabaseClient
     private let authStore: SupabaseAuthStore
     private var repository: LocalSyncRepository?
+    private var scheduledSyncTask: Task<Void, Never>?
 
     var state: CueInSyncState = .idle
 
@@ -30,16 +31,29 @@ final class CueInSyncEngine {
         repository = LocalSyncRepository(modelContext: modelContext)
     }
 
+    func loadCachedWorkspaceForCurrentUser() {
+        guard let repository, let userID = authStore.session?.user.id else { return }
+        do {
+            guard try repository.hasCachedWorkspace(for: userID) else { return }
+            try applyCachedWorkspace(repository: repository, userID: userID)
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+    }
+
     func enqueue<Record: SupabaseSyncRecord>(_ record: Record, table: SupabaseTable) {
         guard let repository else { return }
         do {
             try repository.upsert(record, table: table, enqueueMutation: true)
+            scheduleSync()
         } catch {
             state = .failed(error.localizedDescription)
         }
     }
 
     func syncNow() async {
+        scheduledSyncTask?.cancel()
+        scheduledSyncTask = nil
         guard let repository else {
             state = .blocked("Local database is not ready.")
             return
@@ -58,6 +72,7 @@ final class CueInSyncEngine {
         do {
             try await pushPendingMutations(repository: repository, session: session)
             try await pullRemoteChanges(repository: repository, session: session)
+            try applyCachedWorkspace(repository: repository, userID: session.user.id)
             let now = Date()
             state = .synced(now)
         } catch {
@@ -65,11 +80,37 @@ final class CueInSyncEngine {
         }
     }
 
-    func migrateCurrentWorkspaceIfNeeded(tasksStore: TasksStore, goalStore: GoalStrategyStore) {
-        guard let userID = authStore.session?.user.id else { return }
-        let key = "cuein.sync.didMigrateWorkspace.\(userID.uuidString)"
-        guard !UserDefaults.standard.bool(forKey: key) else { return }
+    private func scheduleSync() {
+        guard authStore.session != nil else { return }
+        scheduledSyncTask?.cancel()
+        scheduledSyncTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await self.syncNow()
+        }
+    }
 
+    func migrateCurrentWorkspaceIfNeeded(tasksStore: TasksStore, goalStore: GoalStrategyStore) {
+        guard let repository, let userID = authStore.session?.user.id else { return }
+        do {
+            if try repository.hasCachedWorkspace(for: userID) {
+                try applyCachedWorkspace(repository: repository, userID: userID)
+                return
+            }
+            try repository.clearPendingMutations(for: .goals)
+            try repository.clearPendingMutations(for: .appLayoutSettings)
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+
+        guard CueInAppDataService.isGimmickDemoRemoved else {
+            return
+        }
+
+        enqueueWorkspaceSnapshot(tasksStore: tasksStore, goalStore: goalStore, userID: userID)
+    }
+
+    private func enqueueWorkspaceSnapshot(tasksStore: TasksStore, goalStore: GoalStrategyStore, userID: UUID) {
         let now = Date()
         for field in tasksStore.fields {
             enqueue(FieldDTO(field: field, userID: userID, syncVersion: 1), table: .fields)
@@ -95,7 +136,6 @@ final class CueInSyncEngine {
             syncVersion: 1
         )
         enqueue(layout, table: .appLayoutSettings)
-        UserDefaults.standard.set(true, forKey: key)
     }
 
     private func pushPendingMutations(repository: LocalSyncRepository, session: SupabaseAuthSession) async throws {
@@ -158,5 +198,45 @@ final class CueInSyncEngine {
             try repository.upsert(record, table: table, enqueueMutation: false)
         }
         repository.setLastPullDate(Date(), for: table)
+    }
+
+    private func applyCachedWorkspace(repository: LocalSyncRepository, userID: UUID) throws {
+        let fields = try repository.records(FieldDTO.self, table: .fields, userID: userID)
+            .filter { $0.deletedAt == nil }
+            .map(\.domainModel)
+            .sorted { $0.createdAt < $1.createdAt }
+
+        let projects = try repository.records(ProjectDTO.self, table: .projects, userID: userID)
+            .filter { $0.deletedAt == nil }
+            .compactMap(\.domainModel)
+            .sorted { $0.createdAt < $1.createdAt }
+
+        let tasks = try repository.records(TaskDTO.self, table: .tasks, userID: userID)
+            .filter { $0.deletedAt == nil }
+            .map(\.domainModel)
+            .sorted { $0.createdAt < $1.createdAt }
+
+        let goals = try repository.records(GoalDTO.self, table: .goals, userID: userID)
+            .filter { $0.deletedAt == nil }
+            .map(\.domainModel)
+            .sorted { $0.createdAt < $1.createdAt }
+
+        TasksStore.shared.replaceFromSync(fields: fields, projects: projects, tasks: tasks)
+        GoalStrategyStore.shared.replaceFromSync(goals)
+        applyCachedLayoutSettings(repository: repository, userID: userID)
+    }
+
+    private func applyCachedLayoutSettings(repository: LocalSyncRepository, userID: UUID) {
+        guard let layout = try? repository.records(AppLayoutSettingDTO.self, table: .appLayoutSettings, userID: userID)
+            .filter({ $0.deletedAt == nil && $0.key == AppTab.storageKey })
+            .sorted(by: { $0.updatedAt > $1.updatedAt })
+            .first,
+            let tabs = layout.payload["tabs"],
+            !tabs.isEmpty
+        else {
+            return
+        }
+
+        UserDefaults.standard.set(AppTab.storageValue(for: AppTab.storedTabs(from: tabs)), forKey: AppTab.storageKey)
     }
 }

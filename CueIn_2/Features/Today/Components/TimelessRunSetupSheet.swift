@@ -58,5 +58,5 @@ struct TimelessRunSetupSheet: View {
         onStart: { _ in },
         onCancel: {}
     )
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

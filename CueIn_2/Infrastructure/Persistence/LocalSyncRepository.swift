@@ -41,13 +41,11 @@ final class LocalSyncRepository {
         }
 
         if enqueueMutation {
-            modelContext.insert(
-                LocalSyncMutation(
-                    tableName: table.rawValue,
-                    recordID: record.id,
-                    operation: record.deletedAt == nil ? .upsert : .softDelete,
-                    payloadData: payload
-                )
+            try upsertPendingMutation(
+                tableName: table.rawValue,
+                recordID: record.id,
+                operation: record.deletedAt == nil ? .upsert : .softDelete,
+                payloadData: payload
             )
         }
 
@@ -69,6 +67,24 @@ final class LocalSyncRepository {
         )
         descriptor.fetchLimit = 100
         return try modelContext.fetch(descriptor)
+    }
+
+    func clearPendingMutations(for table: SupabaseTable) throws {
+        let tableName = table.rawValue
+        let descriptor = FetchDescriptor<LocalSyncMutation>(
+            predicate: #Predicate { $0.tableName == tableName }
+        )
+        for mutation in try modelContext.fetch(descriptor) {
+            modelContext.delete(mutation)
+        }
+        try modelContext.save()
+    }
+
+    func hasCachedWorkspace(for userID: UUID) throws -> Bool {
+        try hasRecords(table: .fields, userID: userID)
+            || hasRecords(table: .projects, userID: userID)
+            || hasRecords(table: .tasks, userID: userID)
+            || hasRecords(table: .goals, userID: userID)
     }
 
     func markSynced(_ mutation: LocalSyncMutation) throws {
@@ -93,5 +109,40 @@ final class LocalSyncRepository {
     private func lastPullKey(_ table: SupabaseTable) -> String {
         "cuein.sync.lastPull.\(table.rawValue)"
     }
-}
 
+    private func hasRecords(table: SupabaseTable, userID: UUID) throws -> Bool {
+        let tableName = table.rawValue
+        var descriptor = FetchDescriptor<LocalSyncRecord>(
+            predicate: #Predicate { $0.tableName == tableName && $0.userID == userID && $0.deletedAt == nil }
+        )
+        descriptor.fetchLimit = 1
+        return try !modelContext.fetch(descriptor).isEmpty
+    }
+
+    private func upsertPendingMutation(
+        tableName: String,
+        recordID: UUID,
+        operation: LocalSyncMutationOperation,
+        payloadData: Data
+    ) throws {
+        let descriptor = FetchDescriptor<LocalSyncMutation>(
+            predicate: #Predicate { $0.tableName == tableName && $0.recordID == recordID }
+        )
+
+        if let existing = try modelContext.fetch(descriptor).first {
+            existing.operationRawValue = operation.rawValue
+            existing.payloadData = payloadData
+            existing.lastError = nil
+            return
+        }
+
+        modelContext.insert(
+            LocalSyncMutation(
+                tableName: tableName,
+                recordID: recordID,
+                operation: operation,
+                payloadData: payloadData
+            )
+        )
+    }
+}

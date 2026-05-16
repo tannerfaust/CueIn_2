@@ -74,7 +74,7 @@ struct ScheduleBlockEditSheet: View {
             .background(CueInColors.background)
             .navigationTitle("Block")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(CueInThemePreference.current.colorScheme, for: .navigationBar)
             .toolbar {
                 CueInEditorToolbar(
                     saveEnabled: !draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -124,5 +124,5 @@ struct ScheduleBlockEditSheet: View {
         onSave: { _ in },
         onCancel: { }
     )
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

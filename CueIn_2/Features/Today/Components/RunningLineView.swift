@@ -541,5 +541,5 @@ private struct RunningLineMaterialChrome: ViewModifier {
             )
         }
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

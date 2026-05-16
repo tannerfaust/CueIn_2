@@ -5,9 +5,9 @@ import SwiftUI
 ///
 /// Interactions:
 /// • Tap body          → open detail (`onOpen`)
-/// • Tap checkbox      → toggle complete (`onToggle`) with success haptic
+/// • Tap status circle → status/action menu
 /// • Swipe right       → quick complete
-/// • Swipe left        → delete
+/// • Swipe left        → quick actions
 /// • Long-press        → context menu
 
 struct TaskItemRow: View {
@@ -19,6 +19,7 @@ struct TaskItemRow: View {
     let onOpen: () -> Void
     var onDelete: () -> Void = {}
     var onSchedule: (Date?) -> Void = { _ in }
+    var onMoreActions: () -> Void = {}
 
     /// Retained for call-site compatibility; layout is always the flat list style.
     var compactStyle: Bool = false
@@ -27,6 +28,7 @@ struct TaskItemRow: View {
 
     @State private var dragOffset: CGFloat = 0
     @State private var hasCrossedThreshold = false
+    @State private var isStatusPopoverPresented = false
 
     @State private var completeHaptic = false
     @State private var thresholdHaptic = false
@@ -34,9 +36,23 @@ struct TaskItemRow: View {
     @State private var queueTapHaptic = false
 
     private let completeThreshold: CGFloat = 80
-    private let deleteThreshold: CGFloat = -90
+    private let moreActionsThreshold: CGFloat = -90
     private let maxSwipe: CGFloat = 140
     private let checkboxSize: CGFloat = 18
+    @AppStorage(TasksTaskDisplayPrefs.densityKey) private var densityRaw = TasksDisplayDensity.compact.rawValue
+    @AppStorage(TasksTaskDisplayPrefs.metadataKey) private var metadataRaw = TasksMetadataLevel.balanced.rawValue
+    @AppStorage(TasksTaskDisplayPrefs.showProjectKey) private var showProject = true
+    @AppStorage(TasksTaskDisplayPrefs.showDueKey) private var showDue = true
+    @AppStorage(TasksTaskDisplayPrefs.showEstimateKey) private var showEstimate = true
+    @AppStorage(TasksTaskDisplayPrefs.showPriorityKey) private var showPriority = true
+
+    private var density: TasksDisplayDensity {
+        TasksDisplayDensity(rawValue: densityRaw) ?? .compact
+    }
+
+    private var metadataLevel: TasksMetadataLevel {
+        TasksMetadataLevel(rawValue: metadataRaw) ?? .balanced
+    }
 
     var body: some View {
         ZStack(alignment: .center) {
@@ -60,19 +76,23 @@ struct TaskItemRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 titleLine
-                metaLine
+                if metadataLevel != .minimal, !metaSummary.isEmpty {
+                    metaLine
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture { onOpen() }
 
-            projectPill
+            if showProject && metadataLevel != .minimal {
+                projectPill
+            }
 
             if onQueueToday != nil {
                 queueTodayControl
             }
         }
-        .padding(.vertical, 9)
+        .padding(.vertical, density.rowVerticalPadding)
         .padding(.horizontal, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.clear)
@@ -84,7 +104,7 @@ struct TaskItemRow: View {
     private var titleLine: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(task.title)
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: density.titleFontSize, weight: .medium))
                 .foregroundStyle(task.isCompleted ? CueInColors.textTertiary : CueInColors.textPrimary)
                 .strikethrough(task.isCompleted, color: CueInColors.textTertiary.opacity(0.55))
                 .lineLimit(2)
@@ -94,7 +114,7 @@ struct TaskItemRow: View {
                 Image(systemName: "exclamationmark.circle.fill")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(CueInColors.danger.opacity(0.9))
-            } else if task.priority != .normal {
+            } else if task.priority != .normal && showPriority {
                 Image(systemName: task.priority.icon)
                     .font(.system(size: 11, weight: .semibold))
                     .symbolRenderingMode(.hierarchical)
@@ -107,7 +127,7 @@ struct TaskItemRow: View {
 
     private var metaLine: some View {
         Text(metaSummary)
-        .font(.system(size: 11, weight: .regular))
+        .font(.system(size: density.metaFontSize, weight: .regular))
         .foregroundStyle(CueInColors.textTertiary.opacity(metaForegroundOpacity))
         .lineLimit(1)
         .minimumScaleFactor(0.82)
@@ -119,12 +139,12 @@ struct TaskItemRow: View {
 
     private var metaSummary: String {
         var parts: [String] = []
-        if let date = dateLabel { parts.append(date) }
-        parts.append(Self.durationLabel(task.plannedMinutes))
-        if let type = task.executionType { parts.append(type.shortLabel) }
-        if task.recurrence != .none { parts.append("Repeats") }
-        if !task.tags.isEmpty { parts.append("#\(task.tags[0])") }
-        if !task.subtasks.isEmpty {
+        if showDue, let date = dateLabel { parts.append(date) }
+        if showEstimate { parts.append(Self.durationLabel(task.plannedMinutes)) }
+        if metadataLevel == .full, let type = task.executionType { parts.append(type.shortLabel) }
+        if metadataLevel == .full, task.recurrence != .none { parts.append("Repeats") }
+        if metadataLevel == .full, !task.tags.isEmpty { parts.append("#\(task.tags[0])") }
+        if metadataLevel == .full, !task.subtasks.isEmpty {
             parts.append("\(task.subtasks.filter(\.isCompleted).count)/\(task.subtasks.count) sub")
         }
         return parts.joined(separator: "  ·  ")
@@ -168,8 +188,8 @@ struct TaskItemRow: View {
 
     private var checkbox: some View {
         Button {
-            completeHaptic.toggle()
-            onToggle()
+            selectHaptic.toggle()
+            isStatusPopoverPresented = true
         } label: {
             CueInTaskStatusCheckbox(
                 isCompleted: task.isCompleted,
@@ -182,6 +202,12 @@ struct TaskItemRow: View {
             .animation(.easeInOut(duration: 0.18), value: task.status)
         }
         .buttonStyle(.plain)
+        .popover(isPresented: $isStatusPopoverPresented) {
+            CueInTaskStatusPopoverContent(selection: task.status) { status in
+                store.setTodayTodoTaskStatus(id: task.id, status: status)
+                isStatusPopoverPresented = false
+            }
+        }
     }
 
     // MARK: Queue today
@@ -241,19 +267,19 @@ struct TaskItemRow: View {
             )
         } else if dragOffset < 0 {
             HStack(spacing: 6) {
-                Text("Delete")
+                Text("More")
                     .font(CueInTypography.captionMedium)
                     .fontWeight(.semibold)
-                Image(systemName: "trash.fill")
+                Image(systemName: "ellipsis.circle.fill")
                     .font(.system(size: 15, weight: .semibold))
             }
-            .foregroundStyle(.white)
-            .opacity(min(1, -dragOffset / abs(deleteThreshold)))
+            .foregroundStyle(CueInColors.textPrimary)
+            .opacity(min(1, -dragOffset / abs(moreActionsThreshold)))
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.trailing, 28)
             .frame(minHeight: rowMin)
             .background(
-                CueInColors.danger.opacity(min(1, -dragOffset / abs(deleteThreshold)))
+                CueInColors.surfaceTertiary.opacity(min(1, -dragOffset / abs(moreActionsThreshold)))
             )
         }
     }
@@ -286,7 +312,7 @@ struct TaskItemRow: View {
                     : max(raw, -maxSwipe)
                 dragOffset = bound
 
-                let past = raw > completeThreshold || raw < deleteThreshold
+                let past = raw > completeThreshold || raw < moreActionsThreshold
                 if past != hasCrossedThreshold {
                     hasCrossedThreshold = past
                     if past { thresholdHaptic.toggle() }
@@ -295,13 +321,14 @@ struct TaskItemRow: View {
             .onEnded { value in
                 let w = value.translation.width
                 let crossedRight = w > completeThreshold
-                let crossedLeft = w < deleteThreshold
+                let crossedLeft = w < moreActionsThreshold
 
                 if crossedRight {
                     completeHaptic.toggle()
                     onToggle()
                 } else if crossedLeft {
-                    onDelete()
+                    selectHaptic.toggle()
+                    onMoreActions()
                 }
 
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {

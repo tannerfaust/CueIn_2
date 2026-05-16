@@ -4,19 +4,33 @@ import SwiftUI
 /// Circular add button that uses native Liquid Glass on iOS 26.
 
 struct FloatingPlusButton: View {
-    let action: () -> Void
+    let onTap: () -> Void
+    var onLongPress: (() -> Void)? = nil
+    var accessibilityLabelText: String = "Add task"
+    /// When `nil`, the hint reflects whether a long-press overflow menu is available.
+    var accessibilityHintOverride: String? = nil
     @State private var feedbackTrigger = false
+
+    private var resolvedAccessibilityHint: String {
+        if let accessibilityHintOverride { return accessibilityHintOverride }
+        return onLongPress == nil
+            ? "Adds a new task"
+            : "Tap to add a task. Hold for more actions for this screen."
+    }
 
     var body: some View {
         FloatingCircularGlassIconButton(
             systemImage: "plus",
             iconSize: CueInLayout.fabPlusIconSize,
             diameter: CueInLayout.fabPlusDiameter,
-            glassTint: Color.white.opacity(0.14),
-            iconColor: .white,
+            glassTint: CueInColors.activeHint,
+            iconColor: CueInColors.textPrimary,
             sensoryTrigger: $feedbackTrigger,
-            action: action
+            onTap: onTap,
+            onLongPress: onLongPress
         )
+        .accessibilityLabel(accessibilityLabelText)
+        .accessibilityHint(resolvedAccessibilityHint)
     }
 }
 
@@ -37,7 +51,7 @@ struct FloatingLightningButton: View {
             glassTint: boltTint.opacity(0.22),
             iconColor: boltTint,
             sensoryTrigger: $feedbackTrigger,
-            action: action
+            onTap: action
         )
         .accessibilityLabel("Execution")
         .accessibilityHint("Open pause, resume, and run controls")
@@ -53,12 +67,36 @@ private struct FloatingCircularGlassIconButton: View {
     let glassTint: Color
     let iconColor: Color
     @Binding var sensoryTrigger: Bool
-    let action: () -> Void
+    let onTap: () -> Void
+    var onLongPress: (() -> Void)? = nil
+    @State private var suppressNextTapAfterLongPress = false
 
     var body: some View {
+        Group {
+            if let longPress = onLongPress {
+                coreButton
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.48)
+                            .onEnded { _ in
+                                suppressNextTapAfterLongPress = true
+                                sensoryTrigger.toggle()
+                                longPress()
+                            }
+                    )
+            } else {
+                coreButton
+            }
+        }
+    }
+
+    private var coreButton: some View {
         Button {
+            if suppressNextTapAfterLongPress {
+                suppressNextTapAfterLongPress = false
+                return
+            }
             sensoryTrigger.toggle()
-            action()
+            onTap()
         } label: {
             // Glass is applied INSIDE the button label so the ButtonStyle's
             // scaleEffect wraps the already-resolved glass shape. This prevents
@@ -73,7 +111,7 @@ private struct FloatingCircularGlassIconButton: View {
                     .circle,
                     tint: glassTint,
                     showsBorder: true,
-                    borderColor: Color.white.opacity(0.18),
+                    borderColor: CueInColors.cardBorder,
                     borderWidth: 0.75,
                     shadow: CueInGlassShadow(color: Color.black.opacity(0.24), radius: 18, x: 0, y: 8)
                 )
@@ -98,7 +136,7 @@ private struct GlassPressStyle: ButtonStyle {
 #Preview {
     ZStack {
         Color.black.ignoresSafeArea()
-        FloatingPlusButton {}
+        FloatingPlusButton(onTap: {})
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

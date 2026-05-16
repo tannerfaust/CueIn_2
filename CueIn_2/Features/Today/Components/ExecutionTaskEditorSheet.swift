@@ -68,7 +68,7 @@ struct ExecutionTaskEditorSheet: View {
                 Text("This removes it from the execution timeline.")
             }
         }
-        .preferredColorScheme(.dark)
+        .cueInPreferredColorScheme()
     }
 
     private var canSave: Bool {

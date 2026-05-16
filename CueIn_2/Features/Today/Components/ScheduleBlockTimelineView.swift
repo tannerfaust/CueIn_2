@@ -90,9 +90,11 @@ struct ScheduleBlockTimelineView: View {
                 }
             }
             .onPreferenceChange(ContainerFramePreferenceKey.self) { frame in
+                guard containerFrameMeaningfullyChanged(frame) else { return }
                 containerFrame = frame
             }
             .onPreferenceChange(BlockFramePreferenceKey.self) { frames in
+                guard blockFramesMeaningfullyChanged(frames, from: pendingPreferenceFrames) else { return }
                 pendingPreferenceFrames = frames
                 schedulePreferenceFrameFlushIfNeeded()
             }
@@ -467,6 +469,20 @@ struct ScheduleBlockTimelineView: View {
         visualBlockIDs = ids
     }
 
+    private func containerFrameMeaningfullyChanged(_ newFrame: CGRect) -> Bool {
+        !newFrame.isAlmostEqual(to: containerFrame, tolerance: 0.5)
+    }
+
+    private func blockFramesMeaningfullyChanged(_ newFrames: [UUID: CGRect], from old: [UUID: CGRect]) -> Bool {
+        if newFrames.count != old.count { return true }
+        if Set(newFrames.keys) != Set(old.keys) { return true }
+        for (id, r) in newFrames {
+            guard let o = old[id] else { return true }
+            if !r.isAlmostEqual(to: o, tolerance: 0.5) { return true }
+        }
+        return false
+    }
+
     /// Coalesce rapid per-row preference updates into one state write per runloop tick.
     /// This prevents layout feedback loops and reduces scheduler pressure while dragging.
     private func schedulePreferenceFrameFlushIfNeeded() {
@@ -482,6 +498,15 @@ struct ScheduleBlockTimelineView: View {
             else { return }
             liveFrames = frames
         }
+    }
+}
+
+private extension CGRect {
+    func isAlmostEqual(to other: CGRect, tolerance: CGFloat) -> Bool {
+        abs(minX - other.minX) < tolerance
+            && abs(minY - other.minY) < tolerance
+            && abs(width - other.width) < tolerance
+            && abs(height - other.height) < tolerance
     }
 }
 

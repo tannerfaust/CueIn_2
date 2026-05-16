@@ -13,7 +13,7 @@ struct GlassSurface: ViewModifier {
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                    .strokeBorder(CueInColors.cardBorder, lineWidth: 0.5)
             )
     }
 }

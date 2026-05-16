@@ -23,9 +23,8 @@ struct TasksView: View {
             )
             .navigationDestination(for: TasksRoute.self, destination: destination)
             .background(CueInColors.background.ignoresSafeArea())
-            .toolbar(.hidden, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
+        .cueInPreferredColorScheme()
         .onAppear {
             knownTodayTaskIDs = Set(store.todayTasks.map(\.id))
         }

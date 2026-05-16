@@ -8,6 +8,7 @@ struct DataAndResetSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @AppStorage(CueInAppDataKeys.gimmickDemoRemoved) private var gimmickDemoRemoved = false
+    @AppStorage(CueInThemePreference.storageKey) private var themeRawValue = CueInThemePreference.defaultValue.rawValue
 
     @State private var confirmEraseEverything = false
     @State private var confirmRemoveDemo = false
@@ -21,6 +22,13 @@ struct DataAndResetSettingsView: View {
     private enum SettingsRowRole {
         case normal
         case destructive
+    }
+
+    private enum SettingsRowAccessory {
+        case chevron
+        case action
+        case checkmark
+        case none
     }
 
     var body: some View {
@@ -37,10 +45,15 @@ struct DataAndResetSettingsView: View {
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }
-                    .font(CueInTypography.bodyMedium)
-                    .foregroundStyle(CueInColors.accentFocus)
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(CueInColors.textPrimary)
+                }
+                .accessibilityLabel("Back")
             }
         }
         .confirmationDialog(
@@ -144,40 +157,33 @@ struct DataAndResetSettingsView: View {
     }
 
     private var settingsCards: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.lg) {
-            CueInEditorSettingsCard(title: "About") {
-                Text("Manage local data, account sync, demo content, and workspace resets.")
-                    .font(CueInTypography.caption)
-                    .foregroundStyle(CueInColors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        VStack(alignment: .leading, spacing: CueInSpacing.md) {
+            settingsSummaryHeader
 
             CueInEditorSettingsCard(title: "Account") {
                 AccountSyncSettingsView(confirmDeleteAccount: $confirmDeleteAccount)
             }
 
-            CueInEditorSettingsCard(title: "Demo data") {
-                demoSectionContent
+            CueInEditorSettingsCard(title: "Appearance") {
+                appearanceSectionContent
             }
 
             CueInEditorSettingsCard(title: "Navigation") {
                 navigationSectionContent
             }
 
-            CueInEditorSettingsCard(title: "Library") {
-                librarySectionContent
+            CueInEditorSettingsCard(title: "Demo data") {
+                demoSectionContent
             }
 
-            CueInEditorSettingsCard(title: "Today") {
+            CueInEditorSettingsCard(title: "Data resets") {
                 todaySectionContent
-            }
-
-            CueInEditorSettingsCard(title: "Tasks") {
+                settingsDivider
                 tasksSectionContent
-            }
-
-            CueInEditorSettingsCard(title: "Goals") {
+                settingsDivider
                 goalsSectionContent
+                settingsDivider
+                librarySectionContent
             }
 
             CueInEditorSettingsCard(title: "Danger zone") {
@@ -187,6 +193,21 @@ struct DataAndResetSettingsView: View {
         .padding(.horizontal, CueInSpacing.screenHorizontal)
         .padding(.top, CueInSpacing.sm)
         .padding(.bottom, CueInSpacing.xxl)
+    }
+
+    private var settingsSummaryHeader: some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.xs) {
+            Text("App settings")
+                .font(CueInTypography.headline)
+                .foregroundStyle(CueInColors.textPrimary)
+            Text("Sync, navigation, demo content, and local reset controls.")
+                .font(CueInTypography.caption)
+                .foregroundStyle(CueInColors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, CueInSpacing.md)
+        .padding(.vertical, CueInSpacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var demoSectionContent: some View {
@@ -200,7 +221,7 @@ struct DataAndResetSettingsView: View {
 
             settingsRow(
                 title: "Remove demo data",
-                subtitle: "Delete seeded Tasks, Goals, and empty Today’s blocks",
+                subtitle: "Delete seeded Tasks, Goals, and Today blocks",
                 icon: "trash",
                 role: .destructive
             ) {
@@ -209,7 +230,7 @@ struct DataAndResetSettingsView: View {
 
             settingsRow(
                 title: "Restore demo data",
-                subtitle: "Re-seed Tasks, Goals, and Today from the bundled sample",
+                subtitle: "Re-seed Tasks, Goals, and Today",
                 icon: "arrow.counterclockwise",
                 role: .normal,
                 disabled: !gimmickDemoRemoved
@@ -236,19 +257,48 @@ struct DataAndResetSettingsView: View {
         } label: {
             settingsRowContent(
                 title: "Navbar layout",
-                subtitle: "Reorder pages, add pages, or hide tabs",
+                subtitle: "Choose up to \(AppTab.maximumVisibleTabs) tabs and reorder them",
                 icon: "rectangle.bottomthird.inset.filled",
                 role: .normal,
-                disabled: false
+                disabled: false,
+                accessory: .chevron
             )
         }
         .buttonStyle(.plain)
     }
 
+    private var appearanceSectionContent: some View {
+        VStack(spacing: CueInSpacing.sm) {
+            ForEach(CueInThemePreference.allCases) { theme in
+                Button {
+                    themeRawValue = theme.rawValue
+                } label: {
+                    settingsRowContent(
+                        title: theme.title,
+                        subtitle: theme.subtitle,
+                        icon: theme.icon,
+                        role: .normal,
+                        disabled: false,
+                        accessory: selectedTheme == theme ? .checkmark : .none
+                    )
+                }
+                .buttonStyle(.plain)
+
+                if theme != CueInThemePreference.allCases.last {
+                    settingsDivider
+                }
+            }
+        }
+    }
+
+    private var selectedTheme: CueInThemePreference {
+        CueInThemePreference(rawValue: themeRawValue) ?? .defaultValue
+    }
+
     private var todaySectionContent: some View {
         settingsRow(
-            title: "Clear schedule & formula state",
-            subtitle: "Persisted run, timers, and blocks for Today",
+            title: "Today schedule",
+            subtitle: "Saved run, timers, formulas, and blocks",
             icon: "calendar.badge.clock",
             role: .destructive
         ) {
@@ -258,7 +308,7 @@ struct DataAndResetSettingsView: View {
 
     private var tasksSectionContent: some View {
         settingsRow(
-            title: "Clear Tasks tab data",
+            title: "Tasks",
             subtitle: "All fields, projects, and tasks",
             icon: "checklist",
             role: .destructive
@@ -269,8 +319,8 @@ struct DataAndResetSettingsView: View {
 
     private var goalsSectionContent: some View {
         settingsRow(
-            title: "Clear Goals data",
-            subtitle: "All goals, stages, subgoals, links, canvas notes, and reviews",
+            title: "Goals",
+            subtitle: "Goals, stages, subgoals, links, notes, and reviews",
             icon: "target",
             role: .destructive
         ) {
@@ -287,6 +337,13 @@ struct DataAndResetSettingsView: View {
         ) {
             confirmEraseEverything = true
         }
+    }
+
+    private var settingsDivider: some View {
+        Rectangle()
+            .fill(CueInColors.divider)
+            .frame(height: 1)
+            .padding(.leading, 46)
     }
 
     private func statusInset(title: String, subtitle: String) -> some View {
@@ -318,7 +375,8 @@ struct DataAndResetSettingsView: View {
                 subtitle: subtitle,
                 icon: icon,
                 role: role,
-                disabled: disabled
+                disabled: disabled,
+                accessory: .action
             )
         }
         .buttonStyle(.plain)
@@ -330,12 +388,13 @@ struct DataAndResetSettingsView: View {
         subtitle: String,
         icon: String,
         role: SettingsRowRole,
-        disabled: Bool
+        disabled: Bool,
+        accessory: SettingsRowAccessory = .action
     ) -> some View {
         HStack(spacing: CueInSpacing.md) {
             Image(systemName: icon)
                 .font(.system(size: 16))
-                .foregroundStyle(role == .destructive ? Color.red.opacity(0.9) : CueInColors.textSecondary)
+                .foregroundStyle(role == .destructive ? CueInColors.danger.opacity(0.9) : CueInColors.textSecondary)
                 .frame(width: 34, height: 34)
                 .background(CueInColors.surfaceSecondary.opacity(0.72))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -343,21 +402,36 @@ struct DataAndResetSettingsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(CueInTypography.bodyMedium)
-                    .foregroundStyle(role == .destructive ? Color.red.opacity(0.95) : CueInColors.textPrimary)
+                    .foregroundStyle(role == .destructive ? CueInColors.danger.opacity(0.95) : CueInColors.textPrimary)
                     .multilineTextAlignment(.leading)
+                    .lineLimit(1)
                 Text(subtitle)
                     .font(CueInTypography.caption)
                     .foregroundStyle(CueInColors.textTertiary)
                     .multilineTextAlignment(.leading)
+                    .lineLimit(2)
             }
 
             Spacer(minLength: 0)
 
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(CueInColors.textTertiary)
+            switch accessory {
+            case .chevron:
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(CueInColors.textTertiary)
+            case .action:
+                Image(systemName: "circle.fill")
+                    .font(.system(size: 6, weight: .medium))
+                    .foregroundStyle(role == .destructive ? CueInColors.danger.opacity(0.7) : CueInColors.textTertiary)
+            case .checkmark:
+                Image(systemName: "checkmark")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(CueInColors.accentFocus)
+            case .none:
+                EmptyView()
+            }
         }
-        .padding(.vertical, CueInSpacing.sm)
+        .padding(.vertical, 6)
         .opacity(disabled ? 0.45 : 1)
     }
 }
@@ -374,25 +448,55 @@ private struct AccountSyncSettingsView: View {
     @State private var redirectURL = UserDefaults.standard.string(forKey: SupabaseConfiguration.redirectURLDefaultsKey) ?? "cuein://auth/callback"
     @State private var email = ""
     @State private var password = ""
+    @State private var confirmPassword = ""
+    @State private var authMode: AccountAuthMode = .signIn
+    @State private var showsBackendConfiguration = false
+
+    private enum AccountAuthMode: String, CaseIterable, Identifiable {
+        case signIn
+        case create
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .signIn: return "Sign in"
+            case .create: return "Create"
+            }
+        }
+    }
 
     var body: some View {
         VStack(spacing: CueInSpacing.sm) {
             statusInset
 
-            if case .missing = authStore.configurationState {
+            if showsBackendConfiguration || authStore.configurationState == .missing {
                 configurationFields
+            } else {
+                Button {
+                    showsBackendConfiguration = true
+                } label: {
+                    Label("Edit backend", systemImage: "server.rack")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             }
 
             if authStore.isSignedIn {
                 signedInControls
+                syncStatusView
             } else {
                 signedOutControls
             }
 
             if let lastError = authStore.lastError {
-                Text(lastError)
+                errorMessage(lastError)
+            }
+
+            if let notice = authStore.lastAuthNotice {
+                Text(notice)
                     .font(CueInTypography.caption)
-                    .foregroundStyle(Color.red.opacity(0.9))
+                    .foregroundStyle(CueInColors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -443,6 +547,7 @@ private struct AccountSyncSettingsView: View {
                 .keyboardType(.URL)
             Button {
                 authStore.configure(projectURL: projectURL, anonKey: anonKey, redirectURL: redirectURL)
+                showsBackendConfiguration = false
             } label: {
                 Label("Save backend", systemImage: "server.rack")
                     .frame(maxWidth: .infinity)
@@ -455,6 +560,13 @@ private struct AccountSyncSettingsView: View {
 
     private var signedOutControls: some View {
         VStack(spacing: CueInSpacing.sm) {
+            Picker("Account mode", selection: $authMode) {
+                ForEach(AccountAuthMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
             SignInWithAppleButton(.signIn) { request in
                 authStore.makeAppleRequest(request)
             } onCompletion: { result in
@@ -484,6 +596,11 @@ private struct AccountSyncSettingsView: View {
             SecureField("Password", text: $password)
                 .textFieldStyle(.roundedBorder)
 
+            if authMode == .create {
+                SecureField("Confirm password", text: $confirmPassword)
+                    .textFieldStyle(.roundedBorder)
+            }
+
             HStack(spacing: CueInSpacing.sm) {
                 Button("Magic link") {
                     Task { await authStore.sendMagicLink(email: email) }
@@ -491,12 +608,18 @@ private struct AccountSyncSettingsView: View {
                 .buttonStyle(.bordered)
                 .disabled(email.isEmpty)
 
-                Button("Sign in") {
-                    Task { await authStore.signInWithPassword(email: email, password: password) }
+                Button(authMode == .create ? "Create account" : "Sign in") {
+                    Task {
+                        if authMode == .create {
+                            await authStore.signUpWithPassword(email: email, password: password)
+                        } else {
+                            await authStore.signInWithPassword(email: email, password: password)
+                        }
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(CueInColors.accentFocus)
-                .disabled(email.isEmpty || password.isEmpty)
+                .disabled(primaryAuthDisabled)
             }
 
             if let lastMagicLinkEmail = authStore.lastMagicLinkEmail {
@@ -507,6 +630,12 @@ private struct AccountSyncSettingsView: View {
             }
         }
         .disabled(authStore.isWorking)
+    }
+
+    private var primaryAuthDisabled: Bool {
+        if email.isEmpty || password.count < 6 { return true }
+        if authMode == .create && password != confirmPassword { return true }
+        return false
     }
 
     private var signedInControls: some View {
@@ -535,6 +664,86 @@ private struct AccountSyncSettingsView: View {
         }
         .disabled(authStore.isWorking)
     }
+
+    private var syncStatusView: some View {
+        HStack(alignment: .firstTextBaseline, spacing: CueInSpacing.sm) {
+            Text(syncStatusText)
+                .font(CueInTypography.caption)
+                .foregroundStyle(syncStatusColor)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+
+            if case let .failed(message) = syncEngine.state {
+                Button {
+                    UIPasteboard.general.string = message
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(CueInColors.textSecondary)
+                        .frame(width: 32, height: 32)
+                        .background(CueInColors.surfaceSecondary.opacity(0.72))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Copy sync error")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var syncStatusText: String {
+        switch syncEngine.state {
+        case .idle:
+            return "Sync not run yet."
+        case .syncing:
+            return "Syncing..."
+        case let .blocked(message):
+            return message
+        case let .failed(message):
+            return "Sync failed: \(message)"
+        case let .synced(date):
+            return "Synced \(date.formatted(date: .omitted, time: .shortened))."
+        }
+    }
+
+    private var syncStatusColor: Color {
+        switch syncEngine.state {
+        case .failed:
+            return Color.red.opacity(0.9)
+        case .synced:
+            return CueInColors.success
+        default:
+            return CueInColors.textSecondary
+        }
+    }
+
+    private func errorMessage(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.xs) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(message)
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(Color.red.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: CueInSpacing.sm)
+
+                Button {
+                    UIPasteboard.general.string = message
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(CueInColors.textSecondary)
+                        .frame(width: 32, height: 32)
+                        .background(CueInColors.surfaceSecondary.opacity(0.72))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Copy error")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
 
 // MARK: - AppNavigationLayoutSettingsView
@@ -544,6 +753,7 @@ private struct AppNavigationLayoutSettingsView: View {
     @AppStorage(TodayDisplayPreferences.taskLedViewMode) private var taskLedViewModeRaw
         = TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue
     @Environment(\.dismiss) private var dismiss
+    @State private var editMode: EditMode = .active
 
     private var taskLedPresentation: TodayDisplayPreferences.TaskLedViewMode {
         TodayDisplayPreferences.TaskLedViewMode(rawValue: taskLedViewModeRaw) ?? .timeline
@@ -569,31 +779,60 @@ private struct AppNavigationLayoutSettingsView: View {
                         .listRowBackground(Color.clear)
                 }
 
-                Section("Pages") {
+                Section {
                     ForEach(selectedTabs) { tab in
-                        navTabRow(tab, active: true)
-                            .deleteDisabled(!tab.canRemoveFromNavigation || selectedTabs.count <= 2)
+                        selectedTabRow(tab)
                     }
                     .onMove(perform: moveTabs)
-                    .onDelete(perform: deleteTabs)
+                } header: {
+                    Text("Shown tabs")
+                } footer: {
+                    Text("Drag to reorder. Use the minus button to remove a tab. Hub stays pinned in the available set.")
                 }
 
                 if !hiddenTabs.isEmpty {
-                    Section("Add") {
+                    Section {
                         ForEach(hiddenTabs) { tab in
                             Button {
                                 add(tab)
                             } label: {
-                                navTabRow(tab, active: false)
+                                availableTabRow(tab)
                             }
                             .buttonStyle(.plain)
                             .disabled(selectedTabs.count >= AppTab.maximumVisibleTabs)
                         }
+                    } header: {
+                        Text("Available")
+                    } footer: {
+                        if selectedTabs.count >= AppTab.maximumVisibleTabs {
+                            Text("Remove a shown tab before adding another.")
+                        }
                     }
+                }
+
+                Section {
+                    Button {
+                        selectedTabs = AppTab.defaultTabs
+                    } label: {
+                        HStack(spacing: CueInSpacing.md) {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(CueInColors.accentFocus)
+                                .frame(width: 34, height: 34)
+                                .background(CueInColors.surfaceSecondary.opacity(0.72))
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                            Text("Restore default tabs")
+                                .font(CueInTypography.bodyMedium)
+                                .foregroundStyle(CueInColors.textPrimary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(selectedTabs == AppTab.defaultTabs)
                 }
             }
             .scrollContentBackground(.hidden)
-            .environment(\.editMode, .constant(.active))
+            .environment(\.editMode, $editMode)
         }
         .navigationTitle("Navbar")
         .navigationBarTitleDisplayMode(.inline)
@@ -613,6 +852,18 @@ private struct AppNavigationLayoutSettingsView: View {
 
     private var navbarPreview: some View {
         VStack(alignment: .leading, spacing: CueInSpacing.sm) {
+            HStack {
+                Text("\(selectedTabs.count)/\(AppTab.maximumVisibleTabs) tabs")
+                    .font(CueInTypography.captionMedium)
+                    .foregroundStyle(CueInColors.textSecondary)
+
+                Spacer(minLength: 0)
+
+                Text("Preview")
+                    .font(CueInTypography.micro)
+                    .foregroundStyle(CueInColors.textTertiary)
+            }
+
             HStack(spacing: 6) {
                 ForEach(selectedTabs) { tab in
                     VStack(spacing: 4) {
@@ -623,20 +874,20 @@ private struct AppNavigationLayoutSettingsView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.72)
                     }
-                    .foregroundStyle(Color.white.opacity(tab == selectedTabs.first ? 1 : 0.48))
+                    .foregroundStyle(tab == selectedTabs.first ? CueInColors.textPrimary : CueInColors.textTertiary)
                     .frame(maxWidth: .infinity)
                     .frame(height: 54)
                     .background(
                         Capsule()
-                            .fill(tab == selectedTabs.first ? Color.white.opacity(0.14) : Color.clear)
+                            .fill(tab == selectedTabs.first ? CueInColors.activeHint : Color.clear)
                     )
                 }
             }
             .padding(7)
-            .background(Color.white.opacity(0.10), in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.6))
+            .background(CueInColors.surfacePrimary.opacity(0.72), in: Capsule())
+            .overlay(Capsule().strokeBorder(CueInColors.cardBorder, lineWidth: 0.6))
 
-            Text("Up to \(AppTab.maximumVisibleTabs) tabs. Hub stays. Algorithm and To-do/Timeline are separate pages.")
+            Text("The first tab opens by default. Timer and Sounds can be pinned here or opened from Hub.")
                 .font(CueInTypography.caption)
                 .foregroundStyle(CueInColors.textTertiary)
         }
@@ -661,6 +912,40 @@ private struct AppNavigationLayoutSettingsView: View {
             return taskLedPresentation.icon
         }
         return active ? tab.icon : tab.iconInactive
+    }
+
+    private func selectedTabRow(_ tab: AppTab) -> some View {
+        HStack(spacing: CueInSpacing.md) {
+            removeTabButton(tab)
+
+            navTabRow(tab, active: true)
+        }
+        .listRowBackground(CueInColors.surfacePrimary.opacity(0.92))
+    }
+
+    private func availableTabRow(_ tab: AppTab) -> some View {
+        navTabRow(tab, active: false)
+            .opacity(selectedTabs.count >= AppTab.maximumVisibleTabs ? 0.45 : 1)
+            .listRowBackground(CueInColors.surfacePrimary.opacity(0.92))
+    }
+
+    private func removeTabButton(_ tab: AppTab) -> some View {
+        Button {
+            remove(tab)
+        } label: {
+            Image(systemName: tab.canRemoveFromNavigation && selectedTabs.count > 2 ? "minus.circle.fill" : "lock.circle")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(
+                    tab.canRemoveFromNavigation && selectedTabs.count > 2
+                        ? CueInColors.danger.opacity(0.95)
+                        : CueInColors.textTertiary
+                )
+                .frame(width: 32, height: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!tab.canRemoveFromNavigation || selectedTabs.count <= 2)
+        .accessibilityLabel(tab.canRemoveFromNavigation ? "Remove \(tab.rearrangementPickerLabel)" : "\(tab.rearrangementPickerLabel) cannot be removed")
     }
 
     private func navTabRow(_ tab: AppTab, active: Bool) -> some View {
@@ -692,7 +977,6 @@ private struct AppNavigationLayoutSettingsView: View {
                     )
             }
         }
-        .listRowBackground(CueInColors.surfacePrimary.opacity(0.92))
     }
 
     private func moveTabs(from source: IndexSet, to destination: Int) {
@@ -701,15 +985,9 @@ private struct AppNavigationLayoutSettingsView: View {
         selectedTabs = tabs
     }
 
-    private func deleteTabs(at offsets: IndexSet) {
-        var tabs = selectedTabs
-        for index in offsets.sorted(by: >) {
-            guard tabs.indices.contains(index),
-                  tabs[index].canRemoveFromNavigation,
-                  tabs.count > 2 else { continue }
-            tabs.remove(at: index)
-        }
-        selectedTabs = tabs
+    private func remove(_ tab: AppTab) {
+        guard tab.canRemoveFromNavigation, selectedTabs.count > 2 else { return }
+        selectedTabs.removeAll { $0 == tab }
     }
 
     private func add(_ tab: AppTab) {
@@ -722,5 +1000,5 @@ private struct AppNavigationLayoutSettingsView: View {
     NavigationStack {
         DataAndResetSettingsView()
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

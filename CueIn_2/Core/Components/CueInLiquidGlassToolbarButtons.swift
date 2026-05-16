@@ -40,7 +40,7 @@ struct CueInLiquidGlassToolbarIconButton: View {
     private var iconForeground: Color {
         switch role {
         case .close:
-            return Color.white.opacity(0.94)
+            return CueInColors.textPrimary
         case .save:
             return Color(hex: 0xD6EDFF)
         }
@@ -77,7 +77,7 @@ private struct LiquidGlassToolbarCircleModifier: ViewModifier {
     private var glassTint: Color {
         switch role {
         case .close:
-            return Color.white.opacity(0.14)
+            return CueInColors.activeHint
         case .save:
             /// System-style saturated blue with enough opacity to read as a real blue button.
             return Color(hex: 0x0A84FF).opacity(0.82)

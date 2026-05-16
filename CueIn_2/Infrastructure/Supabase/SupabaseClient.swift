@@ -4,6 +4,7 @@ enum SupabaseClientError: LocalizedError {
     case missingConfiguration
     case invalidResponse
     case server(status: Int, message: String)
+    case decoding(path: String, message: String, body: String)
 
     var errorDescription: String? {
         switch self {
@@ -12,7 +13,13 @@ enum SupabaseClientError: LocalizedError {
         case .invalidResponse:
             return "The backend returned an invalid response."
         case let .server(status, message):
+            if message.localizedCaseInsensitiveContains("<!doctype html")
+                || message.localizedCaseInsensitiveContains("<html") {
+                return "Backend error \(status): Supabase returned an HTML security page. Check that the project URL is the project root, like https://your-project.supabase.co."
+            }
             return "Backend error \(status): \(message)"
+        case let .decoding(path, message, body):
+            return "Backend decode error at \(path): \(message). Body: \(body)"
         }
     }
 }
@@ -59,6 +66,19 @@ final class SupabaseClient {
         return response.session
     }
 
+    func signUpWithPassword(email: String, password: String) async throws -> SupabaseSignUpResponse {
+        let config = try configuration()
+        let body = PasswordSignInRequest(email: email, password: password)
+        return try await request(
+            baseURL: config.authBaseURL,
+            path: "signup",
+            method: "POST",
+            body: body,
+            config: config,
+            session: nil
+        )
+    }
+
     func signInWithIDToken(provider: String, idToken: String, nonce: String? = nil) async throws -> SupabaseAuthSession {
         let config = try configuration()
         let body = IDTokenSignInRequest(provider: provider, idToken: idToken, nonce: nonce)
@@ -83,7 +103,7 @@ final class SupabaseClient {
             expiresAt: Date().addingTimeInterval(60),
             user: SupabaseUser(id: UUID(), email: nil)
         )
-        let response: SupabaseAuthUserResponse = try await request(
+        let response: SupabaseUser = try await request(
             baseURL: config.authBaseURL,
             path: "user",
             method: "GET",
@@ -91,7 +111,7 @@ final class SupabaseClient {
             config: config,
             session: tempSession
         )
-        return response.user
+        return response
     }
 
     func refreshSession(_ session: SupabaseAuthSession) async throws -> SupabaseAuthSession {
@@ -127,7 +147,7 @@ final class SupabaseClient {
         let _: EmptyResponse = try await request(
             baseURL: config.restBaseURL,
             path: table.rawValue,
-            queryItems: [URLQueryItem(name: "on_conflict", value: "id")],
+            queryItems: [URLQueryItem(name: "on_conflict", value: table.upsertConflictTarget)],
             method: "POST",
             body: records,
             extraHeaders: [
@@ -228,7 +248,12 @@ final class SupabaseClient {
         if Response.self == EmptyResponse.self {
             return EmptyResponse() as! Response
         }
-        return try decoder.decode(Response.self, from: data)
+        do {
+            return try decoder.decode(Response.self, from: data)
+        } catch {
+            let body = String(data: data, encoding: .utf8) ?? "Unreadable response body"
+            throw SupabaseClientError.decoding(path: path, message: error.localizedDescription, body: body)
+        }
     }
 }
 
@@ -240,6 +265,15 @@ enum SupabaseTable: String, CaseIterable {
     case goals
     case scheduleRecords = "schedule_records"
     case appLayoutSettings = "app_layout_settings"
+
+    var upsertConflictTarget: String {
+        switch self {
+        case .appLayoutSettings:
+            return "user_id,key"
+        default:
+            return "id"
+        }
+    }
 }
 
 private struct MagicLinkRequest: Encodable {

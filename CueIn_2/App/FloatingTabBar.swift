@@ -55,7 +55,7 @@ struct FloatingTabBar: View {
                     tabBarIcon(isSelected: isSelected, systemName: activeSymbol)
                     tabBarTitle(title: title)
                 }
-                .foregroundStyle(isSelected ? .white : Color.white.opacity(0.40))
+                .foregroundStyle(isSelected ? CueInColors.textPrimary : CueInColors.textTertiary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Capsule())
@@ -97,14 +97,14 @@ struct FloatingTabBar: View {
             Color.clear
                 .glassEffect(
                     .regular
-                        .tint(Color.white.opacity(0.18))
+                        .tint(CueInColors.activeHint)
                         .interactive(),
                     in: .capsule
                 )
                 .glassEffectID("selected-tab", in: indicatorNamespace)
         } else {
             Capsule()
-                .fill(Color.white.opacity(0.14))
+                .fill(CueInColors.activeHint)
         }
     }
 }
@@ -114,10 +114,10 @@ private struct TabBarGlassModifier: ViewModifier {
         content
             .cueInGlass(
                 .capsule,
-                tint: Color.white.opacity(0.10),
+                tint: CueInColors.activeHint,
                 interactive: false,
                 showsBorder: true,
-                borderColor: Color.white.opacity(0.18),
+                borderColor: CueInColors.cardBorder,
                 borderWidth: 0.75,
                 shadow: CueInGlassShadow(color: Color.black.opacity(0.24), radius: 22, x: 0, y: 8)
             )
@@ -149,11 +149,11 @@ private struct TabBarGlassModifier: ViewModifier {
                     selectedTab: .constant(.taskLed),
                     tabs: AppTab.defaultTabs
                 )
-                FloatingPlusButton {}
+                FloatingPlusButton(onTap: {})
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
         }
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

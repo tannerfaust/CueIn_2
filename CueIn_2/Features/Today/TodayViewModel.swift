@@ -1031,6 +1031,11 @@ final class TodayViewModel {
         executionDays.first(where: { calendar.isDate($0.date, inSameDayAs: currentTime) })
     }
 
+    /// Used by stats when the execution snapshot is already hydrated for today.
+    var todayExecutionDayTaskCountForMetrics: Int? {
+        todayExecutionDay.map { $0.tasks.count }
+    }
+
     var taskLeadSections: [TaskLeadTaskSection] {
         guard isTaskLedMode else { return [] }
 
@@ -1267,6 +1272,90 @@ final class TodayViewModel {
 
     @MainActor
     func saveCreatedFormula(_ formula: DayFormulaTemplate) {
+        FormulaLibraryService.saveCustomSchedule(formula)
+        availableFormulas = FormulaLibraryService.allSchedules
+        selectFormula(formula.id)
+    }
+
+    /// Rebuilds the preview timeline from accordion drafts (before the schedule starts).
+    @MainActor
+    func replacePreviewBlocksFromDrafts(_ drafts: [ScheduleBlockDraft]) {
+        guard isFormulaPreviewing, selectedFormula != nil else { return }
+        let templates = drafts
+            .filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map { $0.toFormulaBlockTemplate() }
+        guard !templates.isEmpty else { return }
+
+        guard let base = selectedFormula else { return }
+        let totalM = templates.reduce(0) { $0 + max($1.durationMinutes, 1) }
+        let tempFormula = DayFormulaTemplate(
+            id: base.id,
+            name: base.name,
+            symbol: base.symbol,
+            summary: "\(templates.count) \(templates.count == 1 ? "block" : "blocks") · \(ScheduleBlockFormat.durationLabel(minutes: totalM))",
+            targetDurationMinutes: max(base.targetDurationMinutes, totalM, 5),
+            rules: base.rules,
+            blocks: templates
+        )
+        let anchor = Date()
+        blocks = materializedFormulaBlocks(formula: tempFormula, anchor: anchor, fillsFromExecution: false)
+        snapshotFormulaNominals()
+        formulaBlocks = blocks
+        deriveBlockStates()
+        persistCurrentBlocks()
+    }
+
+    /// Creates a new user-saved algorithm from a starter block and selects it for inline editing.
+    @MainActor
+    func createNewUserAlgorithmFromRoutineTemplate() {
+        let draft = ScheduleBlockDraft.routineTemplate()
+        let blockTemplate = draft.toFormulaBlockTemplate().copyWithNewID()
+        let totalM = max(1, blockTemplate.durationMinutes)
+        let formula = DayFormulaTemplate(
+            id: UUID(),
+            name: "Untitled Algorithm",
+            symbol: "calendar",
+            summary: "1 block · \(ScheduleBlockFormat.durationLabel(minutes: totalM))",
+            targetDurationMinutes: max(5, totalM),
+            rules: [],
+            blocks: [blockTemplate]
+        )
+        FormulaLibraryService.saveCustomSchedule(formula)
+        availableFormulas = FormulaLibraryService.allSchedules
+        selectFormula(formula.id)
+    }
+
+    /// Persists the current preview blocks to the formula library (new entry when editing a bundled template).
+    @MainActor
+    func saveCurrentPreviewAlgorithmToLibrary(name: String, symbol: String) {
+        guard isFormulaPreviewing else { return }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return }
+
+        let sorted = todayScheduleBlocks.sorted { $0.startTime < $1.startTime }
+        let blockTemplates: [DayFormulaBlockTemplate] = sorted.compactMap { block in
+            let draft = ScheduleBlockDraft(from: block)
+            let t = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty else { return nil }
+            return draft.toFormulaBlockTemplate()
+        }
+        guard !blockTemplates.isEmpty else { return }
+
+        let customIDs = Set(FormulaLibraryService.customSchedules().map(\.id))
+        let isUserCustom = selectedFormulaID.map { customIDs.contains($0) } ?? false
+        let formulaID = isUserCustom ? (selectedFormulaID ?? UUID()) : UUID()
+
+        let totalM = blockTemplates.reduce(0) { $0 + max($1.durationMinutes, 1) }
+        let rules = selectedFormula?.rules ?? []
+        let formula = DayFormulaTemplate(
+            id: formulaID,
+            name: trimmedName,
+            symbol: symbol,
+            summary: "\(blockTemplates.count) \(blockTemplates.count == 1 ? "block" : "blocks") · \(ScheduleBlockFormat.durationLabel(minutes: totalM))",
+            targetDurationMinutes: max(totalM, 5),
+            rules: rules,
+            blocks: blockTemplates
+        )
         FormulaLibraryService.saveCustomSchedule(formula)
         availableFormulas = FormulaLibraryService.allSchedules
         selectFormula(formula.id)
@@ -2235,6 +2324,99 @@ final class TodayViewModel {
             title: "Block added",
             message: trimmed,
             tint: type.accent,
+            undoTitle: "Undo"
+        ) { [self] in
+            self.deleteFormulaBlock(blockID: block.id)
+        }
+
+        return block.id
+    }
+
+    /// Inserts a block from the block library (saved or sample presets). Clock pins are cleared so the
+    /// new slice chains cleanly with the rest of the formula.
+    @MainActor
+    @discardableResult
+    func insertFormulaBlock(from template: DayFormulaBlockTemplate, after afterBlockID: UUID? = nil) -> UUID? {
+        guard dayEngineMode == .formulaBased else { return nil }
+        let fresh = template.copyWithNewID()
+        let trimmed = fresh.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let blockID = fresh.id
+        let minutes = max(5, min(fresh.durationMinutes, 24 * 60))
+        let insertionIndex = formulaInsertionIndex(after: afterBlockID)
+        let start = formulaInsertionStartDate(for: insertionIndex)
+        let end = calendar.date(byAdding: .minute, value: minutes, to: start) ?? start
+
+        let nestedTasks: [DayTask] = fresh.tasks.map { task in
+            DayTask(
+                id: UUID(),
+                title: task.title,
+                isCompleted: false,
+                isPrimary: task.isPrimary,
+                isRepeating: task.isRepeating,
+                sourceExecutionBlockID: blockID,
+                sourceExecutionTaskID: nil,
+                plannerTaskItemID: task.plannerTaskItemID,
+                field: task.field,
+                project: task.project,
+                folder: task.folder
+            )
+        }
+
+        let effectiveTasks: [DayTask]
+        switch fresh.taskSource {
+        case .templateTasks:
+            effectiveTasks = nestedTasks
+        case .executionFill, .noTasks:
+            effectiveTasks = []
+        }
+
+        let block = DayBlock(
+            id: blockID,
+            title: trimmed,
+            type: fresh.type,
+            state: .upcoming,
+            startTime: start,
+            endTime: end,
+            flowMode: fresh.flowMode,
+            taskSource: fresh.taskSource,
+            fillMatchesType: fresh.fillMatchesType,
+            fillRule: fresh.taskSource == .executionFill ? fresh.fillRule : nil,
+            tasks: effectiveTasks,
+            isRepeatable: fresh.isRepeatable,
+            pinsToClock: false,
+            schedulingPriority: fresh.schedulingPriority,
+            compactPresentation: fresh.compactPresentation,
+            locksPlannedDuration: fresh.locksPlannedDuration,
+            timelineGlyph: fresh.timelineGlyph,
+            timelineAccentHex: fresh.timelineAccentHex
+        )
+
+        withAnimation(
+            .spring(response: 0.36, dampingFraction: 0.88, blendDuration: 0.02)
+        ) {
+            let safeIndex = min(max(insertionIndex, 0), blocks.count)
+            blocks.insert(block, at: safeIndex)
+            formulaNominalMinutesByBlockID[block.id] = minutes
+            rechainFormulaTimesAfterStructuralEdit()
+            deriveBlockStates()
+            if isFormulaRunLive || isFormulaRunStopped {
+                injectScheduleBlocksIntoTimeline()
+            }
+        }
+        persistCurrentBlocks()
+
+        if fresh.taskSource == .executionFill,
+           TodayDisplayPreferences.pullsTasksFromExecutionPoolPreference() {
+            refillSchedulesFromPool()
+        }
+
+        CueInToastCenter.shared.show(
+            icon: fresh.type.icon,
+            title: "Block added",
+            message: trimmed,
+            tint: fresh.type.accent,
             undoTitle: "Undo"
         ) { [self] in
             self.deleteFormulaBlock(blockID: block.id)

@@ -70,7 +70,7 @@ struct TaskDetailSheet: View {
             }
             .navigationTitle("Task")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(CueInThemePreference.current.colorScheme, for: .navigationBar)
             .toolbar {
                 CueInEditorToolbar(
                     saveEnabled: canSave,
@@ -90,7 +90,7 @@ struct TaskDetailSheet: View {
                 Text("This can't be undone.")
             }
         }
-        .preferredColorScheme(.dark)
+        .cueInPreferredColorScheme()
         .onAppear {
             if case .create = mode, let cfg = configureCreateDraft {
                 cfg(&draft)

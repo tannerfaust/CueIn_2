@@ -4,10 +4,14 @@ import SwiftUI
 /// Root container with content flowing under a floating bottom control cluster.
 
 struct AppShellView: View {
-    private enum TodaySheetRoute {
-        case formulaPicker
-        case timelineQuickCapture
-        case scheduleBlockTask
+    private enum ShellFabMotion {
+        static let spring = Animation.spring(response: 0.36, dampingFraction: 0.86)
+    }
+
+    private enum AuxiliaryTaskSheet: String, Identifiable {
+        case createProject
+        case createField
+        var id: String { rawValue }
     }
 
     @AppStorage(DayEngineMode.storageKey) private var todayModeRawValue = DayEngineMode.taskLed.rawValue
@@ -15,17 +19,25 @@ struct AppShellView: View {
         = TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue
     @AppStorage(AppTab.storageKey) private var storedTabsRaw = AppTab.storageValue(for: AppTab.defaultTabs)
     @State private var selectedTab: AppTab = .taskLed
-    @State private var showAddSheet = false
+    @State private var showShellQuickCapture = false
+    @State private var showAntiTodoCapture = false
+    @State private var fabOverflowPresented = false
+    @State private var showFabBlockLibrary = false
+    @State private var showHubOverflowSheet = false
+    @State private var showStatsOverflowSheet = false
+    @State private var auxiliaryTaskSheet: AuxiliaryTaskSheet?
     @State private var showExecutionSheet = false
     @State private var showTimelineCapture = false
     @State private var showScheduleBlockTaskSheet = false
     @State private var screenSafeAreaBottom: CGFloat = 0
-    @State private var pendingTodaySheetRoute: TodaySheetRoute?
     @State private var showDevCaptureSheet = false
+    /// Tracks Timer / Sounds tab switches initiated from Hub tiles so a leading back control can return to Hub.
+    @State private var auxiliaryTabOpenedFromHub: AppTab? = nil
     @AppStorage("cuein.devNotebook.showCaptureButton") private var showDevNotebookCaptureButton = false
     @Bindable private var toastCenter = CueInToastCenter.shared
     @Bindable private var todayViewModel = TodayViewModel.shared
     @Bindable private var devNotebookContext = DevNotebookContext.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -44,6 +56,15 @@ struct AppShellView: View {
                 )
                 .onPreferenceChange(BottomSafeAreaKey.self) { screenSafeAreaBottom = $0 }
             tabContent
+            if fabOverflowPresented {
+                Color.black.opacity(0.36)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        dismissFabOverflow()
+                    }
+                    .transition(.opacity)
+            }
             bottomFeedbackAndBar
             devNotebookFloatingControl
         }
@@ -53,6 +74,12 @@ struct AppShellView: View {
             DevNotebookContext.shared.selectedTab = selectedTab
         }
         .onChange(of: selectedTab) { _, newValue in
+            if fabOverflowPresented { fabOverflowPresented = false }
+            if newValue == .hub {
+                auxiliaryTabOpenedFromHub = nil
+            } else if newValue != .pomodoro && newValue != .sounds {
+                auxiliaryTabOpenedFromHub = nil
+            }
             applyNavigationSideEffects(for: newValue)
             DevNotebookContext.shared.selectedTab = newValue
             DevNotebookContext.shared.screenLabel = nil
@@ -61,9 +88,23 @@ struct AppShellView: View {
             guard !tabs.contains(selectedTab) else { return }
             selectedTab = tabs.first ?? .hub
         }
-        .sheet(isPresented: $showAddSheet, onDismiss: handleAddSheetDismiss) {
-            sheetContent
-                .presentationDetents(sheetDetents)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                PomodoroStore.shared.refreshFromWallClockIfNeeded()
+            }
+        }
+        .sheet(isPresented: $showShellQuickCapture) {
+            QuickCaptureSheet(
+                onDismiss: { showShellQuickCapture = false },
+                onExpand: { _ in showShellQuickCapture = false }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showAntiTodoCapture) {
+            AntiTodoCaptureSheet(store: .shared, onDismiss: { showAntiTodoCapture = false })
+                .presentationDetents([.medium])
                 .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
                 .presentationDragIndicator(.visible)
         }
@@ -95,6 +136,48 @@ struct AppShellView: View {
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showFabBlockLibrary) {
+            BlockTemplateLibrarySheet(
+                onPick: { template in
+                    todayViewModel.insertFormulaBlock(from: template)
+                    showFabBlockLibrary = false
+                },
+                onDismiss: { showFabBlockLibrary = false }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
+        .sheet(isPresented: $showHubOverflowSheet) {
+            hubOverflowCreateSheet
+                .presentationDetents([.medium])
+                .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showStatsOverflowSheet) {
+            statsOverflowPlaceholderSheet
+                .presentationDetents([.medium])
+                .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $auxiliaryTaskSheet) { sheet in
+            switch sheet {
+            case .createProject:
+                CreateProjectSheet(mode: .create(fieldID: nil), store: .shared) {
+                    auxiliaryTaskSheet = nil
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+            case .createField:
+                CreateFieldSheet(mode: .create, store: .shared) {
+                    auxiliaryTaskSheet = nil
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+            }
+        }
         .sheet(isPresented: $showDevCaptureSheet) {
             DevNotebookCaptureSheet(isPresented: $showDevCaptureSheet, defaultKind: .moduleIdea) { kind, body in
                 let snap = DevNotebookContext.shared.makeSnapshot()
@@ -110,6 +193,28 @@ struct AppShellView: View {
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }
         .animation(.easeInOut(duration: 0.18), value: selectedTab)
+        .onReceive(NotificationCenter.default.publisher(for: .cueInOpenFocus)) { _ in
+            auxiliaryTabOpenedFromHub = .pomodoro
+            selectedTab = .pomodoro
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .cueInOpenSounds)) { _ in
+            auxiliaryTabOpenedFromHub = .sounds
+            selectedTab = .sounds
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .cueInSwitchTab)) { note in
+            guard let raw = note.userInfo?[CueInShellNotification.switchTabUserInfoKey] as? String,
+                  let tab = AppTab(rawValue: raw)
+            else { return }
+            switch tab {
+            case .pomodoro:
+                auxiliaryTabOpenedFromHub = .pomodoro
+            case .sounds:
+                auxiliaryTabOpenedFromHub = .sounds
+            default:
+                break
+            }
+            selectedTab = tab
+        }
     }
 
     // MARK: - Tab Content
@@ -127,8 +232,25 @@ struct AppShellView: View {
             StatsView()
         case .goals:
             GoalsTabView()
+        case .antiTodo:
+            AntiTodoListView()
+        case .quantifiedSelf:
+            QuantifiedSelfView()
+        case .pomodoro:
+            PomodoroView(onRequestReturnToHub: hubBackActionIfNeeded(for: .pomodoro))
+        case .sounds:
+            FocusTabView(onRequestReturnToHub: hubBackActionIfNeeded(for: .sounds))
         case .hub, .more:
             HubView()
+        }
+    }
+
+    /// Leading "back to Hub" for Timer / Sounds only when the user opened that tab from a Hub tool tile.
+    private func hubBackActionIfNeeded(for tab: AppTab) -> (() -> Void)? {
+        guard auxiliaryTabOpenedFromHub == tab else { return nil }
+        return {
+            selectedTab = .hub
+            auxiliaryTabOpenedFromHub = nil
         }
     }
 
@@ -177,7 +299,29 @@ struct AppShellView: View {
 
     /// Hide the dev capture control while primary shell sheets are up (avoids stacked presentations).
     private var shellSheetsBlockDevCapture: Bool {
-        showAddSheet || showExecutionSheet || showTimelineCapture || showScheduleBlockTaskSheet
+        showShellQuickCapture
+            || showAntiTodoCapture
+            || showFabBlockLibrary
+            || showHubOverflowSheet
+            || showStatsOverflowSheet
+            || auxiliaryTaskSheet != nil
+            || showExecutionSheet
+            || showTimelineCapture
+            || showScheduleBlockTaskSheet
+    }
+
+    /// Clears the floating tab bar + FAB column using the **same** heights as on-screen chrome
+    /// (not the full bolt stack height from ``CueInLayout`` when the bolt is hidden).
+    private var shellToastBottomInset: CGFloat {
+        let showExecution = isTodayDestination(selectedTab) && shouldShowFloatingExecutionButton
+        let fabColumnHeight: CGFloat = showExecution
+            ? CueInLayout.fabExecutionDiameter + CueInLayout.floatingFabVerticalSpacing + CueInLayout.fabPlusDiameter
+            : CueInLayout.fabPlusDiameter
+        let chromeHeight = max(CueInLayout.floatingBarHeight, fabColumnHeight)
+        return chromeHeight
+            + CueInLayout.barBottomPadding(safeAreaBottom: screenSafeAreaBottom)
+            + (screenSafeAreaBottom > 0 ? 9 : 3)
+            + 8
     }
 
     private var bottomFeedbackAndBar: some View {
@@ -196,14 +340,13 @@ struct AppShellView: View {
                 )
                 .accessibilityLabel("\(toast.title), \(toast.message), \(toast.undoTitle)")
                 .padding(.horizontal, CueInSpacing.screenHorizontal)
-                // Keep the toast above the tallest FAB column + tab bar.
-                .padding(.bottom, max(CueInLayout.floatingBarHeight, CueInLayout.stackedFabColumnHeight) + 16)
+                .padding(.bottom, shellToastBottomInset)
                 .zIndex(2)
                 .transition(.move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.98)))
             }
 
             bottomBar
-                .zIndex(1)
+                .zIndex(3)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
@@ -223,11 +366,32 @@ struct AppShellView: View {
         visibleTabs.contains(selectedTab) ? selectedTab : (visibleTabs.first ?? .hub)
     }
 
+    private var floatingPlusAccessibilityLabel: String {
+        switch selectedTab {
+        case .antiTodo: return "Add anti to-do"
+        case .quantifiedSelf: return "New tracker"
+        case .pomodoro, .sounds: return "Quick capture"
+        default: return "Add task"
+        }
+    }
+
+    private var floatingPlusAccessibilityHint: String? {
+        switch selectedTab {
+        case .antiTodo:
+            return "Adds something you are choosing not to do."
+        case .quantifiedSelf:
+            return "Opens the new tracker sheet for Measures."
+        default:
+            return nil
+        }
+    }
+
     /// Trailing **two separate** circular actions: execution (Today only) above add.
     /// Formula preview starts from Today chrome; after a schedule starts, the floating bolt
     /// becomes the schedule action entry point above add.
     private var floatingFabColumn: some View {
         let showExecution = isTodayDestination(selectedTab) && shouldShowFloatingExecutionButton
+        let rows = fabOverflowRows
         return VStack(spacing: CueInLayout.floatingFabVerticalSpacing) {
             if showExecution {
                 FloatingLightningButton { showExecutionSheet = true }
@@ -238,10 +402,43 @@ struct AppShellView: View {
                         )
                     )
             }
-            FloatingPlusButton { showAddSheet = true }
+            FloatingPlusButton(
+                onTap: {
+                    dismissFabOverflow()
+                    if selectedTab == .antiTodo {
+                        showAntiTodoCapture = true
+                    } else if selectedTab == .quantifiedSelf {
+                        NotificationCenter.default.post(name: .cueInShowAddMeasureTracker, object: nil)
+                    } else {
+                        showShellQuickCapture = true
+                    }
+                },
+                onLongPress: {
+                    guard !rows.isEmpty else { return }
+                    withAnimation(ShellFabMotion.spring) {
+                        fabOverflowPresented = true
+                    }
+                },
+                accessibilityLabelText: floatingPlusAccessibilityLabel,
+                accessibilityHintOverride: floatingPlusAccessibilityHint
+            )
+        }
+        // Menu lives in a non-layout overlay so the tab bar height never jumps when it opens.
+        .overlay(alignment: .bottomTrailing) {
+            if fabOverflowPresented, !rows.isEmpty {
+                ShellFabOverflowMenu(rows: rows)
+                    .offset(y: -(CueInLayout.fabPlusDiameter + 12))
+            }
         }
         .animation(fabSpring, value: showExecution)
         .dynamicTypeSize(.xSmall ... .large)
+    }
+
+    private func dismissFabOverflow() {
+        guard fabOverflowPresented else { return }
+        withAnimation(ShellFabMotion.spring) {
+            fabOverflowPresented = false
+        }
     }
 
     private var fabSpring: Animation {
@@ -260,97 +457,147 @@ struct AppShellView: View {
             .combined(with: .scale(scale: 0.94, anchor: .bottom))
     }
 
-    // MARK: - Sheets
+    // MARK: - FAB overflow (long-press)
 
-    @ViewBuilder
-    private var sheetContent: some View {
+    private var fabOverflowRows: [ShellFabOverflowMenu.Row] {
         switch selectedTab {
-        case .schedule, .taskLed:
-            if todayMode == .taskLed {
-                TimelineActionSheet(
-                    onAddTask: {
-                        pendingTodaySheetRoute = .timelineQuickCapture
-                        showAddSheet = false
-                    },
-                    onDismiss: { showAddSheet = false }
-                )
-            } else {
-                AddItemSheetView(
-                    onChangeFormula: {
-                        pendingTodaySheetRoute = .formulaPicker
-                        showAddSheet = false
-                    },
-                    onAddBlock: {
-                        todayViewModel.insertFormulaBlock(
-                            title: "New Block",
-                            type: .focus,
-                            flowMode: .blocking,
-                            durationMinutes: 45
-                        )
-                        showAddSheet = false
-                    },
-                    onAddTask: {
-                        pendingTodaySheetRoute = .scheduleBlockTask
-                        showAddSheet = false
-                    },
-                    onAddRoutineBlock: {
-                        todayViewModel.insertFormulaBlock(
-                            title: "Routine Block",
-                            type: .routine,
-                            flowMode: .blocking,
-                            durationMinutes: 30,
-                            tasks: [
-                                DayTask(title: "First step", isPrimary: true, isRepeating: true)
-                            ],
-                            isRepeatable: true
-                        )
-                        showAddSheet = false
-                    },
-                    onAddQuickItem: {
-                        todayViewModel.insertFormulaBlock(
-                            title: "Quick Item",
-                            type: .mini,
-                            flowMode: .flowing,
-                            durationMinutes: 10
-                        )
-                        showAddSheet = false
-                    },
-                    onDismiss: { showAddSheet = false }
-                )
-            }
-        case .tasks, .projects:
-            QuickCaptureSheet(
-                onDismiss: { showAddSheet = false },
-                onExpand:  { _ in showAddSheet = false }
-            )
+        case .schedule:
+            return todayMode == .formulaBased ? algorithmFabOverflowRows : []
+        case .taskLed:
+            return todayMode == .taskLed ? taskLedFabOverflowRows : []
+        case .tasks:
+            return tasksFabOverflowRows
+        case .projects:
+            return projectsFabOverflowRows
         case .stats:
-            placeholderSheet(title: "Log Entry", items: [
-                ("square.and.pencil", "Quick Log",  "Record a data point"),
-                ("note.text",         "Add Note",   "Attach a note to today"),
-            ])
+            return statsFabOverflowRows
+        case .antiTodo, .quantifiedSelf, .pomodoro, .sounds:
+            return []
         case .goals, .hub, .more:
-            hubCreateSheet
+            return hubFabOverflowRows
         }
     }
 
-    private var hubCreateSheet: some View {
-        CueInBottomSheet(title: "Create", onDismiss: { showAddSheet = false }) {
-            VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-                SheetActionRow(
-                    icon: "target",
-                    title: "New Goal",
-                    subtitle: "Define a grand goal and strategy"
-                ) {
-                    showAddSheet = false
-                    NotificationCenter.default.post(name: .cueInShowCreateGoal, object: nil)
+    private var algorithmFabOverflowRows: [ShellFabOverflowMenu.Row] {
+        [
+            .init(icon: "rectangle.stack.fill.badge.plus", title: "New block", subtitle: "Insert a fresh time block") {
+                dismissFabOverflow()
+                todayViewModel.insertFormulaBlock(
+                    title: "New Block",
+                    type: .focus,
+                    flowMode: .blocking,
+                    durationMinutes: 45
+                )
+            },
+            .init(icon: "books.vertical.fill", title: "Block library", subtitle: "Saved shapes and samples") {
+                dismissFabOverflow()
+                showFabBlockLibrary = true
+            },
+            .init(icon: "checkmark.circle.fill", title: "Add task to block", subtitle: "Attach to an existing block") {
+                dismissFabOverflow()
+                deferPresentation { showScheduleBlockTaskSheet = true }
+            },
+            .init(icon: "arrow.triangle.2.circlepath", title: "Change schedule", subtitle: "Pick a different day framework") {
+                dismissFabOverflow()
+                deferPresentation {
+                    NotificationCenter.default.post(name: .cueInShowTodayFormulaPicker, object: nil)
                 }
+            },
+            .init(icon: "repeat", title: "Routine block", subtitle: "Repeatable routine slice") {
+                dismissFabOverflow()
+                todayViewModel.insertFormulaBlock(
+                    title: "Routine Block",
+                    type: .routine,
+                    flowMode: .blocking,
+                    durationMinutes: 30,
+                    tasks: [
+                        DayTask(title: "First step", isPrimary: true, isRepeating: true)
+                    ],
+                    isRepeatable: true
+                )
+            },
+            .init(icon: "bolt.fill", title: "Quick item", subtitle: "Small flowing slice") {
+                dismissFabOverflow()
+                todayViewModel.insertFormulaBlock(
+                    title: "Quick Item",
+                    type: .mini,
+                    flowMode: .flowing,
+                    durationMinutes: 10
+                )
+            },
+        ]
+    }
 
+    private var taskLedFabOverflowRows: [ShellFabOverflowMenu.Row] {
+        [
+            .init(icon: "calendar.day.timeline.left", title: "Timeline capture", subtitle: "Add straight to the day stream") {
+                dismissFabOverflow()
+                deferPresentation { showTimelineCapture = true }
+            },
+        ]
+    }
+
+    private var tasksFabOverflowRows: [ShellFabOverflowMenu.Row] {
+        [
+            .init(icon: "folder.badge.plus", title: "New project", subtitle: "Organize work under a project") {
+                dismissFabOverflow()
+                auxiliaryTaskSheet = .createProject
+            },
+            .init(icon: "square.grid.2x2.fill", title: "New field", subtitle: "Add an area to group projects") {
+                dismissFabOverflow()
+                auxiliaryTaskSheet = .createField
+            },
+        ]
+    }
+
+    private var projectsFabOverflowRows: [ShellFabOverflowMenu.Row] {
+        [
+            .init(icon: "folder.badge.plus", title: "New project", subtitle: "Start a new project") {
+                dismissFabOverflow()
+                auxiliaryTaskSheet = .createProject
+            },
+        ]
+    }
+
+    private var statsFabOverflowRows: [ShellFabOverflowMenu.Row] {
+        [
+            .init(icon: "square.and.pencil", title: "Quick log", subtitle: "Record a data point") {
+                dismissFabOverflow()
+                showStatsOverflowSheet = true
+            },
+            .init(icon: "note.text", title: "Add note", subtitle: "Attach a note to today") {
+                dismissFabOverflow()
+                showStatsOverflowSheet = true
+            },
+        ]
+    }
+
+    private var hubFabOverflowRows: [ShellFabOverflowMenu.Row] {
+        [
+            .init(icon: "target", title: "New goal", subtitle: "Define a grand goal and strategy") {
+                dismissFabOverflow()
+                NotificationCenter.default.post(name: .cueInShowCreateGoal, object: nil)
+            },
+            .init(icon: "doc.text.fill", title: "New schedule", subtitle: "Build a day template") {
+                dismissFabOverflow()
+                showHubOverflowSheet = true
+            },
+            .init(icon: "gearshape.fill", title: "Settings", subtitle: "App preferences") {
+                dismissFabOverflow()
+                showHubOverflowSheet = true
+            },
+        ]
+    }
+
+    private var hubOverflowCreateSheet: some View {
+        CueInBottomSheet(title: "Create", onDismiss: { showHubOverflowSheet = false }) {
+            VStack(alignment: .leading, spacing: CueInSpacing.sm) {
                 SheetActionRow(
                     icon: "doc.text.fill",
                     title: "New Schedule",
                     subtitle: "Build a day template"
                 ) {
-                    showAddSheet = false
+                    showHubOverflowSheet = false
                 }
 
                 SheetActionRow(
@@ -358,45 +605,38 @@ struct AppShellView: View {
                     title: "Settings",
                     subtitle: "App preferences"
                 ) {
-                    showAddSheet = false
+                    showHubOverflowSheet = false
                 }
             }
         }
     }
 
-    @ViewBuilder
-    private func placeholderSheet(title: String, items: [(String, String, String)]) -> some View {
-        CueInBottomSheet(title: title, onDismiss: { showAddSheet = false }) {
+    private var statsOverflowPlaceholderSheet: some View {
+        CueInBottomSheet(title: "Log entry", onDismiss: { showStatsOverflowSheet = false }) {
             VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-                ForEach(items, id: \.1) { item in
-                    SheetActionRow(icon: item.0, title: item.1, subtitle: item.2) {
-                        showAddSheet = false
-                    }
+                SheetActionRow(
+                    icon: "square.and.pencil",
+                    title: "Quick Log",
+                    subtitle: "Record a data point"
+                ) {
+                    showStatsOverflowSheet = false
+                }
+
+                SheetActionRow(
+                    icon: "note.text",
+                    title: "Add Note",
+                    subtitle: "Attach a note to today"
+                ) {
+                    showStatsOverflowSheet = false
                 }
             }
         }
     }
 
-    private func handleAddSheetDismiss() {
-        guard isTodayDestination(selectedTab), let route = pendingTodaySheetRoute else { return }
-        pendingTodaySheetRoute = nil
-
-        switch route {
-        case .formulaPicker:
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(150))
-                NotificationCenter.default.post(name: .cueInShowTodayFormulaPicker, object: nil)
-            }
-        case .timelineQuickCapture:
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(150))
-                showTimelineCapture = true
-            }
-        case .scheduleBlockTask:
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(150))
-                showScheduleBlockTaskSheet = true
-            }
+    private func deferPresentation(_ body: @escaping () -> Void) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            body()
         }
     }
 
@@ -413,10 +653,6 @@ struct AppShellView: View {
         case .formulaBased:
             return todayViewModel.hasFormulaRunStarted
         }
-    }
-
-    private var sheetDetents: Set<PresentationDetent> {
-        (selectedTab == .tasks || selectedTab == .projects) ? [.medium, .large] : [.medium]
     }
 
     private func isTodayDestination(_ tab: AppTab) -> Bool {
@@ -445,5 +681,5 @@ private struct BottomSafeAreaKey: PreferenceKey {
 
 #Preview {
     AppShellView()
-        .preferredColorScheme(.dark)
+        .cueInPreferredColorScheme()
 }

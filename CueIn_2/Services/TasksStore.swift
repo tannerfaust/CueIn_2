@@ -20,6 +20,8 @@ final class TasksStore {
 
     static let shared = TasksStore()
 
+    private var suppressSyncRecording = false
+
     // MARK: State (published)
 
     var fields: [Field] = []
@@ -34,6 +36,12 @@ final class TasksStore {
     // MARK: Init
 
     private init() {
+        if CueInAppDataService.isGimmickDemoRemoved {
+            self.fields = []
+            self.projects = []
+            self.tasks = []
+            return
+        }
         let seed = Self.makeSeed()
         self.fields = seed.fields
         self.projects = seed.projects
@@ -217,6 +225,33 @@ final class TasksStore {
         guard let i = tasks.firstIndex(where: { $0.id == id }) else { return }
         guard tasks[i].priority != priority else { return }
         tasks[i].priority = priority
+        tasks[i].updatedAt = Date()
+        recordSyncSnapshot()
+    }
+
+    func setTaskStatus(id: UUID, status: TaskStatus) {
+        guard let i = tasks.firstIndex(where: { $0.id == id }) else { return }
+        guard tasks[i].status != status else { return }
+        switch status {
+        case .inbox:
+            tasks[i].scheduledDate = nil
+            tasks[i].completedAt = nil
+            tasks[i].status = .inbox
+        case .scheduled:
+            tasks[i].completedAt = nil
+            tasks[i].status = .scheduled
+        case .active:
+            tasks[i].completedAt = nil
+            tasks[i].status = .active
+        case .paused:
+            tasks[i].completedAt = nil
+            tasks[i].status = .paused
+        case .completed:
+            tasks[i].status = .completed
+            tasks[i].completedAt = tasks[i].completedAt ?? Date()
+        case .archived:
+            tasks[i].status = .archived
+        }
         tasks[i].updatedAt = Date()
         recordSyncSnapshot()
     }
@@ -612,7 +647,18 @@ final class TasksStore {
         recordSyncSnapshot()
     }
 
+    func replaceFromSync(fields syncedFields: [Field], projects syncedProjects: [Project], tasks syncedTasks: [TaskItem]) {
+        UserDefaults.standard.set(true, forKey: CueInAppDataKeys.gimmickDemoRemoved)
+        suppressSyncRecording = true
+        fields = syncedFields
+        projects = syncedProjects
+        tasks = syncedTasks
+        taskListOrder = [:]
+        suppressSyncRecording = false
+    }
+
     private func recordSyncSnapshot() {
+        guard !suppressSyncRecording else { return }
         CueInSyncRuntimeBridge.shared.recordTasksSnapshot()
     }
 }

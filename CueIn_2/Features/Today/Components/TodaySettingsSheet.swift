@@ -686,5 +686,5 @@ private struct TodaySettingsBindingRollback: Equatable {
             onDismiss: {}
         )
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

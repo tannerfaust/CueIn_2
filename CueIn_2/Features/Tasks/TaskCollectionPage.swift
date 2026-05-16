@@ -9,6 +9,7 @@ struct TaskCollectionPage: View {
     let onDeleteTask: (TaskItem, String) -> Void
 
     @State private var allScope: AllTasksScope = .open
+    @State private var actionTask: TaskItem?
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -33,6 +34,26 @@ struct TaskCollectionPage: View {
         .background(CueInColors.background.ignoresSafeArea())
         .navigationTitle(kind.title)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $actionTask) { task in
+            TaskRowActionsSheet(
+                task: task,
+                store: store,
+                onDismiss: {
+                    actionTask = nil
+                },
+                onOpen: {
+                    actionTask = nil
+                    onOpenTask(task.id)
+                },
+                onDelete: {
+                    actionTask = nil
+                    onDeleteTask(task, kind.listKeyPrefix)
+                }
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
     }
 
     @ViewBuilder
@@ -125,7 +146,7 @@ private extension TaskCollectionPage {
             if open.isEmpty && done.isEmpty {
                 TaskEmptyPanel(
                     icon: "sun.max",
-                    title: "Today is clear",
+                    title: "To-do is clear",
                     actionTitle: "New task",
                     action: { onCreateTask(.today()) }
                 )
@@ -250,15 +271,10 @@ private extension TaskCollectionPage {
             sectionIcon: sectionIcon,
             sectionTint: sectionTint,
             onPoolMove: onPoolMove,
-            onDeleteTask: onDeleteTask
+            onDeleteTask: onDeleteTask,
+            onMoreActions: { task in actionTask = task }
         )
-        .padding(CueInSpacing.md)
-        .background(CueInColors.surfacePrimary)
-        .clipShape(RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous)
-                .strokeBorder(CueInColors.cardBorder, lineWidth: 0.6)
-        }
+        .padding(.top, sectionTitle == nil ? 0 : CueInSpacing.xs)
     }
 
     struct FieldTaskGroup {
@@ -310,45 +326,35 @@ private struct TaskCollectionHeader: View {
     let onCreate: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.md) {
-            HStack(alignment: .center, spacing: CueInSpacing.md) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(kind.tint.opacity(0.14))
-                    Image(systemName: kind.icon)
-                        .font(.system(size: 21, weight: .semibold))
-                        .foregroundStyle(kind.tint)
+        HStack(alignment: .firstTextBaseline, spacing: CueInSpacing.md) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(kind.title)
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(CueInColors.textPrimary)
+                    .lineLimit(1)
+
+                HStack(spacing: 6) {
+                    Text("\(openCount) open")
+                    Text("·")
+                    Text("\(doneCount) done")
                 }
-                .frame(width: 54, height: 54)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(kind.title)
-                        .font(CueInTypography.largeTitle)
-                        .foregroundStyle(CueInColors.textPrimary)
-
-                    HStack(spacing: 6) {
-                        Text("\(openCount) open")
-                        Text("·")
-                        Text("\(doneCount) done")
-                    }
-                    .font(CueInTypography.caption)
-                    .foregroundStyle(CueInColors.textSecondary)
-                    .monospacedDigit()
-                }
-
-                Spacer(minLength: CueInSpacing.md)
-
-                Button(action: onCreate) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(CueInColors.textPrimary)
-                        .frame(width: 40, height: 40)
-                        .contentShape(Circle())
-                        .modifier(CueInStableGlassCircleModifier())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("New task")
+                .font(CueInTypography.caption)
+                .foregroundStyle(CueInColors.textTertiary)
+                .monospacedDigit()
             }
+
+            Spacer(minLength: CueInSpacing.md)
+
+            Button(action: onCreate) {
+                Image(systemName: "plus")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(CueInColors.textPrimary)
+                    .frame(width: 36, height: 36)
+                    .contentShape(Circle())
+                    .modifier(CueInStableGlassCircleModifier())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("New task")
         }
     }
 }

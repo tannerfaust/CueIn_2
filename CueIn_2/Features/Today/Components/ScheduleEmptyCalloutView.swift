@@ -55,5 +55,5 @@ struct ScheduleEmptyCalloutView: View {
         CueInColors.background.ignoresSafeArea()
         ScheduleEmptyCalloutView()
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

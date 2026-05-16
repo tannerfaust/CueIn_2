@@ -15,14 +15,9 @@ struct ProjectRow: View {
 
     var body: some View {
         HStack(spacing: CueInSpacing.md) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(color.opacity(0.14))
-                    .frame(width: 26, height: 26)
-                Image(systemName: project.resolvedIconSystemName)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(color)
-            }
+            Circle()
+                .fill(color.opacity(0.78))
+                .frame(width: 7, height: 7)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -38,10 +33,6 @@ struct ProjectRow: View {
                                 .font(Font.system(size: 10, weight: .medium))
                         }
                         .foregroundStyle(project.status.tint)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(project.status.tint.opacity(0.12))
-                        .clipShape(Capsule())
                     }
                 }
 
@@ -55,7 +46,7 @@ struct ProjectRow: View {
                             .foregroundStyle(CueInColors.textTertiary)
                         Text("\(stats.done) done")
                             .font(CueInTypography.micro)
-                            .foregroundStyle(color.opacity(0.7))
+                            .foregroundStyle(CueInColors.textTertiary)
                     }
                 }
             }
@@ -69,7 +60,7 @@ struct ProjectRow: View {
                             .fill(CueInColors.surfaceTertiary)
                             .frame(height: 3)
                         Capsule()
-                            .fill(color)
+                            .fill(CueInColors.textTertiary.opacity(0.7))
                             .frame(width: geo.size.width * progress, height: 3)
                             .animation(.easeInOut(duration: 0.4), value: progress)
                     }

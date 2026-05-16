@@ -176,5 +176,5 @@ struct ExecutionActionSheet: View {
         CueInColors.background.ignoresSafeArea()
         ExecutionActionSheet(onDismiss: {})
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

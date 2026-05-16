@@ -10,6 +10,32 @@ enum TasksRoute: Hashable {
     case project(UUID)
 }
 
+enum TasksWorklistKind: Hashable, Identifiable {
+    case tasks
+    case collection(TaskCollectionKind)
+    case archived
+    case completed
+    case saved
+    case habits
+    case rituals
+    case field(UUID)
+    case project(UUID)
+
+    var id: String {
+        switch self {
+        case .tasks: return "tasks"
+        case .collection(let kind): return "collection:\(kind.rawValue)"
+        case .archived: return "archived"
+        case .completed: return "completed"
+        case .saved: return "saved"
+        case .habits: return "habits"
+        case .rituals: return "rituals"
+        case .field(let id): return "field:\(id.uuidString)"
+        case .project(let id): return "project:\(id.uuidString)"
+        }
+    }
+}
+
 enum TaskCollectionKind: String, CaseIterable, Identifiable, Hashable {
     case today
     case inbox
@@ -20,7 +46,7 @@ enum TaskCollectionKind: String, CaseIterable, Identifiable, Hashable {
 
     var title: String {
         switch self {
-        case .today: return "Today"
+        case .today: return "To-do"
         case .inbox: return "Inbox"
         case .upcoming: return "Upcoming"
         case .all: return "All Tasks"
@@ -29,7 +55,7 @@ enum TaskCollectionKind: String, CaseIterable, Identifiable, Hashable {
 
     var shortTitle: String {
         switch self {
-        case .today: return "Today"
+        case .today: return "To-do"
         case .inbox: return "Inbox"
         case .upcoming: return "Next"
         case .all: return "All"

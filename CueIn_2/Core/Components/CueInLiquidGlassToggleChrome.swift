@@ -13,9 +13,9 @@ struct CueInLiquidGlassToggleShellModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.cueInGlass(
             .capsule,
-            tint: Color.white.opacity(0.08),
+            tint: CueInColors.activeHint,
             showsBorder: true,
-            borderColor: Color.white.opacity(0.12),
+            borderColor: CueInColors.cardBorder,
             borderWidth: 0.6
         )
     }
@@ -28,9 +28,9 @@ struct CueInLiquidGlassToggleThumb: View {
         Color.clear
             .cueInGlass(
                 .capsule,
-                tint: Color.white.opacity(0.16),
+                tint: CueInColors.activeHint,
                 showsBorder: true,
-                borderColor: Color.white.opacity(0.10),
+                borderColor: CueInColors.cardBorder,
                 borderWidth: 0.5
             )
     }

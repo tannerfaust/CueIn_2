@@ -41,5 +41,5 @@ struct CanvasDotsBackgroundView: View {
         CueInColors.background.ignoresSafeArea()
         CanvasDotsBackgroundView()
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

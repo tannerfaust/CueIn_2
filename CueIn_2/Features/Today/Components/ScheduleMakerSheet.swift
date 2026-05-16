@@ -1,5 +1,124 @@
 import SwiftUI
 
+// MARK: - ScheduleMakerDurationOverview
+/// Live total and per-block time shares while building an algorithm (updates as durations change).
+
+private struct ScheduleMakerDurationOverview: View {
+    let drafts: [ScheduleBlockDraft]
+
+    private var totalMinutes: Int {
+        drafts.reduce(0) { $0 + max($1.durationMinutes, 1) }
+    }
+
+    private var executionFillCount: Int {
+        drafts.filter { $0.assignsTasks && $0.poolFillEnabled }.count
+    }
+
+    private var noTasksCount: Int {
+        drafts.filter { !$0.assignsTasks }.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.sm) {
+            HStack(alignment: .firstTextBaseline, spacing: CueInSpacing.md) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Total duration")
+                        .font(CueInTypography.micro)
+                        .foregroundStyle(CueInColors.textTertiary)
+                    Text(ScheduleBlockFormat.durationLabel(minutes: totalMinutes))
+                        .font(CueInTypography.title)
+                        .foregroundStyle(CueInColors.textPrimary)
+                        .monospacedDigit()
+                }
+                Spacer(minLength: 0)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Blocks")
+                        .font(CueInTypography.micro)
+                        .foregroundStyle(CueInColors.textTertiary)
+                    Text("\(drafts.count)")
+                        .font(CueInTypography.title)
+                        .foregroundStyle(CueInColors.textPrimary)
+                        .monospacedDigit()
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: CueInSpacing.sm) {
+                    ForEach(drafts) { draft in
+                        blockShareChip(draft)
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+
+            HStack(spacing: CueInSpacing.sm) {
+                metaChip("\(drafts.count) \(drafts.count == 1 ? "block" : "blocks")")
+                metaChip(ScheduleBlockFormat.durationLabel(minutes: totalMinutes))
+                if executionFillCount > 0 {
+                    metaChip("\(executionFillCount) pool fill", tint: CueInColors.accentFocus)
+                }
+                if noTasksCount > 0 {
+                    metaChip("\(noTasksCount) time-only", tint: CueInColors.textTertiary)
+                }
+            }
+        }
+        .padding(CueInSpacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(CueInColors.surfacePrimary.opacity(0.92))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(CueInColors.divider.opacity(0.35), lineWidth: 0.5)
+        )
+    }
+
+    private func blockShareChip(_ draft: ScheduleBlockDraft) -> some View {
+        let m = max(draft.durationMinutes, 1)
+        let share = totalMinutes > 0 ? CGFloat(m) / CGFloat(totalMinutes) : 0
+        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(title.isEmpty ? "Untitled" : title)
+                .font(CueInTypography.captionMedium)
+                .foregroundStyle(title.isEmpty ? CueInColors.textTertiary : CueInColors.textPrimary)
+                .lineLimit(2)
+                .frame(maxWidth: 160, alignment: .leading)
+            Text(ScheduleBlockFormat.durationLabel(minutes: m))
+                .font(CueInTypography.micro)
+                .foregroundStyle(CueInColors.textSecondary)
+                .monospacedDigit()
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule(style: .continuous)
+                        .fill(CueInColors.surfaceTertiary.opacity(0.55))
+                    Capsule(style: .continuous)
+                        .fill(CueInColors.accentFocus.opacity(0.55))
+                        .frame(width: max(4, geo.size.width * share))
+                }
+            }
+            .frame(height: 5)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(CueInColors.surfaceSecondary.opacity(0.55))
+        )
+    }
+
+    private func metaChip(_ text: String, tint: Color? = nil) -> some View {
+        Text(text)
+            .font(CueInTypography.micro)
+            .foregroundStyle(tint ?? CueInColors.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(CueInColors.surfaceSecondary.opacity(0.65))
+            )
+    }
+}
+
 // MARK: - ScheduleMakerSheet
 /// Minimalist schedule builder.
 ///
@@ -38,8 +157,8 @@ struct ScheduleMakerSheet: View {
 
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: CueInSpacing.lg) {
+                        ScheduleMakerDurationOverview(drafts: blocks)
                         headerRow
-                        metaChips
                         blocksSection
                     }
                     .padding(.horizontal, CueInSpacing.screenHorizontal)
@@ -53,7 +172,7 @@ struct ScheduleMakerSheet: View {
                     expandedBlockID = blocks.first?.id
                 }
             }
-            .navigationTitle("Schedule")
+            .navigationTitle("Algorithm")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -109,31 +228,6 @@ struct ScheduleMakerSheet: View {
                 .font(CueInTypography.title)
                 .foregroundStyle(CueInColors.textPrimary)
         }
-    }
-
-    private var metaChips: some View {
-        HStack(spacing: CueInSpacing.sm) {
-            metaChip("\(blocks.count) \(blocks.count == 1 ? "block" : "blocks")")
-            metaChip(ScheduleBlockFormat.durationLabel(minutes: totalMinutes))
-            if executionFillCount > 0 {
-                metaChip("\(executionFillCount) pool fill", tint: CueInColors.accentFocus)
-            }
-            if noTasksCount > 0 {
-                metaChip("\(noTasksCount) time-only", tint: CueInColors.textTertiary)
-            }
-        }
-    }
-
-    private func metaChip(_ text: String, tint: Color? = nil) -> some View {
-        Text(text)
-            .font(CueInTypography.micro)
-            .foregroundStyle(tint ?? CueInColors.textSecondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(CueInColors.surfaceSecondary.opacity(0.65))
-            )
     }
 
     // MARK: - Blocks section
@@ -291,14 +385,6 @@ struct ScheduleMakerSheet: View {
         blocks.reduce(0) { $0 + max($1.durationMinutes, 1) }
     }
 
-    private var executionFillCount: Int {
-        blocks.filter { $0.assignsTasks && $0.poolFillEnabled }.count
-    }
-
-    private var noTasksCount: Int {
-        blocks.filter { !$0.assignsTasks }.count
-    }
-
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && blocks.contains { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -454,5 +540,5 @@ private struct BlockRow: View {
         onSave: { _ in },
         onDismiss: {}
     )
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

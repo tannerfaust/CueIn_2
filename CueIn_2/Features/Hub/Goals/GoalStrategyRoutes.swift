@@ -13,7 +13,6 @@ enum GoalStrategySheet: Identifiable, Hashable {
     case createSubgoal(goalID: UUID, stageID: UUID)
     case editSubgoal(goalID: UUID, stageID: UUID, subgoalID: UUID)
     case linkWork(goalID: UUID, stageID: UUID, subgoalID: UUID)
-    case review(goalID: UUID)
 
     var id: String {
         switch self {
@@ -31,8 +30,6 @@ enum GoalStrategySheet: Identifiable, Hashable {
             return "editSubgoal:\(goalID.uuidString):\(stageID.uuidString):\(subgoalID.uuidString)"
         case .linkWork(let goalID, let stageID, let subgoalID):
             return "linkWork:\(goalID.uuidString):\(stageID.uuidString):\(subgoalID.uuidString)"
-        case .review(let goalID):
-            return "review:\(goalID.uuidString)"
         }
     }
 }

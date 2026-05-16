@@ -100,7 +100,7 @@ struct CreateProjectSheet: View {
                 Text("Tasks will remain, unassigned.")
             }
         }
-        .preferredColorScheme(.dark)
+        .cueInPreferredColorScheme()
     }
 
     // MARK: Sections

@@ -3,6 +3,7 @@ import SwiftUI
 // MARK: - DevNotebookView
 
 struct DevNotebookView: View {
+    @Environment(\.dismiss) private var dismiss
     @AppStorage("cuein.devNotebook.showCaptureButton") private var showCaptureButton = false
     @Bindable private var store = DevNotebookStore.shared
     @State private var filter: DevNotebookFilter = .all
@@ -63,6 +64,16 @@ struct DevNotebookView: View {
         .navigationTitle("Dev notebook")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(CueInColors.textPrimary)
+                }
+                .accessibilityLabel("Back")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Section("All notes") {
@@ -267,5 +278,5 @@ private struct DevNotebookRow: View {
     NavigationStack {
         DevNotebookView()
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

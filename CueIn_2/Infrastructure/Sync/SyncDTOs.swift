@@ -153,8 +153,8 @@ struct GoalDTO: SupabaseSyncRecord {
     var status: String
     var targetDate: Date?
     var stages: [GoalStage]
-    var canvas: GoalCanvas
-    var reviewEntries: [GoalReviewEntry]
+    var canvas: [String: String]
+    var reviewEntries: [String]
     var createdAt: Date
     var updatedAt: Date
     var deletedAt: Date?

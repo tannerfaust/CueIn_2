@@ -21,12 +21,7 @@ struct GoalResolvedWorkLink: Identifiable {
     let isMissing: Bool
 }
 
-struct GoalNextMove {
-    let title: String
-    let detail: String
-    let icon: String
-    let tint: Color
-}
+
 
 // MARK: - GoalStrategyStore
 
@@ -37,6 +32,7 @@ final class GoalStrategyStore {
     static let shared = GoalStrategyStore()
 
     private static let storageKey = "cuein.goalStrategy.goals.v1"
+    private var suppressSyncRecording = false
 
     var goals: [Goal] = [] {
         didSet { persist() }
@@ -89,11 +85,8 @@ final class GoalStrategyStore {
 
         let goal = Goal(
             title: template.title,
-            why: template.why,
-            iconName: template.iconName,
-            colorHex: template.colorHex,
+            description: template.description,
             stages: stages,
-            canvas: template.canvas,
             createdAt: now,
             updatedAt: now
         )
@@ -262,19 +255,7 @@ final class GoalStrategyStore {
         return task.id
     }
 
-    // MARK: - Canvas and reviews
 
-    func updateCanvasValue(goalID: UUID, section: GoalCanvasSection, value: String) {
-        mutateGoal(goalID) { goal in
-            goal.canvas.setValue(value, for: section)
-        }
-    }
-
-    func addReviewEntry(goalID: UUID, entry: GoalReviewEntry) {
-        mutateGoal(goalID) { goal in
-            goal.reviewEntries.insert(entry, at: 0)
-        }
-    }
 
     // MARK: - Progress
 
@@ -318,91 +299,7 @@ final class GoalStrategyStore {
             ?? goal.stages.last
     }
 
-    // MARK: - Strategic signals
 
-    func nextMove(for goal: Goal, tasksStore: TasksStore) -> GoalNextMove {
-        guard goal.status != .completed else {
-            return GoalNextMove(
-                title: "Goal completed",
-                detail: "Review what worked and archive it when you are ready.",
-                icon: "checkmark.seal.fill",
-                tint: CueInColors.success
-            )
-        }
-
-        guard let stage = currentStage(for: goal) else {
-            return GoalNextMove(
-                title: "Add the first stage",
-                detail: "Give this goal a first phase so it can turn into action.",
-                icon: "plus.circle.fill",
-                tint: goal.color
-            )
-        }
-
-        if stage.subgoals.isEmpty {
-            return GoalNextMove(
-                title: "Add a subgoal to \(stage.title)",
-                detail: "Create the first concrete outcome for the current stage.",
-                icon: "square.badge.plus",
-                tint: goal.color
-            )
-        }
-
-        let candidates = stage.subgoals.filter { $0.status != .completed && $0.status != .skipped }
-        if let linkedTask = candidates
-            .flatMap(\.linkedWork)
-            .compactMap({ link -> TaskItem? in
-                guard link.targetKind == .task else { return nil }
-                return tasksStore.tasks.first { $0.id == link.targetID && !$0.isCompleted && $0.status != .archived }
-            })
-            .sorted(by: { $0.priority.sortWeight < $1.priority.sortWeight })
-            .first {
-            return GoalNextMove(
-                title: linkedTask.title,
-                detail: "Next task from \(stage.title)",
-                icon: "bolt.fill",
-                tint: goal.color
-            )
-        }
-
-        if let unlinked = candidates.first(where: { $0.linkedWork.isEmpty }) {
-            return GoalNextMove(
-                title: unlinked.title,
-                detail: "Link work or create the first action for this subgoal.",
-                icon: "link.badge.plus",
-                tint: goal.color
-            )
-        }
-
-        if let first = candidates.first {
-            return GoalNextMove(
-                title: first.title,
-                detail: "Move this subgoal forward inside \(stage.title).",
-                icon: "arrow.up.right.circle.fill",
-                tint: goal.color
-            )
-        }
-
-        return GoalNextMove(
-            title: "Review the roadmap",
-            detail: "The current stage looks clear. Pick the next stage or complete the goal.",
-            icon: "map.fill",
-            tint: goal.color
-        )
-    }
-
-    func staleSubgoals(for goal: Goal, tasksStore: TasksStore, olderThanDays: Int = 10) -> [(stage: GoalStage, subgoal: GoalSubgoal)] {
-        let threshold = Calendar.current.date(byAdding: .day, value: -olderThanDays, to: Date()) ?? Date()
-        var stale: [(GoalStage, GoalSubgoal)] = []
-        for stage in goal.stages where stage.status != .completed && stage.status != .skipped {
-            for subgoal in stage.subgoals where subgoal.status != .completed && subgoal.status != .skipped {
-                if latestActivityDate(for: subgoal, tasksStore: tasksStore) < threshold {
-                    stale.append((stage, subgoal))
-                }
-            }
-        }
-        return stale
-    }
 
     func resolvedLink(_ link: GoalWorkLink, tasksStore: TasksStore) -> GoalResolvedWorkLink {
         switch link.targetKind {
@@ -473,17 +370,10 @@ final class GoalStrategyStore {
             [
                 "id": goal.id.uuidString,
                 "title": goal.title,
-                "why": goal.why,
+                "description": goal.description,
                 "status": goal.status.rawValue,
                 "targetDate": goal.targetDate.map { ISO8601DateFormatter().string(from: $0) } as Any,
                 "progress": progress(goal: goal, tasksStore: tasksStore),
-                "nextMove": [
-                    "title": nextMove(for: goal, tasksStore: tasksStore).title,
-                    "detail": nextMove(for: goal, tasksStore: tasksStore).detail,
-                ],
-                "canvas": Dictionary(uniqueKeysWithValues: GoalCanvasSection.allCases.map {
-                    ($0.rawValue, goal.canvas.value(for: $0))
-                }),
                 "stages": goal.stages.map { stage in
                     [
                         "id": stage.id.uuidString,
@@ -519,6 +409,12 @@ final class GoalStrategyStore {
 
     func clearAllGoalsData() {
         goals = []
+    }
+
+    func replaceFromSync(_ syncedGoals: [Goal]) {
+        suppressSyncRecording = true
+        goals = syncedGoals
+        suppressSyncRecording = false
     }
 
     // MARK: - Private helpers
@@ -589,6 +485,7 @@ final class GoalStrategyStore {
     private func persist() {
         guard let data = try? JSONEncoder().encode(goals) else { return }
         UserDefaults.standard.set(data, forKey: Self.storageKey)
+        guard !suppressSyncRecording else { return }
         CueInSyncRuntimeBridge.shared.recordGoalsSnapshot(goals)
     }
 
@@ -611,11 +508,7 @@ final class GoalStrategyStore {
 
         let shipCueIn = Goal(
             title: "Ship CueIn v1",
-            why: "Turn the product into a real operating system for daily execution.",
-            successMetric: "A usable v1 with a coherent Today, Tasks, Hub, and strategy loop.",
-            notes: "Keep scope tight: the goal is a useful first system, not a bloated workspace.",
-            iconName: "paperplane.fill",
-            colorHex: 0x34C759,
+            description: "Turn the product into a real operating system for daily execution. Keep scope tight.",
             targetDate: Calendar.current.date(byAdding: .month, value: 3, to: Date()),
             stages: [
                 GoalStage(
@@ -646,24 +539,12 @@ final class GoalStrategyStore {
                     ]
                 ),
                 GoalStage(title: "Launch", summary: "Put the app in front of real users.")
-            ],
-            canvas: GoalCanvas(
-                outcome: "CueIn v1 helps a person turn direction into daily action.",
-                why: "The product should reduce chaos and make ambition executable.",
-                currentReality: "The execution and task layers exist; strategy needs to connect them.",
-                keyLevers: "Scope control, daily shipping, strong UX, real progress loops.",
-                risks: "Overbuilding planning surfaces instead of making them actionable.",
-                weeklyCommitment: "Protect deep work blocks and review the roadmap every week.",
-                definitionOfDone: "A user can set a goal, break it down, link work, and act today."
-            )
+            ]
         )
 
         let healthGoal = Goal(
             title: "Build a stronger baseline",
-            why: "Better energy makes the rest of the system easier to execute.",
-            successMetric: "Consistent training, sleep, and daily movement.",
-            iconName: "heart.fill",
-            colorHex: 0x5BC6B9,
+            description: "Better energy makes the rest of the system easier to execute.",
             targetDate: Calendar.current.date(byAdding: .month, value: 2, to: Date()),
             stages: [
                 GoalStage(
@@ -680,15 +561,7 @@ final class GoalStrategyStore {
                     ]
                 ),
                 GoalStage(title: "Capacity", summary: "Increase the standard once the rhythm holds.")
-            ],
-            canvas: GoalCanvas(
-                outcome: "A body and routine that support high-output days.",
-                why: "Health is a multiplier for focus, mood, and consistency.",
-                currentReality: "Movement is present, but needs a clearer repeatable system.",
-                keyLevers: "Steps, training, recovery, nutrition.",
-                weeklyCommitment: "Three training sessions and daily baseline movement.",
-                definitionOfDone: "The routine holds for four straight weeks."
-            )
+            ]
         )
 
         return [shipCueIn, healthGoal]

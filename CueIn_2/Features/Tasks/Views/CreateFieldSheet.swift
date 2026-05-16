@@ -82,7 +82,7 @@ struct CreateFieldSheet: View {
                 Text("Projects inside will also be deleted. Tasks will remain, unassigned.")
             }
         }
-        .preferredColorScheme(.dark)
+        .cueInPreferredColorScheme()
     }
 
     // MARK: UI blocks

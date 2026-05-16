@@ -67,6 +67,10 @@ enum CueInAppDataService {
         TasksStore.shared.replaceWithGimmickSeed()
         GoalStrategyStore.shared.replaceWithGimmickSeed()
         defaults.set(false, forKey: CueInAppDataKeys.gimmickDemoRemoved)
+        AntiTodoStore.shared.clearAll()
+        MeasureStore.shared.clearAll()
+        PomodoroStore.shared.resetForFreshInstall()
+        FocusSoundscapeStore.shared.resetForFreshInstall()
         TodayViewModel.shared.performFreshInstallReset()
     }
 }

@@ -12,6 +12,14 @@ enum AppTab: String, CaseIterable, Identifiable {
     case projects
     case stats
     case goals
+    /// Things you are choosing **not** to do (local list; not tasks).
+    case antiTodo
+    /// Personal measures and logging (quantified self); also opened from Hub.
+    case quantifiedSelf
+    /// Focus timer; opened from Hub or pinned in the navbar.
+    case pomodoro
+    /// Ambient focus audio; opened from Hub or pinned in the navbar.
+    case sounds
     case hub
     case more
 
@@ -23,13 +31,14 @@ enum AppTab: String, CaseIterable, Identifiable {
     static let defaultTabs: [AppTab] = [.schedule, .taskLed, .tasks, .stats, .hub]
 
     static var editableTabs: [AppTab] {
-        [.schedule, .taskLed, .tasks, .projects, .stats, .goals, .more, .hub]
+        [.schedule, .taskLed, .tasks, .projects, .stats, .goals, .antiTodo, .quantifiedSelf, .pomodoro, .sounds, .more, .hub]
     }
 
     /// Maps legacy persisted ids (`timeline`, `todo`) onto ``taskLed``.
     static func migrateLegacyTabToken(_ raw: String) -> String {
         switch raw.trimmingCharacters(in: .whitespacesAndNewlines) {
         case "timeline", "todo": return AppTab.taskLed.rawValue
+        case "focus": return AppTab.pomodoro.rawValue
         default: return raw
         }
     }
@@ -80,6 +89,10 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .projects: return "Projects"
         case .stats: return "Stats"
         case .goals: return "Goals"
+        case .antiTodo: return "Anti To‑do"
+        case .quantifiedSelf: return "Measures"
+        case .pomodoro: return "Timer"
+        case .sounds: return "Sounds"
         case .hub: return "Hub"
         case .more: return "More"
         }
@@ -102,6 +115,10 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .projects: return "folder.fill"
         case .stats: return "chart.bar.fill"
         case .goals: return "target"
+        case .antiTodo: return "slash.circle.fill"
+        case .quantifiedSelf: return "chart.xyaxis.line"
+        case .pomodoro: return "timer"
+        case .sounds: return "waveform"
         case .hub: return "square.grid.2x2.fill"
         case .more: return "ellipsis.circle.fill"
         }
@@ -115,6 +132,10 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .projects: return "folder"
         case .stats: return "chart.bar"
         case .goals: return "target"
+        case .antiTodo: return "slash.circle"
+        case .quantifiedSelf: return "chart.line.uptrend.xyaxis"
+        case .pomodoro: return "timer"
+        case .sounds: return "waveform"
         case .hub: return "square.grid.2x2"
         case .more: return "ellipsis.circle"
         }

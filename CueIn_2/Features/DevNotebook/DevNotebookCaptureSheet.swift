@@ -152,5 +152,5 @@ struct DevNotebookCaptureSheet: View {
 
 #Preview {
     DevNotebookCaptureSheet(isPresented: .constant(true)) { _, _ in }
-        .preferredColorScheme(.dark)
+        .cueInPreferredColorScheme()
 }

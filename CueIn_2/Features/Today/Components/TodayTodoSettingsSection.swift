@@ -275,5 +275,5 @@ private extension TodayDisplayPreferences.TodoTaskBlockStyle {
             .padding()
     }
     .background(CueInColors.background)
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

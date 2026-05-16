@@ -18,10 +18,10 @@ enum CueInGlassShape: Equatable {
 
 struct CueInGlassModifier: ViewModifier {
     let shape: CueInGlassShape
-    var tint: Color = Color.white.opacity(0.10)
+    var tint: Color = CueInColors.activeHint
     var interactive: Bool = true
     var showsBorder: Bool = false
-    var borderColor: Color = Color.white.opacity(0.12)
+    var borderColor: Color = CueInColors.cardBorder
     var borderWidth: CGFloat = 0.5
     /// Drop shadow parameters; pass nil for no shadow.
     var shadow: CueInGlassShadow? = nil
@@ -128,10 +128,10 @@ extension View {
     /// Applies the unified CueIn glass treatment.
     func cueInGlass(
         _ shape: CueInGlassShape,
-        tint: Color = Color.white.opacity(0.10),
+        tint: Color = CueInColors.activeHint,
         interactive: Bool = true,
         showsBorder: Bool = false,
-        borderColor: Color = Color.white.opacity(0.12),
+        borderColor: Color = CueInColors.cardBorder,
         borderWidth: CGFloat = 0.5,
         shadow: CueInGlassShadow? = nil
     ) -> some View {

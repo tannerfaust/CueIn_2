@@ -9,51 +9,91 @@ private struct HubToolDefinition: Identifiable {
     let systemImage: String
     let title: String
     let subtitle: String
+    /// A live badge string (e.g. "Running", "Rain") shown when the tool has active state.
+    var liveBadge: String? = nil
     /// When non-`nil`, the tile is tappable; otherwise it renders as a calm placeholder for upcoming work.
     var onSelect: (() -> Void)? = nil
 
     var isInteractive: Bool { onSelect != nil }
 
-    /// Ordered list shown in the Hub grid — keep this the source of truth for “what lives in Hub.”
+    /// ``AppTab`` destinations that already have a Hub catalog tile; avoid duplicating them in "Not in tab bar."
+    static let appTabsCoveredByCatalog: Set<AppTab> = [.pomodoro, .sounds, .quantifiedSelf]
+
+    /// Ordered list shown in the Hub grid — keep this the source of truth for "what lives in Hub."
     static let catalog: [HubToolDefinition] = [
-        HubToolDefinition(id: "goals", systemImage: "target", title: "Goals", subtitle: "Direction & milestones"),
-        HubToolDefinition(id: "schedules", systemImage: "doc.text.fill", title: "Schedules", subtitle: "Day & week templates"),
-        HubToolDefinition(id: "routines", systemImage: "arrow.triangle.2.circlepath", title: "Routines", subtitle: "Repeatable systems"),
-        HubToolDefinition(id: "ai", systemImage: "brain.head.profile", title: "AI Tools", subtitle: "Smart assistance"),
-        HubToolDefinition(id: "integrations", systemImage: "link", title: "Integrations", subtitle: "Connect your stack"),
-        HubToolDefinition(id: "planning", systemImage: "calendar", title: "Planning", subtitle: "Week & month view"),
+        HubToolDefinition(id: "pomodoro",       systemImage: "timer",               title: "Timer",      subtitle: "Focus intervals"),
+        HubToolDefinition(id: "sounds",         systemImage: "waveform",            title: "Sounds",     subtitle: "Focus audio"),
+        HubToolDefinition(id: "quantifiedSelf", systemImage: "chart.xyaxis.line",   title: "Measures",   subtitle: "Quantified self"),
+        HubToolDefinition(id: "planning",       systemImage: "calendar",            title: "Planning",   subtitle: "Week & month view"),
+        HubToolDefinition(id: "routines",       systemImage: "arrow.triangle.2.circlepath", title: "Routines", subtitle: "Repeatable systems"),
+        HubToolDefinition(id: "schedules",      systemImage: "doc.text.fill",       title: "Schedules",  subtitle: "Day & week templates"),
+        HubToolDefinition(id: "ai",             systemImage: "brain.head.profile",  title: "AI Tools",   subtitle: "Smart assistance"),
+        HubToolDefinition(id: "integrations",   systemImage: "link",                title: "Integrations", subtitle: "Connect your stack"),
     ]
 }
 
 // MARK: - HubView
-/// Hub tab — system-building home. Layout is driven by `HubToolDefinition.catalog` for easy expansion.
+/// Hub tab — command center. Goals are the hero; tools radiate outward.
 
 struct HubView: View {
+    @AppStorage(AppTab.storageKey) private var storedTabsRaw = AppTab.storageValue(for: AppTab.defaultTabs)
+    @AppStorage(TodayDisplayPreferences.taskLedViewMode) private var taskLedViewModeRaw
+        = TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue
     @State private var path: [GoalStrategyRoute] = []
     @State private var activeGoalSheet: GoalStrategySheet?
     @State private var showSettings = false
     @State private var showDevNotebook = false
+    @State private var showQuantifiedSelfSheet = false
     @Bindable private var todayViewModel = TodayViewModel.shared
     @Bindable private var goalStore = GoalStrategyStore.shared
     @Bindable private var tasksStore = TasksStore.shared
+    @Bindable private var pomodoroStore = PomodoroStore.shared
+    @Bindable private var focusSoundStore = FocusSoundscapeStore.shared
 
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: CueInSpacing.xxl) {
-                    headerBlock
+                VStack(alignment: .leading, spacing: 0) {
+                    goalsHeroCard
+                        .padding(.top, CueInSpacing.base)
+                        .padding(.bottom, CueInSpacing.xxl)
 
                     toolsSection
+                        .padding(.bottom, CueInSpacing.xxl)
 
-                    planningSection
-
-                    goalsSection
+                    if !missingNavbarTabs.isEmpty {
+                        offTabBarModulesSection
+                            .padding(.bottom, CueInSpacing.xxl)
+                    }
 
                     systemSection
                 }
                 .padding(.bottom, CueInLayout.scrollBottomInset)
             }
-            .toolbar(.hidden, for: .navigationBar)
+            .background(CueInColors.background)
+            .navigationTitle("Hub")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        showDevNotebook = true
+                    } label: {
+                        Image(systemName: "note.text")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(CueInColors.textPrimary)
+                    }
+                    .accessibilityLabel("Open Developer Notebook")
+
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(CueInColors.textPrimary)
+                    }
+                    .accessibilityLabel("Open Settings")
+                }
+            }
             .navigationDestination(for: GoalStrategyRoute.self, destination: goalDestination)
         }
         .onReceive(NotificationCenter.default.publisher(for: .cueInShowCreateGoal)) { _ in
@@ -82,7 +122,15 @@ struct HubView: View {
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }
+        .sheet(isPresented: $showQuantifiedSelfSheet) {
+            QuantifiedSelfView(onRequestDismiss: { showQuantifiedSelfSheet = false })
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
     }
+
+    // MARK: - Navigation Destinations
 
     @ViewBuilder
     private func goalDestination(_ route: GoalStrategyRoute) -> some View {
@@ -94,7 +142,8 @@ struct HubView: View {
                 onCreateGoal: { template in
                     activeGoalSheet = .createGoal(templateID: template?.id)
                 },
-                onPresentSheet: { activeGoalSheet = $0 }
+                onPresentSheet: { activeGoalSheet = $0 },
+                showsHubBackButton: true
             )
 
         case .goal(let id):
@@ -102,7 +151,8 @@ struct HubView: View {
                 goalID: id,
                 store: goalStore,
                 tasksStore: tasksStore,
-                onPresentSheet: { activeGoalSheet = $0 }
+                onPresentSheet: { activeGoalSheet = $0 },
+                showsHubBackButton: true
             )
         }
     }
@@ -154,56 +204,280 @@ struct HubView: View {
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
 
-        case .review(let goalID):
-            GoalReviewEntrySheet(
-                goalID: goalID,
-                store: goalStore,
-                onDismiss: { activeGoalSheet = nil }
-            )
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+
         }
     }
 
-    // MARK: - Sections
+    // MARK: - Header
 
-    private var headerBlock: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.lg) {
-            VStack(alignment: .leading, spacing: CueInSpacing.xs) {
-                Text("Hub")
-                    .font(CueInTypography.largeTitle)
-                    .foregroundStyle(CueInColors.textPrimary)
 
-                Text("Shape the system behind Today — goals, structure, and tools in one calm place.")
-                    .font(CueInTypography.body)
-                    .foregroundStyle(CueInColors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+
+    // MARK: - Goals Hero Card
+
+    private var goalsHeroCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Accent rail at top
+            Rectangle()
+                .fill(CueInColors.accentFocus)
+                .frame(height: 2)
+
+            VStack(alignment: .leading, spacing: CueInSpacing.md) {
+                // Section label row
+                HStack {
+                    sectionLabel("Goals")
+                    Spacer()
+                    if !goalStore.activeGoals.isEmpty {
+                        NavigationLink(value: GoalStrategyRoute.home) {
+                            HStack(spacing: 4) {
+                                Text("\(goalStore.activeGoals.count) active")
+                                    .font(CueInTypography.micro)
+                                    .foregroundStyle(CueInColors.textTertiary)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(CueInColors.textTertiary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                // Content
+                if goalStore.activeGoals.isEmpty {
+                    goalsEmptyState
+                } else {
+                    VStack(spacing: CueInSpacing.sm) {
+                        ForEach(goalStore.activeGoals.prefix(3)) { goal in
+                            NavigationLink(value: GoalStrategyRoute.goal(goal.id)) {
+                                goalProgressRow(goal)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
             }
-
-            HStack(spacing: 0) {
-                hubMetric(title: "Tools", value: "\(resolvedToolCatalog.count)")
-                verticalRule
-                hubMetric(title: "Goals", value: "\(goalStore.activeGoals.count)")
-                verticalRule
-                hubMetric(title: "Pinned ahead", value: futurePinsLabel)
-            }
-            .padding(.vertical, CueInSpacing.md)
-            .padding(.horizontal, CueInSpacing.base)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(CueInColors.surfacePrimary, in: RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous)
-                    .strokeBorder(CueInColors.cardBorder, lineWidth: 0.5)
-            )
+            .padding(CueInSpacing.base)
         }
+        .background(CueInColors.surfacePrimary)
+        .clipShape(RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous)
+                .strokeBorder(CueInColors.cardBorder, lineWidth: 0.5)
+        )
         .padding(.horizontal, CueInSpacing.screenHorizontal)
-        .padding(.top, CueInSpacing.base)
     }
+
+    private var goalsEmptyState: some View {
+        Button {
+            activeGoalSheet = .createGoal(templateID: nil)
+        } label: {
+            HStack(spacing: CueInSpacing.md) {
+                Image(systemName: "target")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(CueInColors.accentFocus)
+                    .frame(width: 38, height: 38)
+                    .background(CueInColors.accentFocus.opacity(0.12), in: RoundedRectangle(cornerRadius: CueInSpacing.chipRadius, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Set your first goal")
+                        .font(CueInTypography.bodyMedium)
+                        .foregroundStyle(CueInColors.textPrimary)
+                    Text("Direction & milestones come first.")
+                        .font(CueInTypography.caption)
+                        .foregroundStyle(CueInColors.textTertiary)
+                }
+
+                Spacer()
+
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(CueInColors.accentFocus.opacity(0.7))
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func goalProgressRow(_ goal: Goal) -> some View {
+        let progress = goalStore.progress(goal: goal, tasksStore: tasksStore)
+
+        VStack(alignment: .leading, spacing: CueInSpacing.sm) {
+            HStack(spacing: CueInSpacing.md) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(goal.title)
+                        .font(CueInTypography.bodyMedium)
+                        .foregroundStyle(CueInColors.textPrimary)
+                        .lineLimit(1)
+                    if !goal.description.isEmpty {
+                        Text(goal.description)
+                            .font(CueInTypography.micro)
+                            .foregroundStyle(CueInColors.textTertiary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer()
+
+                Text("\(Int(progress * 100))%")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(CueInColors.textSecondary)
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(CueInColors.surfaceTertiary)
+                    Capsule()
+                        .fill(CueInColors.accentFocus)
+                        .frame(width: max(0, geo.size.width * progress))
+                }
+            }
+            .frame(height: 3)
+        }
+    }
+
+    // MARK: - Tab bar shortcuts (modules not pinned in the navbar)
+
+    /// Order matches navbar customization (`AppTab.editableTabs`) minus overflow/meta slots.
+    private var missingNavbarTabs: [AppTab] {
+        let visible = AppTab.storedTabs(from: storedTabsRaw)
+        let order: [AppTab] = [.schedule, .taskLed, .tasks, .projects, .stats, .goals, .antiTodo, .quantifiedSelf, .pomodoro, .sounds]
+        return order.filter { tab in
+            !visible.contains(tab) && !HubToolDefinition.appTabsCoveredByCatalog.contains(tab)
+        }
+    }
+
+    private var taskLedPresentation: TodayDisplayPreferences.TaskLedViewMode {
+        TodayDisplayPreferences.TaskLedViewMode(rawValue: taskLedViewModeRaw) ?? .timeline
+    }
+
+    private var offTabBarModulesSection: some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.md) {
+            sectionLabel("Not in tab bar")
+                .padding(.horizontal, CueInSpacing.screenHorizontal)
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: CueInSpacing.md),
+                    GridItem(.flexible(), spacing: CueInSpacing.md),
+                ],
+                spacing: CueInSpacing.md
+            ) {
+                ForEach(missingNavbarTabs, id: \.self) { tab in
+                    toolTile(jumpTileDefinition(for: tab))
+                }
+            }
+            .padding(.horizontal, CueInSpacing.screenHorizontal)
+        }
+    }
+
+    private func postSwitchToShellTab(_ tab: AppTab) {
+        NotificationCenter.default.post(
+            name: .cueInSwitchTab,
+            object: nil,
+            userInfo: [CueInShellNotification.switchTabUserInfoKey: tab.rawValue]
+        )
+    }
+
+    private func jumpTileDefinition(for tab: AppTab) -> HubToolDefinition {
+        let onSelect: () -> Void = { postSwitchToShellTab(tab) }
+        switch tab {
+        case .schedule:
+            return HubToolDefinition(
+                id: "jump-tab-\(tab.rawValue)",
+                systemImage: tab.icon,
+                title: tab.label,
+                subtitle: "Formula-based day",
+                onSelect: onSelect
+            )
+        case .taskLed:
+            return HubToolDefinition(
+                id: "jump-tab-\(tab.rawValue)",
+                systemImage: taskLedPresentation.icon,
+                title: tab.rearrangementPickerLabel,
+                subtitle: "Task-led day",
+                onSelect: onSelect
+            )
+        case .tasks:
+            return HubToolDefinition(
+                id: "jump-tab-\(tab.rawValue)",
+                systemImage: tab.icon,
+                title: tab.label,
+                subtitle: "Fields, projects & tasks",
+                onSelect: onSelect
+            )
+        case .projects:
+            return HubToolDefinition(
+                id: "jump-tab-\(tab.rawValue)",
+                systemImage: tab.icon,
+                title: tab.label,
+                subtitle: "Project home",
+                onSelect: onSelect
+            )
+        case .stats:
+            return HubToolDefinition(
+                id: "jump-tab-\(tab.rawValue)",
+                systemImage: tab.icon,
+                title: tab.label,
+                subtitle: "Trends & daily snapshot",
+                onSelect: onSelect
+            )
+        case .goals:
+            return HubToolDefinition(
+                id: "jump-tab-\(tab.rawValue)",
+                systemImage: tab.icon,
+                title: tab.label,
+                subtitle: "Strategies & milestones",
+                onSelect: onSelect
+            )
+        case .antiTodo:
+            return HubToolDefinition(
+                id: "jump-tab-\(tab.rawValue)",
+                systemImage: tab.icon,
+                title: tab.label,
+                subtitle: "Track what you skip",
+                onSelect: onSelect
+            )
+        case .quantifiedSelf:
+            return HubToolDefinition(
+                id: "jump-tab-\(tab.rawValue)",
+                systemImage: tab.icon,
+                title: tab.label,
+                subtitle: "Trackers & logs",
+                onSelect: onSelect
+            )
+        case .pomodoro:
+            return HubToolDefinition(
+                id: "jump-tab-\(tab.rawValue)",
+                systemImage: tab.icon,
+                title: tab.label,
+                subtitle: "Focus intervals",
+                onSelect: onSelect
+            )
+        case .sounds:
+            return HubToolDefinition(
+                id: "jump-tab-\(tab.rawValue)",
+                systemImage: tab.icon,
+                title: tab.label,
+                subtitle: "Focus audio",
+                onSelect: onSelect
+            )
+        case .hub, .more:
+            return HubToolDefinition(
+                id: "jump-tab-\(tab.rawValue)",
+                systemImage: tab.icon,
+                title: tab.label,
+                subtitle: "",
+                onSelect: nil
+            )
+        }
+    }
+
+    // MARK: - Tools Grid
 
     private var toolsSection: some View {
         VStack(alignment: .leading, spacing: CueInSpacing.md) {
-            sectionHeading("Tools & modules", caption: nil)
+            sectionLabel("Tools")
+                .padding(.horizontal, CueInSpacing.screenHorizontal)
 
             LazyVGrid(
                 columns: [
@@ -213,134 +487,161 @@ struct HubView: View {
                 spacing: CueInSpacing.md
             ) {
                 ForEach(resolvedToolCatalog) { tool in
-                    hubToolTile(tool)
+                    toolTile(tool)
                 }
             }
+            .padding(.horizontal, CueInSpacing.screenHorizontal)
         }
-        .padding(.horizontal, CueInSpacing.screenHorizontal)
     }
 
-    private var goalsSection: some View {
+    @ViewBuilder
+    private func toolTile(_ tool: HubToolDefinition) -> some View {
+        let content = toolTileContent(tool)
+        if let action = tool.onSelect {
+            Button(action: action) { content }.buttonStyle(.plain)
+        } else {
+            content
+        }
+    }
+
+    @ViewBuilder
+    private func toolTileContent(_ tool: HubToolDefinition) -> some View {
         VStack(alignment: .leading, spacing: CueInSpacing.md) {
-            sectionHeading("Active goals", caption: goalStore.activeGoals.isEmpty ? "Ready" : "\(goalStore.activeGoals.count)")
+            // Icon row
+            HStack {
+                Image(systemName: tool.systemImage)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(tool.isInteractive ? CueInColors.textPrimary : CueInColors.textSecondary)
+                    .frame(width: 38, height: 38)
+                    .background(CueInColors.surfaceSecondary, in: RoundedRectangle(cornerRadius: CueInSpacing.chipRadius, style: .continuous))
 
-            if goalStore.activeGoals.isEmpty {
-                Button {
-                    activeGoalSheet = .createGoal(templateID: nil)
-                } label: {
-                    CueInCard(padding: CueInSpacing.md) {
-                        HStack(spacing: CueInSpacing.md) {
-                            Image(systemName: "target")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(CueInColors.accentFocus)
-                                .frame(width: 40, height: 40)
-                                .background(CueInColors.accentFocus.opacity(0.14), in: RoundedRectangle(cornerRadius: CueInSpacing.chipRadius, style: .continuous))
+                Spacer()
 
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Create your first grand goal")
-                                    .font(CueInTypography.bodyMedium)
-                                    .foregroundStyle(CueInColors.textPrimary)
-                                Text("Stages and links can come later.")
-                                    .font(CueInTypography.caption)
-                                    .foregroundStyle(CueInColors.textTertiary)
-                            }
-
-                            Spacer()
-
-                            Image(systemName: "plus")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(CueInColors.textTertiary)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-            } else {
-                VStack(spacing: CueInSpacing.sm) {
-                    ForEach(goalStore.activeGoals.prefix(3)) { goal in
-                        NavigationLink(value: GoalStrategyRoute.goal(goal.id)) {
-                            hubGoalPreviewRow(goal)
-                        }
-                        .buttonStyle(.plain)
-                    }
+                if let badge = tool.liveBadge {
+                    liveBadgeDot(label: badge)
+                } else if !tool.isInteractive {
+                    Text("Soon")
+                        .font(CueInTypography.micro)
+                        .foregroundStyle(CueInColors.textTertiary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(CueInColors.activeHint, in: Capsule())
                 }
             }
+
+            // Text
+            VStack(alignment: .leading, spacing: 3) {
+                Text(tool.title)
+                    .font(CueInTypography.bodyMedium)
+                    .foregroundStyle(CueInColors.textPrimary)
+
+                Text(tool.subtitle)
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(CueInColors.textTertiary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .padding(.horizontal, CueInSpacing.screenHorizontal)
+        .padding(CueInSpacing.base)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(CueInColors.surfacePrimary)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(CueInColors.cardBorder, lineWidth: 0.5)
+        )
+        .opacity(tool.isInteractive ? 1 : 0.45)
     }
+
+    // MARK: - System Section
 
     private var systemSection: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.md) {
-            sectionHeading("On this device", caption: nil)
+        VStack(alignment: .leading, spacing: CueInSpacing.sm) {
+            sectionLabel("Device")
+                .padding(.horizontal, CueInSpacing.screenHorizontal)
 
-            VStack(spacing: CueInSpacing.sm) {
-                navigationRowCard(
+            VStack(spacing: 0) {
+                systemRow(
                     icon: "note.text.badge.plus",
-                    title: "Dev notebook",
-                    subtitle: "Ideas, bugs, and design notes",
+                    title: "Dev Notebook",
                     action: { showDevNotebook = true }
                 )
 
-                navigationRowCard(
-                    icon: "gearshape.fill",
+                Divider()
+                    .background(CueInColors.divider)
+                    .padding(.leading, CueInSpacing.screenHorizontal + 32 + CueInSpacing.md)
+
+                systemRow(
+                    icon: "gearshape",
                     title: "Settings",
-                    subtitle: "Preferences, account, and data",
                     action: { showSettings = true }
                 )
             }
+            .background(CueInColors.surfacePrimary, in: RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous)
+                    .strokeBorder(CueInColors.cardBorder, lineWidth: 0.5)
+            )
+            .padding(.horizontal, CueInSpacing.screenHorizontal)
         }
-        .padding(.horizontal, CueInSpacing.screenHorizontal)
     }
 
-    // MARK: - Planning (unchanged data, clearer framing)
+    private func systemRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: CueInSpacing.md) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(CueInColors.textSecondary)
+                    .frame(width: 32, height: 32)
+                    .background(CueInColors.surfaceSecondary, in: RoundedRectangle(cornerRadius: CueInSpacing.chipRadius - 2, style: .continuous))
 
-    private var planningSection: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.md) {
-            sectionHeading("Planning snapshot", caption: planningSubtitle)
+                Text(title)
+                    .font(CueInTypography.bodyMedium)
+                    .foregroundStyle(CueInColors.textPrimary)
 
-            if todayViewModel.futurePinnedScheduleBlocks.isEmpty {
-                CueInCard(padding: CueInSpacing.md) {
-                    HStack(spacing: CueInSpacing.md) {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(CueInColors.textTertiary)
-                            .frame(width: 40, height: 40)
-                            .background(CueInColors.surfaceSecondary, in: RoundedRectangle(cornerRadius: CueInSpacing.chipRadius, style: .continuous))
+                Spacer()
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("No future pinned blocks")
-                                .font(CueInTypography.bodyMedium)
-                                .foregroundStyle(CueInColors.textPrimary)
-                            Text("Pinned blocks scheduled after today will appear here.")
-                                .font(CueInTypography.caption)
-                                .foregroundStyle(CueInColors.textTertiary)
-                        }
-                    }
-                }
-            } else {
-                VStack(spacing: CueInSpacing.sm) {
-                    ForEach(todayViewModel.futurePinnedScheduleBlocks.prefix(6)) { block in
-                        futurePinnedBlockRow(block)
-                    }
-                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(CueInColors.textTertiary)
             }
+            .padding(.horizontal, CueInSpacing.screenHorizontal)
+            .frame(height: 52)
         }
-        .padding(.horizontal, CueInSpacing.screenHorizontal)
+        .buttonStyle(.plain)
     }
 
-    // MARK: - Components
+    // MARK: - Helpers
+
+    /// Uppercase micro label for section headings.
+    private func sectionLabel(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(CueInTypography.micro)
+            .foregroundStyle(CueInColors.textTertiary)
+            .tracking(1.0)
+    }
+
+    /// Pulsing green dot with a short badge label — used for live tool states.
+    private func liveBadgeDot(label: String) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(CueInColors.accentFocus)
+                .frame(width: 6, height: 6)
+            Text(label)
+                .font(CueInTypography.micro)
+                .foregroundStyle(CueInColors.accentFocus)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(CueInColors.accentFocus.opacity(0.12), in: Capsule())
+    }
+
+    // MARK: - Resolved Catalog
 
     /// Live subtitles where a tile should reflect app state (e.g. future pins).
     private var resolvedToolCatalog: [HubToolDefinition] {
         HubToolDefinition.catalog.map { tool in
             switch tool.id {
-            case "goals":
-                return HubToolDefinition(
-                    id: tool.id,
-                    systemImage: tool.systemImage,
-                    title: tool.title,
-                    subtitle: goalsTileSubtitle,
-                    onSelect: { path.append(.home) }
-                )
             case "planning":
                 return HubToolDefinition(
                     id: tool.id,
@@ -349,20 +650,40 @@ struct HubView: View {
                     subtitle: planningTileSubtitle,
                     onSelect: tool.onSelect
                 )
+            case "quantifiedSelf":
+                return HubToolDefinition(
+                    id: tool.id,
+                    systemImage: tool.systemImage,
+                    title: tool.title,
+                    subtitle: tool.subtitle,
+                    onSelect: { showQuantifiedSelfSheet = true }
+                )
+            case "pomodoro":
+                return HubToolDefinition(
+                    id: tool.id,
+                    systemImage: tool.systemImage,
+                    title: tool.title,
+                    subtitle: pomodoroHubSubtitle,
+                    liveBadge: pomodoroLiveBadge,
+                    onSelect: {
+                        NotificationCenter.default.post(name: .cueInOpenFocus, object: nil)
+                    }
+                )
+            case "sounds":
+                return HubToolDefinition(
+                    id: tool.id,
+                    systemImage: tool.systemImage,
+                    title: tool.title,
+                    subtitle: soundsHubSubtitle,
+                    liveBadge: soundsLiveBadge,
+                    onSelect: {
+                        NotificationCenter.default.post(name: .cueInOpenSounds, object: nil)
+                    }
+                )
             default:
                 return tool
             }
         }
-    }
-
-    private var goalsTileSubtitle: String {
-        let active = goalStore.activeGoals.count
-        if active == 0 { return "Direction & milestones" }
-        let stalled = goalStore.activeGoals.reduce(0) {
-            $0 + goalStore.staleSubgoals(for: $1, tasksStore: tasksStore).count
-        }
-        if stalled > 0 { return "\(active) active · \(stalled) stalled" }
-        return "\(active) active roadmap\(active == 1 ? "" : "s")"
     }
 
     private var planningTileSubtitle: String {
@@ -371,225 +692,31 @@ struct HubView: View {
         return "\(count) future pin\(count == 1 ? "" : "s")"
     }
 
-    private var futurePinsLabel: String {
-        let n = todayViewModel.futurePinnedScheduleBlocks.count
-        if n == 0 { return "—" }
-        return "\(n)"
-    }
-
-    private var planningSubtitle: String {
-        let count = todayViewModel.futurePinnedScheduleBlocks.count
-        if count == 0 { return "Nothing pinned ahead" }
-        return "\(count) future pin\(count == 1 ? "" : "s")"
-    }
-
-    private func sectionHeading(_ title: String, caption: String?) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title)
-                .font(CueInTypography.title)
-                .foregroundStyle(CueInColors.textPrimary)
-            Spacer()
-            if let caption {
-                Text(caption)
-                    .font(CueInTypography.caption)
-                    .foregroundStyle(CueInColors.textTertiary)
-                    .multilineTextAlignment(.trailing)
-            }
+    private var pomodoroHubSubtitle: String {
+        if pomodoroStore.isRunning {
+            let m = pomodoroStore.remainingSeconds / 60
+            let s = pomodoroStore.remainingSeconds % 60
+            return String(format: "%02d:%02d remaining", m, s)
         }
+        if pomodoroStore.pausedRemainingSeconds != nil { return "Paused" }
+        return "Focus intervals"
     }
 
-    private func hubMetric(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.xs) {
-            Text(title.uppercased())
-                .font(CueInTypography.micro)
-                .foregroundStyle(CueInColors.textTertiary)
-                .tracking(0.6)
-            Text(value)
-                .font(CueInTypography.headline)
-                .foregroundStyle(CueInColors.textPrimary)
-                .monospacedDigit()
+    private var pomodoroLiveBadge: String? {
+        guard pomodoroStore.isRunning else { return nil }
+        return pomodoroStore.phase.title
+    }
+
+    private var soundsHubSubtitle: String {
+        if focusSoundStore.isPlaying, focusSoundStore.preset != .off {
+            return focusSoundStore.preset.title
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        return "Focus audio"
     }
 
-    private var verticalRule: some View {
-        Rectangle()
-            .fill(CueInColors.divider)
-            .frame(width: 1, height: 36)
-            .padding(.horizontal, CueInSpacing.base)
-    }
-
-    @ViewBuilder
-    private func hubToolTile(_ tool: HubToolDefinition) -> some View {
-        let tile = hubToolTileContent(tool)
-
-        if let action = tool.onSelect {
-            Button(action: action) { tile }
-                .buttonStyle(.plain)
-        } else {
-            tile
-        }
-    }
-
-    @ViewBuilder
-    private func hubToolTileContent(_ tool: HubToolDefinition) -> some View {
-        CueInCard {
-            ZStack(alignment: .topTrailing) {
-                VStack(alignment: .leading, spacing: CueInSpacing.md) {
-                    Image(systemName: tool.systemImage)
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(tool.isInteractive ? CueInColors.textPrimary : CueInColors.textSecondary)
-                        .frame(width: 40, height: 40)
-                        .background(CueInColors.surfaceSecondary, in: RoundedRectangle(cornerRadius: CueInSpacing.chipRadius, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(tool.title)
-                            .font(CueInTypography.bodyMedium)
-                            .foregroundStyle(CueInColors.textPrimary)
-
-                        Text(tool.subtitle)
-                            .font(CueInTypography.caption)
-                            .foregroundStyle(CueInColors.textTertiary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .opacity(tool.isInteractive ? 1 : 0.92)
-
-                if !tool.isInteractive {
-                    Text("Soon")
-                        .font(CueInTypography.micro)
-                        .foregroundStyle(CueInColors.textTertiary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(CueInColors.activeHint, in: Capsule())
-                }
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            if tool.isInteractive {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(CueInColors.textTertiary)
-                    .padding(12)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func navigationRowCard(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            CueInCard {
-                HStack(spacing: CueInSpacing.md) {
-                    Image(systemName: icon)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(CueInColors.textSecondary)
-                        .frame(width: 40, height: 40)
-                        .background(CueInColors.surfaceSecondary)
-                        .clipShape(RoundedRectangle(cornerRadius: CueInSpacing.chipRadius, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title)
-                            .font(CueInTypography.bodyMedium)
-                            .foregroundStyle(CueInColors.textPrimary)
-                        Text(subtitle)
-                            .font(CueInTypography.caption)
-                            .foregroundStyle(CueInColors.textTertiary)
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(CueInColors.textTertiary)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private func futurePinnedBlockRow(_ block: DayBlock) -> some View {
-        CueInCard(padding: CueInSpacing.md) {
-            HStack(spacing: CueInSpacing.md) {
-                Image(systemName: block.resolvedTimelineGlyph)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(CueInColors.resolvedTimelineAccent(blockType: block.type, hex: block.timelineAccentHex))
-                    .frame(width: 40, height: 40)
-                    .background(CueInColors.surfaceSecondary, in: RoundedRectangle(cornerRadius: CueInSpacing.chipRadius, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(block.title)
-                        .font(CueInTypography.bodyMedium)
-                        .foregroundStyle(CueInColors.textPrimary)
-                        .lineLimit(1)
-
-                    Text(Self.futurePinnedDateLabel(block.startTime))
-                        .font(CueInTypography.caption)
-                        .foregroundStyle(CueInColors.textTertiary)
-                        .monospacedDigit()
-                }
-
-                Spacer()
-
-                Image(systemName: "pin.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(CueInColors.accentFixed)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func hubGoalPreviewRow(_ goal: Goal) -> some View {
-        let progress = goalStore.progress(goal: goal, tasksStore: tasksStore)
-        let move = goalStore.nextMove(for: goal, tasksStore: tasksStore)
-        CueInCard(padding: CueInSpacing.md) {
-            VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-                HStack {
-                    Image(systemName: goal.resolvedIconSystemName)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(goal.color)
-                        .frame(width: 30, height: 30)
-                        .background(goal.color.opacity(0.14), in: RoundedRectangle(cornerRadius: CueInSpacing.chipRadius, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(goal.title)
-                            .font(CueInTypography.bodyMedium)
-                            .foregroundStyle(CueInColors.textPrimary)
-                            .lineLimit(1)
-                        Text(move.title)
-                            .font(CueInTypography.micro)
-                            .foregroundStyle(CueInColors.textTertiary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer()
-
-                    Text("\(Int(progress * 100))%")
-                        .font(CueInTypography.bodyMedium)
-                        .foregroundStyle(CueInColors.textSecondary)
-                        .monospacedDigit()
-                }
-
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(CueInColors.surfaceTertiary)
-                        Capsule()
-                            .fill(goal.color)
-                            .frame(width: geo.size.width * progress)
-                    }
-                }
-                .frame(height: 4)
-            }
-        }
-    }
-
-    private static func futurePinnedDateLabel(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("EEE MMM d HH:mm")
-        return formatter.string(from: date)
+    private var soundsLiveBadge: String? {
+        guard focusSoundStore.isPlaying, focusSoundStore.preset != .off else { return nil }
+        return "Playing"
     }
 }
 
@@ -598,5 +725,5 @@ struct HubView: View {
         CueInColors.background.ignoresSafeArea()
         HubView()
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

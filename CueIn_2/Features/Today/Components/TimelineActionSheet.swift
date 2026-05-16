@@ -28,5 +28,5 @@ struct TimelineActionSheet: View {
         CueInColors.background.ignoresSafeArea()
         TimelineActionSheet(onAddTask: {}, onDismiss: {})
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

@@ -1014,5 +1014,5 @@ private struct TodayTodoEmptyState: View {
             onOpenTask: { _ in }
         )
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

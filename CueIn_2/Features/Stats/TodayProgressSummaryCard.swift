@@ -85,5 +85,5 @@ struct TodayProgressSummaryCard: View {
         TodayProgressSummaryCard()
             .padding()
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

@@ -204,3 +204,14 @@ create trigger touch_schedule_records_sync_metadata before update on public.sche
 drop trigger if exists touch_app_layout_settings_sync_metadata on public.app_layout_settings;
 create trigger touch_app_layout_settings_sync_metadata before update on public.app_layout_settings
     for each row execute function public.touch_sync_metadata();
+
+grant usage on schema public to authenticated;
+
+grant select, insert, update, delete on table public.profiles to authenticated;
+grant select, insert, update, delete on table public.fields to authenticated;
+grant select, insert, update, delete on table public.projects to authenticated;
+grant select, insert, update, delete on table public.tasks to authenticated;
+grant select, insert, update, delete on table public.goals to authenticated;
+grant select, insert, update, delete on table public.schedule_records to authenticated;
+grant select, insert, update, delete on table public.app_layout_settings to authenticated;
+grant select, insert, update, delete on table public.sync_mutations to authenticated;

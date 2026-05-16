@@ -189,5 +189,5 @@ struct BlockTemplateLibrarySheet: View {
 
 #Preview {
     BlockTemplateLibrarySheet(onPick: { _ in }, onDismiss: {})
-        .preferredColorScheme(.dark)
+        .cueInPreferredColorScheme()
 }

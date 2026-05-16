@@ -161,9 +161,9 @@ extension View {
     func cueInEditorGlassSurface(cornerRadius: CGFloat) -> some View {
         self.cueInGlass(
             .roundedRect(cornerRadius: cornerRadius),
-            tint: Color.white.opacity(0.08),
+            tint: CueInColors.activeHint,
             showsBorder: true,
-            borderColor: Color.white.opacity(0.11),
+            borderColor: CueInColors.cardBorder,
             borderWidth: 0.55
         )
     }

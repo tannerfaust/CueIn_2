@@ -485,5 +485,5 @@ enum ScheduleStartPreflightAction: Identifiable, Equatable {
         onIssueAction: { _ in },
         onCancel: {}
     )
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

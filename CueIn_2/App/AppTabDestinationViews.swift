@@ -21,7 +21,7 @@ struct ProjectsTabView: View {
             .navigationDestination(for: TasksRoute.self, destination: destination)
             .background(CueInColors.background.ignoresSafeArea())
         }
-        .preferredColorScheme(.dark)
+        .cueInPreferredColorScheme()
         .sheet(item: $activeSheet, content: sheetContent)
     }
 
@@ -246,15 +246,6 @@ struct GoalsTabView: View {
                 subgoalID: subgoalID,
                 store: goalStore,
                 tasksStore: tasksStore,
-                onDismiss: { activeGoalSheet = nil }
-            )
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
-        case .review(let goalID):
-            GoalReviewEntrySheet(
-                goalID: goalID,
-                store: goalStore,
                 onDismiss: { activeGoalSheet = nil }
             )
             .presentationDetents([.large])

@@ -21,6 +21,7 @@ struct ReorderableTaskList: View {
     var onDeleteTask: (TaskItem, String) -> Void = { task, _ in
         TasksStore.shared.deleteTask(task.id)
     }
+    var onMoreActions: (TaskItem) -> Void = { _ in }
 
     var body: some View {
         let ordered = store.orderedTasks(tasks, listKey: listKey)
@@ -44,6 +45,7 @@ struct ReorderableTaskList: View {
                             }
                         },
                         onSchedule: { store.scheduleTask(t.id, on: $0) },
+                        onMoreActions: { onMoreActions(t) },
                         compactStyle: true,
                         isQueuedForToday: dayPlanner.isPlannerTaskQueuedForToday(t.id),
                         onQueueToday: {
@@ -91,10 +93,10 @@ struct ReorderableTaskList: View {
     @ViewBuilder
     private func sectionHeader(title: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            if let icon = sectionIcon, let tint = sectionTint {
+            if let icon = sectionIcon {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(tint.opacity(0.9))
+                    .foregroundStyle(CueInColors.textTertiary.opacity(0.85))
             }
             Text(title)
                 .font(.system(size: 12, weight: .semibold))

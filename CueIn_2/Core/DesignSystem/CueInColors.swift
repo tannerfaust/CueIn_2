@@ -1,73 +1,135 @@
 import SwiftUI
+import UIKit
+
+enum CueInThemePreference: String, CaseIterable, Identifiable {
+    case dark
+    case light
+
+    static let storageKey = "cuein.appearance.theme"
+    static let defaultValue: CueInThemePreference = .dark
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .dark: return "Dark"
+        case .light: return "Light"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .dark: return "Deep graphite surfaces"
+        case .light: return "Clean white Reminders-style surfaces"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .dark: return "moon.fill"
+        case .light: return "sun.max.fill"
+        }
+    }
+
+    var colorScheme: ColorScheme {
+        switch self {
+        case .dark: return .dark
+        case .light: return .light
+        }
+    }
+
+    static var current: CueInThemePreference {
+        let rawValue = UserDefaults.standard.string(forKey: storageKey)
+        return CueInThemePreference(rawValue: rawValue ?? "") ?? defaultValue
+    }
+}
+
+private struct CueInPreferredColorSchemeModifier: ViewModifier {
+    @AppStorage(CueInThemePreference.storageKey) private var themeRawValue = CueInThemePreference.defaultValue.rawValue
+
+    private var theme: CueInThemePreference {
+        CueInThemePreference(rawValue: themeRawValue) ?? .defaultValue
+    }
+
+    func body(content: Content) -> some View {
+        content.preferredColorScheme(theme.colorScheme)
+    }
+}
+
+extension View {
+    func cueInPreferredColorScheme() -> some View {
+        modifier(CueInPreferredColorSchemeModifier())
+    }
+}
 
 // MARK: - CueIn Color System
-/// Neutral, dark, minimalist palette. No flashy accents.
+/// Neutral, minimalist palette. Dark stays graphite; light is white, grouped, and Reminders-clean.
 
 enum CueInColors {
 
     // MARK: Backgrounds
 
-    /// Near-black canvas — a hair above true black (~5% lift) for a softer, less harsh field.
-    static let background = Color(hex: 0x0D0D0D)
+    /// App canvas.
+    static var background: Color { themed(dark: 0x0D0D0D, light: 0xF7F7F8) }
 
-    /// Primary card surface — very subtle lift from black
-    static let surfacePrimary = Color(hex: 0x1C1C1E)
+    /// Primary card surface.
+    static var surfacePrimary: Color { themed(dark: 0x1C1C1E, light: 0xFFFFFF) }
 
     /// Elevated surface
-    static let surfaceSecondary = Color(hex: 0x2C2C2E)
+    static var surfaceSecondary: Color { themed(dark: 0x2C2C2E, light: 0xF2F2F7) }
 
     /// Tertiary / subtle layering
-    static let surfaceTertiary = Color(hex: 0x3A3A3C)
+    static var surfaceTertiary: Color { themed(dark: 0x3A3A3C, light: 0xE5E5EA) }
 
     // MARK: Text
 
-    /// High-emphasis text — clean white
-    static let textPrimary = Color.white.opacity(0.92)
+    /// High-emphasis text.
+    static var textPrimary: Color { themed(dark: .white, light: .black, darkOpacity: 0.92, lightOpacity: 0.88) }
 
     /// Medium-emphasis text
-    static let textSecondary = Color.white.opacity(0.55)
+    static var textSecondary: Color { themed(dark: .white, light: .black, darkOpacity: 0.55, lightOpacity: 0.56) }
 
     /// Low-emphasis / metadata
-    static let textTertiary = Color.white.opacity(0.30)
+    static var textTertiary: Color { themed(dark: .white, light: .black, darkOpacity: 0.30, lightOpacity: 0.34) }
 
     // MARK: Semantic — only used for actual meaning
 
     /// Completed / success — soft teal
-    static let success = Color(hex: 0x30D158)
+    static var success: Color { themed(dark: 0x30D158, light: 0x34C759) }
 
     /// Warning / caution
-    static let warning = Color(hex: 0xFFD60A)
+    static var warning: Color { themed(dark: 0xFFD60A, light: 0xC88A00) }
 
     /// Destructive
-    static let danger = Color(hex: 0xFF453A)
+    static var danger: Color { themed(dark: 0xFF453A, light: 0xFF3B30) }
 
     // MARK: Subtle tints — very muted, only for differentiation
 
     /// Active block subtle tint
-    static let activeHint = Color.white.opacity(0.06)
+    static var activeHint: Color { themed(dark: .white, light: .black, darkOpacity: 0.06, lightOpacity: 0.035) }
 
     // MARK: Dividers
 
-    static let divider = Color.white.opacity(0.08)
+    static var divider: Color { themed(dark: .white, light: .black, darkOpacity: 0.08, lightOpacity: 0.08) }
 
     /// Card border — very subtle
-    static let cardBorder = Color.white.opacity(0.06)
+    static var cardBorder: Color { themed(dark: .white, light: .black, darkOpacity: 0.06, lightOpacity: 0.07) }
 
     // MARK: Block-type accents
     /// Muted accent colors used as thin rails / chip tints on the Today timeline.
     /// Kept low-chroma so the canvas stays calm per Style Guide.
 
     /// Focus — the product's primary accent. Green, matches `success`.
-    static let accentFocus = Color(hex: 0x34C759)
+    static var accentFocus: Color { Color(hex: 0x34C759) }
 
     /// Routine — soft teal / sea-green, steady and restorative.
-    static let accentRoutine = Color(hex: 0x5BC6B9)
+    static var accentRoutine: Color { Color(hex: 0x5BC6B9) }
 
     /// Fixed — warm amber, signals "this can't move".
-    static let accentFixed = Color(hex: 0xE2B253)
+    static var accentFixed: Color { Color(hex: 0xE2B253) }
 
     /// Mini — muted lavender, signals "lightweight / filler".
-    static let accentMini = Color(hex: 0xA99BE0)
+    static var accentMini: Color { Color(hex: 0xA99BE0) }
 
     // MARK: - Schedule block cosmetic tints
     /// Optional 0xRRGGBB override for timeline / icon colour; `nil` uses `BlockType` defaults.
@@ -94,6 +156,24 @@ enum CueInColors {
 
     /// Legacy — prefer ``scheduleBlockAppearanceHexChoices`` for new UI.
     static let scheduleBlockAccentSwatches: [UInt32] = scheduleBlockAppearanceHexChoices
+
+    private static func themed(dark: UInt, light: UInt) -> Color {
+        Color(UIColor { _ in
+            UIColor(hex: CueInThemePreference.current == .light ? light : dark)
+        })
+    }
+
+    private static func themed(
+        dark: UIColor,
+        light: UIColor,
+        darkOpacity: CGFloat,
+        lightOpacity: CGFloat
+    ) -> Color {
+        Color(UIColor { _ in
+            let isLight = CueInThemePreference.current == .light
+            return (isLight ? light : dark).withAlphaComponent(isLight ? lightOpacity : darkOpacity)
+        })
+    }
 }
 
 // MARK: - Color+Hex
@@ -107,6 +187,17 @@ extension Color {
             green: Double((hex >>  8) & 0xFF) / 255,
             blue:  Double( hex        & 0xFF) / 255,
             opacity: alpha
+        )
+    }
+}
+
+private extension UIColor {
+    convenience init(hex: UInt, alpha: CGFloat = 1.0) {
+        self.init(
+            red: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: alpha
         )
     }
 }

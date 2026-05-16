@@ -231,26 +231,39 @@ struct TodayView: View {
                 presentScheduleStart()
             }
             .background(CueInColors.background)
-            .toolbar(.hidden, for: .navigationBar)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                TodayTopChromeBar(
-                    title: todayChromeTitle,
-                    prominentTitle: viewModel.isTaskLedMode && taskLedViewMode == .todo,
-                    showsStart: viewModel.hasFormulaTemplate && viewModel.isFormulaPreviewing,
-                    onStart: {
-                        isJiggleRearrangeMode = false
-                        presentScheduleStart()
-                    },
-                    showsSchedulePlayback: scheduleShowsPagePlaybackControl && viewModel.hasFormulaRunStarted,
-                    schedulePlaybackSystemImage: (viewModel.isFormulaRunStopped || viewModel.isFormulaSchedulePaused) ? "play.fill" : "pause.fill",
-                    schedulePlaybackAccessibilityLabel: (viewModel.isFormulaRunStopped || viewModel.isFormulaSchedulePaused) ? "Resume schedule" : "Pause schedule",
-                    onSchedulePlayback: toggleSchedulePlayback,
-                    showsRearrangeDone: isJiggleRearrangeMode,
-                    onRearrangeDone: { isJiggleRearrangeMode = false },
-                    scheduleLiveMenu: { EmptyView() },
-                    beforeTrailing: { todayTodoChromeBeforeTrailing },
-                    trailing: { todayOverflowMenu }
-                )
+            .navigationTitle(todayChromeTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if isJiggleRearrangeMode {
+                        Button("Done") { isJiggleRearrangeMode = false }
+                            .fontWeight(.semibold)
+                            .foregroundStyle(CueInColors.textPrimary)
+                    }
+
+                    if viewModel.hasFormulaTemplate && viewModel.isFormulaPreviewing {
+                        Button("Start") {
+                            isJiggleRearrangeMode = false
+                            presentScheduleStart()
+                        }
+                        .fontWeight(.semibold)
+                        .foregroundStyle(CueInColors.textPrimary)
+                    }
+
+                    if scheduleShowsPagePlaybackControl && viewModel.hasFormulaRunStarted {
+                        Button {
+                            toggleSchedulePlayback()
+                        } label: {
+                            Image(systemName: (viewModel.isFormulaRunStopped || viewModel.isFormulaSchedulePaused) ? "play.fill" : "pause.fill")
+                        }
+                        .accessibilityLabel((viewModel.isFormulaRunStopped || viewModel.isFormulaSchedulePaused) ? "Resume schedule" : "Pause schedule")
+                        .foregroundStyle(CueInColors.textPrimary)
+                    }
+
+                    todayTodoChromeBeforeTrailing
+
+                    todayOverflowMenu
+                }
             }
         }
         .devNotebookScreen(todayChromeTitle)
@@ -558,7 +571,9 @@ struct TodayView: View {
                 }
             }
         } label: {
-            TodayChromeMenuGlyph()
+            Image(systemName: "ellipsis")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(CueInColors.textPrimary)
         }
         .accessibilityLabel("Menu")
     }
@@ -627,13 +642,8 @@ private struct TodayTodoChromeSortMenu: View {
             Image(systemName: "arrow.up.arrow.down")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(CueInColors.textPrimary)
-                .frame(width: 44, height: 44)
-                .contentShape(Circle())
-                .modifier(CueInStableGlassCircleModifier())
         }
-        .buttonStyle(.plain)
         .accessibilityLabel("Sort to-do list")
-        .cueInMenuInteractionStability()
     }
 
     private func syncTimeline() {
@@ -717,9 +727,9 @@ private struct TodayTodoChromeSummaryBarPill: View {
             .lineLimit(1)
             .minimumScaleFactor(0.75)
             .padding(.horizontal, 12)
-            .frame(height: CueInLayout.topChromeButtonHeight)
-            .contentShape(Capsule(style: .continuous))
-            .modifier(CueInStableGlassCapsuleModifier())
+            .padding(.vertical, 6)
+            .background(Color(white: 0.15))
+            .clipShape(Capsule(style: .continuous))
             .accessibilityLabel(accessibilitySummary)
     }
 }
@@ -772,5 +782,5 @@ private struct ExecutionTaskEditRequest: Identifiable {
         CueInColors.background.ignoresSafeArea()
         TodayView()
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

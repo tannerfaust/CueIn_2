@@ -19,6 +19,7 @@ final class SupabaseAuthStore {
     var isWorking = false
     var lastError: String?
     var lastMagicLinkEmail: String?
+    var lastAuthNotice: String?
     var pendingAppleNonce: String?
 
     var configurationState: SupabaseConfigurationState {
@@ -53,6 +54,21 @@ final class SupabaseAuthStore {
         await perform {
             let newSession = try await self.client.signInWithPassword(email: email, password: password)
             self.save(newSession)
+            self.lastAuthNotice = nil
+            await CueInSyncRuntimeBridge.shared.migrateAndSyncCurrentWorkspace()
+        }
+    }
+
+    func signUpWithPassword(email: String, password: String) async {
+        await perform {
+            let response = try await self.client.signUpWithPassword(email: email, password: password)
+            if let session = response.session {
+                self.save(session)
+                self.lastAuthNotice = nil
+                await CueInSyncRuntimeBridge.shared.migrateAndSyncCurrentWorkspace()
+            } else {
+                self.lastAuthNotice = "Account created. Confirm your email, then sign in."
+            }
         }
     }
 
@@ -80,28 +96,19 @@ final class SupabaseAuthStore {
         lastError = nil
         do {
             let callback = try await WebOAuthSession.start(url: url, callbackScheme: config.redirectURL.scheme ?? "cuein")
-            let fragmentItems = Self.callbackItems(from: callback)
-            guard
-                let accessToken = fragmentItems["access_token"],
-                let refreshToken = fragmentItems["refresh_token"]
-            else {
-                throw SupabaseClientError.invalidResponse
-            }
-            let expiresIn = TimeInterval(fragmentItems["expires_in"].flatMap(Double.init) ?? 3600)
-            let user = try await client.user(accessToken: accessToken)
-            save(
-                SupabaseAuthSession(
-                    accessToken: accessToken,
-                    refreshToken: refreshToken,
-                    tokenType: fragmentItems["token_type"] ?? "bearer",
-                    expiresAt: Date().addingTimeInterval(expiresIn),
-                    user: user
-                )
-            )
+            try await handleCallback(callback)
+            await CueInSyncRuntimeBridge.shared.migrateAndSyncCurrentWorkspace()
         } catch {
             lastError = error.localizedDescription
         }
         isWorking = false
+    }
+
+    func handleIncomingURL(_ url: URL) async {
+        await perform {
+            try await self.handleCallback(url)
+            await CueInSyncRuntimeBridge.shared.migrateAndSyncCurrentWorkspace()
+        }
     }
 
     func signInWithApple(credential: ASAuthorizationAppleIDCredential) async {
@@ -121,6 +128,7 @@ final class SupabaseAuthStore {
             )
             self.save(newSession)
             self.pendingAppleNonce = nil
+            await CueInSyncRuntimeBridge.shared.migrateAndSyncCurrentWorkspace()
         }
     }
 
@@ -129,6 +137,7 @@ final class SupabaseAuthStore {
         await perform {
             let newSession = try await self.client.refreshSession(current)
             self.save(newSession)
+            await CueInSyncEngine.shared.syncNow()
         }
     }
 
@@ -161,6 +170,7 @@ final class SupabaseAuthStore {
     private func perform(_ operation: @escaping () async throws -> Void) async {
         isWorking = true
         lastError = nil
+        lastAuthNotice = nil
         do {
             try await operation()
         } catch {
@@ -172,6 +182,28 @@ final class SupabaseAuthStore {
     private func save(_ newSession: SupabaseAuthSession) {
         session = newSession
         tokenStore.save(newSession)
+    }
+
+    private func handleCallback(_ url: URL) async throws {
+        let callbackValues = Self.callbackItems(from: url)
+        guard
+            let accessToken = callbackValues["access_token"],
+            let refreshToken = callbackValues["refresh_token"]
+        else {
+            throw SupabaseClientError.invalidResponse
+        }
+
+        let expiresIn = TimeInterval(callbackValues["expires_in"].flatMap(Double.init) ?? 3600)
+        let user = try await client.user(accessToken: accessToken)
+        save(
+            SupabaseAuthSession(
+                accessToken: accessToken,
+                refreshToken: refreshToken,
+                tokenType: callbackValues["token_type"] ?? "bearer",
+                expiresAt: Date().addingTimeInterval(expiresIn),
+                user: user
+            )
+        )
     }
 
     private func clearSession() {

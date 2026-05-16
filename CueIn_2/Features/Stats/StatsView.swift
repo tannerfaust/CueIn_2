@@ -1,120 +1,242 @@
 import SwiftUI
 
 // MARK: - StatsView
-/// Placeholder Stats tab — neutral, clean, no colored elements.
+/// Stats tab: Activity-style rings driven by Algorithm adherence, awake window, and Today tasks.
+/// Page-specific settings live in the navigation menu (⋯).
 
 struct StatsView: View {
+    @State private var showStatsSettings = false
+    @Bindable private var todayViewModel = TodayViewModel.shared
+    @Bindable private var tasksStore = TasksStore.shared
+
+    @AppStorage(StatsDisplayPreferences.showActivityRings) private var showActivityRings = true
+    @AppStorage(StatsDisplayPreferences.showTodayProgressCard) private var showTodayProgressCard = true
+    @AppStorage(StatsDisplayPreferences.showWeeklySnapshot) private var showWeeklySnapshot = false
+    @AppStorage(StatsDisplayPreferences.showTimeAllocation) private var showTimeAllocation = false
+    @AppStorage(StatsDisplayPreferences.showTrends) private var showTrends = false
+    @AppStorage(StatsDisplayPreferences.showActivitySparkline) private var showActivitySparkline = false
+
+    @AppStorage(StatsDisplayPreferences.dayWakeMinutes) private var dayWakeMinutes = StatsDisplayPreferences.dayWakeMinutesDefault
+    @AppStorage(StatsDisplayPreferences.daySleepMinutes) private var daySleepMinutes = StatsDisplayPreferences.daySleepMinutesDefault
+
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: CueInSpacing.xl) {
-                // Header
-                VStack(alignment: .leading, spacing: CueInSpacing.xs) {
-                    Text("Stats")
-                        .font(CueInTypography.largeTitle)
-                        .foregroundStyle(CueInColors.textPrimary)
+        NavigationStack {
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                let snapshot = StatsDayMetrics.makeSnapshot(
+                    now: context.date,
+                    viewModel: todayViewModel,
+                    todayTasks: tasksStore.todayTasks,
+                    wakeMinutesFromMidnight: dayWakeMinutes,
+                    sleepMinutesFromMidnight: daySleepMinutes
+                )
 
-                    Text("See how you're actually living")
-                        .font(CueInTypography.body)
-                        .foregroundStyle(CueInColors.textSecondary)
-                }
-                .padding(.horizontal, CueInSpacing.screenHorizontal)
-                .padding(.top, CueInSpacing.base)
-
-                VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-                    Text("Today")
-                        .font(CueInTypography.title)
-                        .foregroundStyle(CueInColors.textPrimary)
-                    TodayProgressSummaryCard()
-                }
-                .padding(.horizontal, CueInSpacing.screenHorizontal)
-
-                // Weekly Summary
-                CueInCard {
-                    VStack(alignment: .leading, spacing: CueInSpacing.base) {
-                        HStack {
-                            Text("This Week")
-                                .font(CueInTypography.headline)
-                                .foregroundStyle(CueInColors.textPrimary)
-                            Spacer()
-                            Text("Apr 17–23")
-                                .font(CueInTypography.caption)
-                                .foregroundStyle(CueInColors.textTertiary)
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: CueInSpacing.xl) {
+                        if showActivityRings {
+                            activityRingsSection(snapshot: snapshot)
                         }
 
-                        HStack(spacing: CueInSpacing.xl) {
-                            statRing(value: 0.73, label: "Completion")
-                            statRing(value: 0.85, label: "Consistency")
-                            statRing(value: 0.61, label: "Focus Time")
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                }
-                .padding(.horizontal, CueInSpacing.screenHorizontal)
-
-                // Time Allocation
-                VStack(alignment: .leading, spacing: CueInSpacing.md) {
-                    Text("Time Allocation")
-                        .font(CueInTypography.title)
-                        .foregroundStyle(CueInColors.textPrimary)
-
-                    CueInCard {
-                        VStack(spacing: CueInSpacing.md) {
-                            allocationBar(label: "Deep Work", hours: 14.5, total: 40)
-                            allocationBar(label: "Meetings", hours: 6.0, total: 40)
-                            allocationBar(label: "Routines", hours: 7.5, total: 40)
-                            allocationBar(label: "Admin", hours: 4.0, total: 40)
-                            allocationBar(label: "Breaks", hours: 3.5, total: 40)
-                        }
-                    }
-                }
-                .padding(.horizontal, CueInSpacing.screenHorizontal)
-
-                // Trends
-                VStack(alignment: .leading, spacing: CueInSpacing.md) {
-                    Text("Trends")
-                        .font(CueInTypography.title)
-                        .foregroundStyle(CueInColors.textPrimary)
-
-                    HStack(spacing: CueInSpacing.md) {
-                        trendCard(title: "Tasks / Day", value: "8.3", trend: "+12%", isUp: true)
-                        trendCard(title: "Focus Hours", value: "3.2h", trend: "-5%", isUp: false)
-                    }
-
-                    HStack(spacing: CueInSpacing.md) {
-                        trendCard(title: "Block Adherence", value: "78%", trend: "+8%", isUp: true)
-                        trendCard(title: "Replan Rate", value: "2.1x", trend: "-15%", isUp: true)
-                    }
-                }
-                .padding(.horizontal, CueInSpacing.screenHorizontal)
-
-                // Activity
-                VStack(alignment: .leading, spacing: CueInSpacing.md) {
-                    Text("7-Day Activity")
-                        .font(CueInTypography.title)
-                        .foregroundStyle(CueInColors.textPrimary)
-
-                    CueInCard {
-                        VStack(spacing: CueInSpacing.md) {
-                            sparkline(data: [0.4, 0.65, 0.8, 0.55, 0.9, 0.7, 0.75])
-
-                            HStack {
-                                ForEach(Array(["M", "T", "W", "T", "F", "S", "S"].enumerated()), id: \.offset) { _, day in
-                                    Text(day)
-                                        .font(CueInTypography.micro)
-                                        .foregroundStyle(CueInColors.textTertiary)
-                                        .frame(maxWidth: .infinity)
-                                }
+                        if showTodayProgressCard {
+                            VStack(alignment: .leading, spacing: CueInSpacing.sm) {
+                                Text("Today")
+                                    .font(CueInTypography.title)
+                                    .foregroundStyle(CueInColors.textPrimary)
+                                TodayProgressSummaryCard()
                             }
+                            .padding(.horizontal, CueInSpacing.screenHorizontal)
+                        }
+
+                        if showWeeklySnapshot {
+                            weeklySnapshotSection(snapshot: snapshot)
+                        }
+
+                        if showTimeAllocation {
+                            timeAllocationSection
+                        }
+
+                        if showTrends {
+                            trendsSection
+                        }
+
+                        if showActivitySparkline {
+                            activitySparklineSection
                         }
                     }
+                    .padding(.bottom, CueInLayout.scrollBottomInset)
                 }
-                .padding(.horizontal, CueInSpacing.screenHorizontal)
             }
-            .padding(.bottom, CueInLayout.scrollBottomInset)
+            .onAppear {
+                // Keep formula / timeline-derived labels fresh if Today hasn’t ticked recently.
+                todayViewModel.currentTime = Date()
+            }
+            .navigationTitle("Stats")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button {
+                            showStatsSettings = true
+                        } label: {
+                            Label("Stats settings", systemImage: "slider.horizontal.3")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(CueInColors.textSecondary)
+                    }
+                    .accessibilityLabel("Stats options")
+                }
+            }
+        }
+        .sheet(isPresented: $showStatsSettings) {
+            StatsSettingsSheet(isPresented: $showStatsSettings)
+                .presentationDetents([.medium, .large])
+                .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+                .presentationDragIndicator(.visible)
         }
     }
 
-    // MARK: - Components
+
+    private func activityRingsSection(snapshot: StatsDaySnapshot) -> some View {
+        CueInCard {
+            HStack(alignment: .top, spacing: CueInSpacing.lg) {
+                StatsActivityRingsView(snapshot: snapshot)
+                    .padding(.top, CueInSpacing.xs)
+
+                VStack(alignment: .leading, spacing: CueInSpacing.md) {
+                    ringLegend(
+                        color: Color(red: 0.98, green: 0.35, blue: 0.38),
+                        title: "Awake day",
+                        caption: snapshot.awakeCaption
+                    )
+                    ringLegend(
+                        color: CueInColors.accentFocus,
+                        title: "Algorithm",
+                        caption: snapshot.algorithmCaption
+                    )
+                    ringLegend(
+                        color: Color(red: 0.35, green: 0.78, blue: 0.98),
+                        title: "Today tasks",
+                        caption: snapshot.todayTasksCaption
+                    )
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, CueInSpacing.screenHorizontal)
+    }
+
+    private func ringLegend(color: Color, title: String, caption: String) -> some View {
+        HStack(alignment: .top, spacing: CueInSpacing.sm) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+                .padding(.top, 5)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(CueInTypography.captionMedium)
+                    .foregroundStyle(CueInColors.textPrimary)
+                Text(caption)
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(CueInColors.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func weeklySnapshotSection(snapshot: StatsDaySnapshot) -> some View {
+        CueInCard {
+            VStack(alignment: .leading, spacing: CueInSpacing.base) {
+                HStack {
+                    Text("This week")
+                        .font(CueInTypography.headline)
+                        .foregroundStyle(CueInColors.textPrimary)
+                    Spacer()
+                    Text("Sample")
+                        .font(CueInTypography.caption)
+                        .foregroundStyle(CueInColors.textTertiary)
+                }
+
+                Text("Placeholder — will chart your real rings once history lands.")
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(CueInColors.textSecondary)
+
+                HStack(spacing: CueInSpacing.xl) {
+                    statRing(value: snapshot.awakeProgress, label: "Awake")
+                    statRing(value: snapshot.algorithmProgress, label: "Algorithm")
+                    statRing(value: snapshot.todayTasksProgress, label: "Tasks")
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.horizontal, CueInSpacing.screenHorizontal)
+    }
+
+    private var timeAllocationSection: some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.md) {
+            sectionHeader("Time allocation", badge: "Sample")
+            CueInCard {
+                VStack(spacing: CueInSpacing.md) {
+                    allocationBar(label: "Deep Work", hours: 14.5, total: 40)
+                    allocationBar(label: "Meetings", hours: 6.0, total: 40)
+                    allocationBar(label: "Routines", hours: 7.5, total: 40)
+                    allocationBar(label: "Admin", hours: 4.0, total: 40)
+                    allocationBar(label: "Breaks", hours: 3.5, total: 40)
+                }
+            }
+        }
+        .padding(.horizontal, CueInSpacing.screenHorizontal)
+    }
+
+    private var trendsSection: some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.md) {
+            sectionHeader("Trends", badge: "Sample")
+            HStack(spacing: CueInSpacing.md) {
+                trendCard(title: "Tasks / Day", value: "8.3", trend: "+12%", isUp: true)
+                trendCard(title: "Focus Hours", value: "3.2h", trend: "-5%", isUp: false)
+            }
+
+            HStack(spacing: CueInSpacing.md) {
+                trendCard(title: "Block adherence", value: "78%", trend: "+8%", isUp: true)
+                trendCard(title: "Replan rate", value: "2.1x", trend: "-15%", isUp: true)
+            }
+        }
+        .padding(.horizontal, CueInSpacing.screenHorizontal)
+    }
+
+    private var activitySparklineSection: some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.md) {
+            sectionHeader("7-day activity", badge: "Sample")
+            CueInCard {
+                VStack(spacing: CueInSpacing.md) {
+                    sparkline(data: [0.4, 0.65, 0.8, 0.55, 0.9, 0.7, 0.75])
+
+                    HStack {
+                        ForEach(Array(["M", "T", "W", "T", "F", "S", "S"].enumerated()), id: \.offset) { _, day in
+                            Text(day)
+                                .font(CueInTypography.micro)
+                                .foregroundStyle(CueInColors.textTertiary)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, CueInSpacing.screenHorizontal)
+    }
+
+    private func sectionHeader(_ title: String, badge: String) -> some View {
+        HStack {
+            Text(title)
+                .font(CueInTypography.title)
+                .foregroundStyle(CueInColors.textPrimary)
+            Spacer()
+            Text(badge)
+                .font(CueInTypography.caption)
+                .foregroundStyle(CueInColors.textTertiary)
+        }
+    }
 
     @ViewBuilder
     private func statRing(value: Double, label: String) -> some View {
@@ -126,7 +248,13 @@ struct StatsView: View {
 
                 Circle()
                     .trim(from: 0, to: value)
-                    .stroke(Color.white.opacity(0.6), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .stroke(
+                        AngularGradient(
+                            colors: [CueInColors.accentFocus.opacity(0.55), CueInColors.accentFocus, CueInColors.accentFocus.opacity(0.75)],
+                            center: .center
+                        ),
+                        style: StrokeStyle(lineWidth: 4, lineCap: .round)
+                    )
                     .frame(width: 52, height: 52)
                     .rotationEffect(.degrees(-90))
 
@@ -199,7 +327,7 @@ struct StatsView: View {
         GeometryReader { geo in
             let w = geo.size.width
             let h: CGFloat = 40
-            let step = w / CGFloat(data.count - 1)
+            let step = w / CGFloat(max(data.count - 1, 1))
 
             Path { path in
                 for (i, val) in data.enumerated() {
@@ -229,5 +357,5 @@ struct StatsView: View {
         CueInColors.background.ignoresSafeArea()
         StatsView()
     }
-    .preferredColorScheme(.dark)
+    .cueInPreferredColorScheme()
 }

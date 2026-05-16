@@ -52,3 +52,29 @@ struct SupabaseAuthUserResponse: Codable {
     var user: SupabaseUser
 }
 
+struct SupabaseSignUpResponse: Codable {
+    var accessToken: String?
+    var refreshToken: String?
+    var tokenType: String?
+    var expiresIn: TimeInterval?
+    var user: SupabaseUser
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case refreshToken = "refresh_token"
+        case tokenType = "token_type"
+        case expiresIn = "expires_in"
+        case user
+    }
+
+    var session: SupabaseAuthSession? {
+        guard let accessToken, let refreshToken else { return nil }
+        return SupabaseAuthSession(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            tokenType: tokenType ?? "bearer",
+            expiresAt: Date().addingTimeInterval(expiresIn ?? 3600),
+            user: user
+        )
+    }
+}
