@@ -4,17 +4,51 @@ import Foundation
 /// Seeded formula library used by the Today formula mode.
 
 enum FormulaLibraryService {
-    private static let customSchedulesKey = "cuein.customSchedules.v1"
-    private static let customBlockPresetsKey = "cuein.customBlockPresets.v1"
+    /// Bundled “Test day (empty blocks)” template — optional to hide from in-app lists (see Settings).
+    static let bundledDummyTestDaySchemeID = UUID(uuidString: "66666666-6666-4666-8666-666666666666")!
+
+    /// Canonical local storage for saved day layouts (TimeMaps).
+    private static let customTimeMapsKey = "cuein.customTimeMaps.v1"
+    /// Canonical local storage for reusable block presets (TimeMap blocks).
+    private static let customTimeMapBlockPresetsKey = "cuein.customTimeMapBlockPresets.v1"
+    /// Legacy keys — read until first write to canonical keys clears them.
+    private static let legacyCustomSchedulesKey = "cuein.customSchedules.v1"
+    private static let legacyCustomBlockPresetsKey = "cuein.customBlockPresets.v1"
     private static var suppressSyncRecording = false
 
-    static var allSchedules: [DayFormulaTemplate] {
-        library + customSchedules()
+    private static func storedTimeMapsData() -> Data? {
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: customTimeMapsKey), !data.isEmpty { return data }
+        return defaults.data(forKey: legacyCustomSchedulesKey)
     }
 
-    /// User-saved block definitions only (not full schedules). See ``BlockTemplateLibrarySheet``.
+    private static func storedTimeMapBlockPresetsData() -> Data? {
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: customTimeMapBlockPresetsKey), !data.isEmpty { return data }
+        return defaults.data(forKey: legacyCustomBlockPresetsKey)
+    }
+
+    private static func clearLegacyScheduleKeysIfNeeded() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: legacyCustomSchedulesKey)
+        defaults.removeObject(forKey: legacyCustomBlockPresetsKey)
+    }
+
+    /// Built-in day layouts (starter schemes), respecting Settings for hiding dummy templates.
+    static var bundledLibraryTemplates: [DayFormulaTemplate] {
+        if UserDefaults.standard.bool(forKey: CueInAppDataKeys.hideBundledDummyTestDayTimeMap) {
+            return library.filter { $0.id != bundledDummyTestDaySchemeID }
+        }
+        return library
+    }
+
+    static var allSchedules: [DayFormulaTemplate] {
+        bundledLibraryTemplates + customSchedules()
+    }
+
+    /// User-saved block definitions only (not full TimeMaps). See ``BlockTemplateLibrarySheet``.
     static func customBlockPresets() -> [DayFormulaBlockTemplate] {
-        guard let data = UserDefaults.standard.data(forKey: customBlockPresetsKey) else { return [] }
+        guard let data = storedTimeMapBlockPresetsData(), !data.isEmpty else { return [] }
         return (try? JSONDecoder().decode([DayFormulaBlockTemplate].self, from: data)) ?? []
     }
 
@@ -32,7 +66,9 @@ enum FormulaLibraryService {
             presets.append(preset.copyWithNewID())
         }
         guard let data = try? JSONEncoder().encode(presets) else { return false }
-        UserDefaults.standard.set(data, forKey: customBlockPresetsKey)
+        let defaults = UserDefaults.standard
+        defaults.set(data, forKey: customTimeMapBlockPresetsKey)
+        clearLegacyScheduleKeysIfNeeded()
         recordSyncSnapshot()
         return true
     }
@@ -42,12 +78,14 @@ enum FormulaLibraryService {
         var presets = customBlockPresets()
         presets.removeAll { $0.id == id }
         guard let data = try? JSONEncoder().encode(presets) else { return }
-        UserDefaults.standard.set(data, forKey: customBlockPresetsKey)
+        let defaults = UserDefaults.standard
+        defaults.set(data, forKey: customTimeMapBlockPresetsKey)
+        clearLegacyScheduleKeysIfNeeded()
         recordSyncSnapshot()
     }
 
     static func customSchedules() -> [DayFormulaTemplate] {
-        guard let data = UserDefaults.standard.data(forKey: customSchedulesKey) else { return [] }
+        guard let data = storedTimeMapsData(), !data.isEmpty else { return [] }
         return (try? JSONDecoder().decode([DayFormulaTemplate].self, from: data)) ?? []
     }
 
@@ -67,7 +105,7 @@ enum FormulaLibraryService {
     /// Picks a display name that does not collide with ``allSchedules`` (excluding one id when renaming that row).
     static func uniquedScheduleDisplayName(startingWith base: String, excludingScheduleID: UUID?) -> String {
         let root = base.trimmingCharacters(in: .whitespacesAndNewlines)
-        let stem = root.isEmpty ? "Untitled schedule" : root
+        let stem = root.isEmpty ? "Untitled TimeMap" : root
         if existingScheduleConflictingWithName(stem, excludingScheduleID: excludingScheduleID) == nil {
             return stem
         }
@@ -95,7 +133,9 @@ enum FormulaLibraryService {
         }
 
         guard let data = try? JSONEncoder().encode(schedules) else { return false }
-        UserDefaults.standard.set(data, forKey: customSchedulesKey)
+        let defaults = UserDefaults.standard
+        defaults.set(data, forKey: customTimeMapsKey)
+        clearLegacyScheduleKeysIfNeeded()
         recordSyncSnapshot()
         return true
     }
@@ -105,7 +145,9 @@ enum FormulaLibraryService {
         var schedules = customSchedules()
         schedules.removeAll { $0.id == id }
         guard let data = try? JSONEncoder().encode(schedules) else { return }
-        UserDefaults.standard.set(data, forKey: customSchedulesKey)
+        let defaults = UserDefaults.standard
+        defaults.set(data, forKey: customTimeMapsKey)
+        clearLegacyScheduleKeysIfNeeded()
         recordSyncSnapshot()
         Task { @MainActor in
             TodayViewModel.shared.reloadAvailableFormulasFromLibrary()
@@ -114,24 +156,33 @@ enum FormulaLibraryService {
 
     /// Removes user-created day formulas and saved block presets (bundled templates stay on disk in code).
     static func clearUserSavedTemplates() {
-        UserDefaults.standard.removeObject(forKey: customSchedulesKey)
-        UserDefaults.standard.removeObject(forKey: customBlockPresetsKey)
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: customTimeMapsKey)
+        defaults.removeObject(forKey: customTimeMapBlockPresetsKey)
+        defaults.removeObject(forKey: legacyCustomSchedulesKey)
+        defaults.removeObject(forKey: legacyCustomBlockPresetsKey)
         recordSyncSnapshot()
     }
 
     static func syncPayload() -> [String: String] {
-        let defaults = UserDefaults.standard
+        let mapsB64 = storedTimeMapsData()?.base64EncodedString() ?? ""
+        let blocksB64 = storedTimeMapBlockPresetsData()?.base64EncodedString() ?? ""
         return [
-            "custom_schedules": defaults.data(forKey: customSchedulesKey)?.base64EncodedString() ?? "",
-            "custom_block_presets": defaults.data(forKey: customBlockPresetsKey)?.base64EncodedString() ?? ""
+            "custom_timemaps": mapsB64,
+            "custom_time_map_block_presets": blocksB64,
+            "custom_schedules": mapsB64,
+            "custom_block_presets": blocksB64,
         ]
     }
 
     static func applySyncPayload(_ payload: [String: String]) {
         suppressSyncRecording = true
         let defaults = UserDefaults.standard
-        applyBase64Payload(payload["custom_schedules"], key: customSchedulesKey, defaults: defaults)
-        applyBase64Payload(payload["custom_block_presets"], key: customBlockPresetsKey, defaults: defaults)
+        let mapsPayload = payload["custom_timemaps"] ?? payload["custom_schedules"]
+        let blocksPayload = payload["custom_time_map_block_presets"] ?? payload["custom_block_presets"]
+        applyBase64Payload(mapsPayload, key: customTimeMapsKey, defaults: defaults)
+        applyBase64Payload(blocksPayload, key: customTimeMapBlockPresetsKey, defaults: defaults)
+        clearLegacyScheduleKeysIfNeeded()
         suppressSyncRecording = false
         TodayViewModel.shared.reloadAvailableFormulasFromLibrary()
     }
@@ -355,7 +406,7 @@ enum FormulaLibraryService {
             ]
         ),
         DayFormulaTemplate(
-            id: UUID(uuidString: "66666666-6666-4666-8666-666666666666")!,
+            id: bundledDummyTestDaySchemeID,
             name: "Test day (empty blocks)",
             symbol: "square.dashed",
             summary: "Dummy schedule for trying layouts and the running day—each block is blank so you can add tasks yourself.",

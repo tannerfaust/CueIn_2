@@ -25,7 +25,7 @@ struct FormulaSchedulePreviewStatsBar: View {
                 .font(CueInTypography.title)
                 .foregroundStyle(CueInColors.textPrimary)
                 .monospacedDigit()
-                .accessibilityLabel("Schedule duration, \(ScheduleBlockFormat.durationLabel(minutes: totalMinutes))")
+                .accessibilityLabel("TimeMap duration, \(ScheduleBlockFormat.durationLabel(minutes: totalMinutes))")
 
             Spacer(minLength: 0)
 
@@ -160,7 +160,7 @@ struct FormulaScheduleSaveSheet: View {
                             Button {
                                 validateAndCommit(.saveAsNew)
                             } label: {
-                                Text("Save as new schedule")
+                                Text("Save as new TimeMap")
                                     .font(CueInTypography.headline)
                                     .foregroundStyle(CueInColors.textPrimary)
                                     .frame(maxWidth: .infinity)
@@ -189,7 +189,7 @@ struct FormulaScheduleSaveSheet: View {
                 .padding(.vertical, CueInSpacing.md)
             }
             .background(CueInColors.background)
-            .navigationTitle("Save schedule")
+            .navigationTitle("Save TimeMap")
             .cueInNavigationBarTitleDisplayMode(.inline)
             .cueInNavigationToolbarColorScheme()
             .onChange(of: name) { _, _ in
@@ -221,9 +221,9 @@ struct FormulaScheduleSaveSheet: View {
         if FormulaLibraryService.existingScheduleConflictingWithName(trimmed, excludingScheduleID: exclude) != nil {
             switch intent {
             case .updateExisting:
-                nameValidationMessage = "Another schedule already uses that name. Pick a different name, or keep this schedule’s name to update it in place."
+                nameValidationMessage = "Another TimeMap already uses that name. Pick a different name, or keep this TimeMap’s name to update it in place."
             case .saveAsNew:
-                nameValidationMessage = "That name is already taken (including built-in schedules). Enter a new name for this copy."
+                nameValidationMessage = "That name is already taken (including built-in TimeMaps). Enter a new name for this copy."
             }
             return
         }

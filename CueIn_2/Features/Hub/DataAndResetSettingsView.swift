@@ -31,6 +31,7 @@ struct DataAndResetSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @AppStorage(CueInAppDataKeys.gimmickDemoRemoved) private var gimmickDemoRemoved = false
+    @AppStorage(CueInAppDataKeys.hideBundledDummyTestDayTimeMap) private var hideBundledDummyTestDayTimeMap = false
     @AppStorage(CueInThemePreference.storageKey) private var themeRawValue = CueInThemePreference.defaultValue.rawValue
 
     @State private var confirmEraseEverything = false
@@ -88,7 +89,7 @@ struct DataAndResetSettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes Tasks, Goals, schedules, custom formulas, block presets, and Today display preferences on this device. Demo sample data will be restored. This cannot be undone.")
+            Text("This removes Tasks, Goals, TimeMaps, TimeMap block presets, and Today display preferences on this device. Demo sample data will be restored. This cannot be undone.")
         }
         .confirmationDialog(
             "Remove demo data?",
@@ -126,10 +127,10 @@ struct DataAndResetSettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Removes your custom day formulas and saved block presets. Bundled templates in the app stay available.")
+            Text("Removes your saved TimeMaps and TimeMap block presets. Bundled templates in the app stay available.")
         }
         .confirmationDialog(
-            "Clear schedule state?",
+            "Clear TimeMap state?",
             isPresented: $confirmClearSchedule,
             titleVisibility: .visible
         ) {
@@ -138,7 +139,7 @@ struct DataAndResetSettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Clears the saved schedule run, formula timers, and resets Today’s blocks (mock sample day if demo is on, otherwise empty).")
+            Text("Clears the saved TimeMap run, timers, and resets Today’s time blocks (mock sample day if demo is on, otherwise empty).")
         }
         .confirmationDialog(
             "Clear Tasks tab?",
@@ -238,7 +239,7 @@ struct DataAndResetSettingsView: View {
                 title: gimmickDemoRemoved ? "Demo data removed" : "Demo data active",
                 subtitle: gimmickDemoRemoved
                     ? "Tasks, Goals, and task-led Today use empty starter content."
-                    : "Sample tasks, goals, and schedules match the bundled mock day."
+                    : "Sample tasks, goals, and TimeMaps match the bundled mock day."
             )
 
             settingsRow(
@@ -263,13 +264,50 @@ struct DataAndResetSettingsView: View {
     }
 
     private var librarySectionContent: some View {
-        settingsRow(
-            title: "Clear saved formulas & presets",
-            subtitle: "User-created schedules and block presets only — not bundled templates",
-            icon: "books.vertical",
-            role: .destructive
-        ) {
-            confirmClearLibrary = true
+        VStack(spacing: CueInSpacing.sm) {
+            HStack(spacing: CueInSpacing.md) {
+                Image(systemName: "square.dashed")
+                    .font(.system(size: 16))
+                    .foregroundStyle(CueInColors.textSecondary)
+                    .frame(width: 34, height: 34)
+                    .background(CueInColors.surfaceSecondary.opacity(0.72))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Hide Test day starter scheme")
+                        .font(CueInTypography.bodyMedium)
+                        .foregroundStyle(CueInColors.textPrimary)
+                        .multilineTextAlignment(.leading)
+                    Text("Removes the bundled empty-blocks sample from Library, pickers, and block lists.")
+                        .font(CueInTypography.caption)
+                        .foregroundStyle(CueInColors.textTertiary)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(3)
+                }
+
+                Spacer(minLength: 0)
+
+                Toggle("", isOn: $hideBundledDummyTestDayTimeMap)
+                    .labelsHidden()
+                    .tint(CueInColors.accentFocus)
+                    .onChange(of: hideBundledDummyTestDayTimeMap) { _, _ in
+                        Task { @MainActor in
+                            TodayViewModel.shared.reloadAvailableFormulasFromLibrary()
+                        }
+                    }
+            }
+            .padding(.vertical, 6)
+
+            settingsDivider
+
+            settingsRow(
+                title: "Clear saved TimeMaps & block presets",
+                subtitle: "User-created TimeMaps and TimeMap block presets only — not bundled templates",
+                icon: "books.vertical",
+                role: .destructive
+            ) {
+                confirmClearLibrary = true
+            }
         }
     }
 
@@ -319,8 +357,8 @@ struct DataAndResetSettingsView: View {
 
     private var todaySectionContent: some View {
         settingsRow(
-            title: "Today schedule",
-            subtitle: "Saved run, timers, formulas, and blocks",
+            title: "Today TimeMap",
+            subtitle: "Saved run, timers, TimeMap, and time blocks",
             icon: "calendar.badge.clock",
             role: .destructive
         ) {

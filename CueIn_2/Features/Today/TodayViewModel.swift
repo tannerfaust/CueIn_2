@@ -556,16 +556,16 @@ final class TodayViewModel {
         dayEngineMode == .formulaBased && formulaRunStartedAt == nil && !isFormulaRunStopped
     }
 
-    /// Short label for the navigation bar in Schedule mode: saved template name, or a neutral draft label when there are blocks but no library selection.
+    /// Short label for the navigation bar in TimeMap mode: saved template name, or a neutral draft label when there are time blocks but no library selection.
     var formulaScheduleNavigationTitle: String {
         guard isFormulaMode else { return "" }
         if let name = selectedFormula?.name.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
             return name
         }
         if !todayScheduleBlocks.isEmpty {
-            return "Draft schedule"
+            return "Draft TimeMap"
         }
-        return "Blocks"
+        return "TimeMap"
     }
 
     /// `true` when the selected template is one of the user's saved library schedules (not a bundled sample).
@@ -762,14 +762,14 @@ final class TodayViewModel {
         }
 
         if isFormulaSchedulePaused {
-            return "Paused · \(remainingBlockCount) blocks · \(completedTaskCount)/\(totalTaskCount) tasks"
+            return "Paused · \(remainingBlockCount) time blocks · \(completedTaskCount)/\(totalTaskCount) tasks"
         }
 
         if isFormulaRunStopped {
             return "Stopped · \(completedTaskCount)/\(totalTaskCount) tasks"
         }
 
-        return "\(remainingBlockCount) blocks · \(completedTaskCount)/\(totalTaskCount) tasks"
+        return "\(remainingBlockCount) time blocks · \(completedTaskCount)/\(totalTaskCount) tasks"
     }
 
     /// Task-led execution: stats for the calendar day currently in view (scroll-synced header).
@@ -810,6 +810,7 @@ final class TodayViewModel {
             .first
     }
 
+    /// Field / project / folder suggestions for block editors (from today’s execution cards).
     var scheduleMakerTaskScopes: ScheduleMakerTaskScopes {
         let tasks = todayExecutionDay?.tasks ?? executionDays.first?.tasks ?? []
         return ScheduleMakerTaskScopes(tasks: tasks)
@@ -1015,7 +1016,7 @@ final class TodayViewModel {
                     ScheduleStartPreflightIssue(
                         id: "compress-\(boundaryID?.uuidString ?? "end")",
                         severity: .warning,
-                        title: "Blocks will compress before \(boundaryTitle)",
+                        title: "Time blocks will compress before \(boundaryTitle)",
                         message: "\(nominal)m of planned work will fit into \(window)m.",
                         suggestion: "Higher-priority blocks keep more room; lower-priority blocks shrink first.",
                         actions: boundaryActions
@@ -1026,7 +1027,7 @@ final class TodayViewModel {
                     ScheduleStartPreflightIssue(
                         id: "stretch-\(boundaryID?.uuidString ?? "end")",
                         severity: .notice,
-                        title: "Blocks will stretch before \(boundaryTitle)",
+                        title: "Time blocks will stretch before \(boundaryTitle)",
                         message: "\(nominal)m of planned work has \(window)m available.",
                         suggestion: "Add another block, fill from Execution, or let the engine expand the segment.",
                         actions: boundaryActions
@@ -1351,15 +1352,6 @@ final class TodayViewModel {
         }
     }
 
-    @MainActor
-    @discardableResult
-    func saveCreatedFormula(_ formula: DayFormulaTemplate) -> Bool {
-        guard FormulaLibraryService.saveCustomSchedule(formula) else { return false }
-        availableFormulas = FormulaLibraryService.allSchedules
-        selectFormula(formula.id)
-        return true
-    }
-
     /// Rebuilds the preview timeline from accordion drafts (before the schedule starts).
     @MainActor
     func replacePreviewBlocksFromDrafts(_ drafts: [ScheduleBlockDraft]) {
@@ -1375,7 +1367,7 @@ final class TodayViewModel {
             id: base.id,
             name: base.name,
             symbol: base.symbol,
-            summary: "\(templates.count) \(templates.count == 1 ? "block" : "blocks") · \(ScheduleBlockFormat.durationLabel(minutes: totalM))",
+            summary: "\(templates.count) \(templates.count == 1 ? "time block" : "time blocks") · \(ScheduleBlockFormat.durationLabel(minutes: totalM))",
             targetDurationMinutes: max(base.targetDurationMinutes, totalM, 5),
             rules: base.rules,
             blocks: templates
@@ -1395,12 +1387,12 @@ final class TodayViewModel {
         let draft = ScheduleBlockDraft.routineTemplate()
         let blockTemplate = draft.toFormulaBlockTemplate().copyWithNewID()
         let totalM = max(1, blockTemplate.durationMinutes)
-        let uniqueName = FormulaLibraryService.uniquedScheduleDisplayName(startingWith: "Untitled blocks", excludingScheduleID: nil)
+        let uniqueName = FormulaLibraryService.uniquedScheduleDisplayName(startingWith: "Untitled TimeMap", excludingScheduleID: nil)
         let formula = DayFormulaTemplate(
             id: UUID(),
             name: uniqueName,
             symbol: "calendar",
-            summary: "1 block · \(ScheduleBlockFormat.durationLabel(minutes: totalM))",
+            summary: "1 time block · \(ScheduleBlockFormat.durationLabel(minutes: totalM))",
             targetDurationMinutes: max(5, totalM),
             rules: [],
             blocks: [blockTemplate]
@@ -1447,7 +1439,7 @@ final class TodayViewModel {
         let rules = selectedFormula?.rules ?? []
 
         let summaryTrimmed = userSummary.trimmingCharacters(in: .whitespacesAndNewlines)
-        let autoSummary = "\(blockTemplates.count) \(blockTemplates.count == 1 ? "block" : "blocks") · \(ScheduleBlockFormat.durationLabel(minutes: totalM))"
+        let autoSummary = "\(blockTemplates.count) \(blockTemplates.count == 1 ? "time block" : "time blocks") · \(ScheduleBlockFormat.durationLabel(minutes: totalM))"
         let summary = summaryTrimmed.isEmpty ? autoSummary : summaryTrimmed
 
         let formula = DayFormulaTemplate(

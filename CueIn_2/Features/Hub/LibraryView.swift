@@ -4,16 +4,29 @@ import SwiftUI
 
 enum LibraryHomeSegment: String, CaseIterable, Identifiable {
     case tasks
-    case blocks
+    case timeMaps
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .tasks: return "Tasks"
-        case .blocks: return "Blocks"
+        case .timeMaps: return "TimeMaps"
         }
     }
+}
+
+// MARK: - TimeMaps library navigation (pages inside the sheet)
+
+private enum LibraryTimeMapNav: Hashable {
+    /// All day layouts: yours + bundled, single list.
+    case timeMapsList
+    /// Saved blocks + entry to browse blocks grouped by parent TimeMap.
+    case timeBlocksHub
+    /// Blocks taken from one bundled / included TimeMap.
+    case timeMapBlocksDetail(UUID)
+    /// Build a new saved TimeMap using the same timeline as Today (preview only, no Start).
+    case newTimeMapEditor
 }
 
 // MARK: - Sample block from a bundled day (not a whole saved schedule)
@@ -40,16 +53,12 @@ struct LibraryView: View {
     @State private var blockPendingDelete: DayFormulaBlockTemplate?
     @State private var taskEditID: UUID?
     @State private var libraryEpoch = 0
-    @State private var blockSearchQuery = ""
+    @State private var timeMapLibraryPath = NavigationPath()
 
     init(initialSegment: LibraryHomeSegment = .tasks, onRequestDismiss: @escaping () -> Void) {
         self.initialSegment = initialSegment
         self.onRequestDismiss = onRequestDismiss
         _segment = State(initialValue: initialSegment)
-    }
-
-    private var searchTrimmed: String {
-        blockSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var savedTasks: [TaskItem] {
@@ -58,29 +67,8 @@ struct LibraryView: View {
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    private var userSchedules: [DayFormulaTemplate] {
-        _ = libraryEpoch
-        let base = FormulaLibraryService.customSchedules()
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        return filterSchedules(base)
-    }
-
-    private var userBlocks: [DayFormulaBlockTemplate] {
-        _ = libraryEpoch
-        let base = FormulaLibraryService.customBlockPresets()
-            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        return filterUserBlocks(base)
-    }
-
-    private var sampleBlockItems: [SampleBlockItem] {
-        let rows = FormulaLibraryService.library.flatMap { formula in
-            formula.blocks.map { SampleBlockItem(formulaID: formula.id, formulaName: formula.name, block: $0) }
-        }
-        return filterSamples(rows)
-    }
-
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $timeMapLibraryPath) {
             VStack(spacing: 0) {
                 Picker("Section", selection: $segment) {
                     ForEach(LibraryHomeSegment.allCases) { seg in
@@ -91,19 +79,20 @@ struct LibraryView: View {
                 .padding(.horizontal, CueInSpacing.screenHorizontal)
                 .padding(.vertical, CueInSpacing.sm)
 
-                if segment == .blocks {
-                    searchBar
-                }
-
-                ScrollView {
+                Group {
                     switch segment {
                     case .tasks:
-                        tasksSection
-                    case .blocks:
-                        blocksHubSection
+                        ScrollView {
+                            tasksSection
+                        }
+                        .scrollIndicators(.hidden)
+                    case .timeMaps:
+                        ScrollView {
+                            timeMapsLibraryHubRoot
+                        }
+                        .scrollIndicators(.hidden)
                     }
                 }
-                .scrollIndicators(.hidden)
             }
             .background(CueInColors.background.ignoresSafeArea())
             .navigationTitle("Library")
@@ -118,8 +107,41 @@ struct LibraryView: View {
                     .foregroundStyle(CueInColors.textPrimary)
                 }
             }
+            .navigationDestination(for: LibraryTimeMapNav.self) { route in
+                switch route {
+                case .timeMapsList:
+                    LibraryTimeMapsListPage(
+                        libraryEpoch: $libraryEpoch,
+                        onUseTimeMap: { id in
+                            Self.applySavedSchedule(id: id)
+                            onRequestDismiss()
+                            dismiss()
+                        },
+                        onDeleteRequest: { schedulePendingDelete = $0 }
+                    )
+                case .timeBlocksHub:
+                    LibraryTimeBlocksHubPage(
+                        libraryEpoch: $libraryEpoch,
+                        onInsertBlock: { useBlockTemplate($0) },
+                        onDeleteBlockRequest: { blockPendingDelete = $0 }
+                    )
+                case .timeMapBlocksDetail(let formulaID):
+                    LibraryTimeMapBlocksDetailPage(
+                        formulaID: formulaID,
+                        libraryEpoch: libraryEpoch,
+                        onInsertBlock: { useBlockTemplate($0) }
+                    )
+                case .newTimeMapEditor:
+                    LibraryNewTimeMapEditorView(libraryEpoch: $libraryEpoch)
+                }
+            }
         }
         .onAppear { segment = initialSegment }
+        .onChange(of: segment) { _, new in
+            if new != .timeMaps {
+                timeMapLibraryPath = NavigationPath()
+            }
+        }
         .sheet(item: Binding(
             get: { taskEditID.map { IdentifiableUUID(id: $0) } },
             set: { taskEditID = $0?.id }
@@ -129,7 +151,7 @@ struct LibraryView: View {
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }
-        .alert("Remove this day schedule from your library?", isPresented: Binding(
+        .alert("Remove this TimeMap from your library?", isPresented: Binding(
             get: { schedulePendingDelete != nil },
             set: { if !$0 { schedulePendingDelete = nil } }
         )) {
@@ -144,7 +166,7 @@ struct LibraryView: View {
         } message: {
             Text(schedulePendingDelete?.name ?? "")
         }
-        .alert("Delete this block preset?", isPresented: Binding(
+        .alert("Delete this TimeMap block preset?", isPresented: Binding(
             get: { blockPendingDelete != nil },
             set: { if !$0 { blockPendingDelete = nil } }
         )) {
@@ -161,62 +183,90 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: Search (Blocks)
+    // MARK: TimeMaps hub (two pages)
 
-    private var searchBar: some View {
-        HStack(spacing: CueInSpacing.sm) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(CueInColors.textTertiary)
-            TextField("Search schedules & blocks", text: $blockSearchQuery)
-                .font(CueInTypography.body)
-                .foregroundStyle(CueInColors.textPrimary)
-            if !blockSearchQuery.isEmpty {
-                Button {
-                    blockSearchQuery = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(CueInColors.textTertiary)
+    private var timeMapsLibraryHubRoot: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: CueInSpacing.md) {
+                Text("Browse day layouts and reusable blocks on their own screens.")
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(CueInColors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(spacing: CueInSpacing.sm) {
+                    NavigationLink(value: LibraryTimeMapNav.timeMapsList) {
+                        libraryHubRow(
+                            icon: "rectangle.split.3x1",
+                            title: "TimeMaps",
+                            subtitle: timeMapsHubSubtitle
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink(value: LibraryTimeMapNav.timeBlocksHub) {
+                        libraryHubRow(
+                            icon: "square.split.2x1",
+                            title: "Time blocks",
+                            subtitle: timeBlocksHubSubtitle
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(.horizontal, CueInSpacing.screenHorizontal)
+            .padding(.top, CueInSpacing.md)
+            .padding(.bottom, CueInLayout.scrollBottomInset)
         }
-        .padding(.horizontal, CueInSpacing.md)
-        .padding(.vertical, 10)
-        .background(CueInColors.surfacePrimary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .scrollIndicators(.hidden)
+    }
+
+    private var timeMapsHubSubtitle: String {
+        _ = libraryEpoch
+        let n = FormulaLibraryService.customSchedules().count + FormulaLibraryService.bundledLibraryTemplates.count
+        return n == 0 ? "No layouts yet" : "\(n) layout\(n == 1 ? "" : "s")"
+    }
+
+    private var timeBlocksHubSubtitle: String {
+        _ = libraryEpoch
+        let saved = FormulaLibraryService.customBlockPresets().count
+        let fromMaps = FormulaLibraryService.bundledLibraryTemplates.reduce(0) { $0 + $1.blocks.count }
+        if saved == 0, fromMaps == 0 { return "Nothing to show" }
+        if saved == 0 { return "\(fromMaps) from included TimeMaps" }
+        if fromMaps == 0 { return "\(saved) saved" }
+        return "\(saved) saved · \(fromMaps) from TimeMaps"
+    }
+
+    private func libraryHubRow(icon: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: CueInSpacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(CueInColors.textPrimary)
+                .frame(width: 44, height: 44)
+                .background(CueInColors.surfaceSecondary.opacity(0.88), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(CueInTypography.bodyMedium)
+                    .foregroundStyle(CueInColors.textPrimary)
+                Text(subtitle)
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(CueInColors.textTertiary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(CueInColors.textTertiary)
+        }
+        .padding(CueInSpacing.base)
+        .background(CueInColors.surfacePrimary, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(CueInColors.cardBorder, lineWidth: 0.5)
         )
-        .padding(.horizontal, CueInSpacing.screenHorizontal)
-        .padding(.bottom, CueInSpacing.sm)
-    }
-
-    private func filterSchedules(_ list: [DayFormulaTemplate]) -> [DayFormulaTemplate] {
-        let q = searchTrimmed.lowercased()
-        guard !q.isEmpty else { return list }
-        return list.filter {
-            $0.name.lowercased().contains(q)
-                || $0.summary.lowercased().contains(q)
-                || $0.previewTitles.lowercased().contains(q)
-        }
-    }
-
-    private func filterUserBlocks(_ list: [DayFormulaBlockTemplate]) -> [DayFormulaBlockTemplate] {
-        let q = searchTrimmed.lowercased()
-        guard !q.isEmpty else { return list }
-        return list.filter { $0.title.lowercased().contains(q) || $0.type.label.lowercased().contains(q) }
-    }
-
-    private func filterSamples(_ rows: [SampleBlockItem]) -> [SampleBlockItem] {
-        let q = searchTrimmed.lowercased()
-        guard !q.isEmpty else { return rows }
-        return rows.filter {
-            $0.block.title.lowercased().contains(q)
-                || $0.formulaName.lowercased().contains(q)
-                || $0.block.type.label.lowercased().contains(q)
-        }
     }
 
     // MARK: Tasks
@@ -315,244 +365,6 @@ struct LibraryView: View {
         tasksStore.updateTask(next)
     }
 
-    // MARK: Blocks hub (schedules + separate blocks)
-
-    private var blocksHubSection: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.xl) {
-            blockSchedulesSection
-            separateBlocksSection
-        }
-        .padding(.horizontal, CueInSpacing.screenHorizontal)
-        .padding(.top, CueInSpacing.md)
-        .padding(.bottom, CueInLayout.scrollBottomInset)
-    }
-
-    private var blockSchedulesSection: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.md) {
-            sectionChromeTitle(
-                "Block schedules",
-                subtitle: "Whole-day layouts you saved. They open as your day on Blocks."
-            )
-
-            if userSchedules.isEmpty {
-                emptyStatePanel(
-                    icon: "rectangle.split.3x1",
-                    title: "No saved day layouts",
-                    message: "On Blocks, build or edit a day, then save it as a reusable schedule."
-                )
-            } else {
-                GeometryReader { geo in
-                    let cardWidth = min(320, max(260, geo.size.width - CueInSpacing.screenHorizontal * 2))
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: CueInSpacing.md) {
-                            ForEach(userSchedules) { formula in
-                                scheduleCarouselCard(formula, width: cardWidth)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-                .frame(height: 220)
-            }
-        }
-    }
-
-    private func scheduleCarouselCard(_ formula: DayFormulaTemplate, width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .bottomLeading) {
-                LinearGradient(
-                    colors: [
-                        CueInColors.surfaceSecondary.opacity(0.95),
-                        CueInColors.surfacePrimary.opacity(0.4),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .frame(height: 72)
-                .overlay(alignment: .topTrailing) {
-                    Image(systemName: formula.symbol)
-                        .font(.system(size: 28, weight: .semibold))
-                        .foregroundStyle(CueInColors.textPrimary.opacity(0.85))
-                        .padding(CueInSpacing.md)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(formula.name)
-                        .font(CueInTypography.bodyMedium)
-                        .foregroundStyle(CueInColors.textPrimary)
-                        .lineLimit(2)
-                    HStack(spacing: CueInSpacing.sm) {
-                        chip(text: "\(formula.blockCount) blocks", icon: "square.split.2x1")
-                        chip(text: formula.targetDurationLabel, icon: "clock")
-                    }
-                }
-                .padding(CueInSpacing.md)
-            }
-
-            if !formula.summary.isEmpty {
-                Text(formula.summary)
-                    .font(CueInTypography.caption)
-                    .foregroundStyle(CueInColors.textSecondary)
-                    .lineLimit(2)
-                    .padding(.horizontal, CueInSpacing.md)
-                    .padding(.bottom, CueInSpacing.sm)
-            }
-
-            HStack(spacing: CueInSpacing.sm) {
-                Button {
-                    Self.applySavedSchedule(id: formula.id)
-                    onRequestDismiss()
-                    dismiss()
-                } label: {
-                    Label("Use on Blocks", systemImage: "play.fill")
-                        .font(CueInTypography.captionMedium)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(CueInColors.accentFocus)
-
-                Button {
-                    schedulePendingDelete = formula
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 15, weight: .semibold))
-                        .frame(width: 40, height: 36)
-                }
-                .buttonStyle(.bordered)
-                .tint(CueInColors.textSecondary)
-                .accessibilityLabel("Delete schedule")
-            }
-            .padding(CueInSpacing.md)
-        }
-        .frame(width: width, alignment: .leading)
-        .background(CueInColors.surfacePrimary, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(CueInColors.cardBorder, lineWidth: 0.5)
-        )
-        .shadow(color: Color.black.opacity(0.08), radius: 16, x: 0, y: 8)
-    }
-
-    private var separateBlocksSection: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.lg) {
-            sectionChromeTitle(
-                "Separate blocks",
-                subtitle: "Single time slices — yours first, then shapes from bundled sample days."
-            )
-
-            VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-                Text("Your blocks")
-                    .font(CueInTypography.captionMedium)
-                    .foregroundStyle(CueInColors.textSecondary)
-
-                if userBlocks.isEmpty {
-                    subtleEmptyRow("No saved presets yet — save a block from the block editor on Blocks.")
-                } else {
-                    LazyVStack(spacing: CueInSpacing.sm) {
-                        ForEach(userBlocks) { block in
-                            separateBlockCard(block: block, sourceLabel: nil, canDelete: true)
-                        }
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-                Text("From sample days")
-                    .font(CueInTypography.captionMedium)
-                    .foregroundStyle(CueInColors.textSecondary)
-
-                if sampleBlockItems.isEmpty {
-                    subtleEmptyRow("Bundled sample days will list extractable blocks here.")
-                } else {
-                    LazyVStack(spacing: CueInSpacing.sm) {
-                        ForEach(sampleBlockItems) { item in
-                            separateBlockCard(
-                                block: item.block,
-                                sourceLabel: item.formulaName,
-                                canDelete: false
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func separateBlockCard(
-        block: DayFormulaBlockTemplate,
-        sourceLabel: String?,
-        canDelete: Bool
-    ) -> some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.md) {
-            HStack(alignment: .top, spacing: CueInSpacing.md) {
-                Image(systemName: block.timelineGlyph ?? block.type.icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(CueInColors.textPrimary)
-                    .frame(width: 48, height: 48)
-                    .background(
-                        Circle()
-                            .fill(CueInColors.surfaceSecondary.opacity(0.9))
-                    )
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(block.title)
-                        .font(CueInTypography.bodyMedium)
-                        .foregroundStyle(CueInColors.textPrimary)
-                        .lineLimit(2)
-                    HStack(spacing: CueInSpacing.sm) {
-                        chip(
-                            text: ScheduleBlockFormat.durationLabel(minutes: block.durationMinutes),
-                            icon: "timer"
-                        )
-                        chip(text: block.type.label, icon: "square.grid.2x2")
-                    }
-                    if let sourceLabel {
-                        Text(sourceLabel)
-                            .font(CueInTypography.micro)
-                            .foregroundStyle(CueInColors.textTertiary)
-                            .padding(.top, 2)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-
-            HStack(spacing: CueInSpacing.sm) {
-                Button {
-                    useBlockTemplate(block)
-                } label: {
-                    Label("Insert on Blocks", systemImage: "plus.circle.fill")
-                        .font(CueInTypography.captionMedium)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(CueInColors.accentFocus)
-
-                if canDelete {
-                    Button {
-                        blockPendingDelete = block
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 15, weight: .semibold))
-                            .frame(width: 40, height: 36)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(CueInColors.textSecondary)
-                    .accessibilityLabel("Delete preset")
-                }
-            }
-        }
-        .padding(CueInSpacing.base)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(CueInColors.surfacePrimary)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(CueInColors.cardBorder.opacity(0.85), lineWidth: 0.5)
-        )
-        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 4)
-    }
-
     // MARK: Actions
 
     private func useBlockTemplate(_ template: DayFormulaBlockTemplate) {
@@ -586,23 +398,6 @@ struct LibraryView: View {
         }
     }
 
-    private func chip(text: String, icon: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
-            Text(text)
-                .font(CueInTypography.micro)
-        }
-        .foregroundStyle(CueInColors.textSecondary)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(CueInColors.surfacePrimary.opacity(0.65), in: Capsule())
-        .overlay(
-            Capsule()
-                .strokeBorder(CueInColors.divider.opacity(0.5), lineWidth: 0.5)
-        )
-    }
-
     private func emptyStatePanel(icon: String, title: String, message: String) -> some View {
         VStack(spacing: CueInSpacing.md) {
             ZStack {
@@ -628,15 +423,6 @@ struct LibraryView: View {
         .glassSurface(cornerRadius: 22)
     }
 
-    private func subtleEmptyRow(_ message: String) -> some View {
-        Text(message)
-            .font(CueInTypography.caption)
-            .foregroundStyle(CueInColors.textTertiary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(CueInSpacing.md)
-            .background(CueInColors.surfaceSecondary.opacity(0.25), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
     static func applySavedSchedule(id: UUID) {
         NotificationCenter.default.post(
             name: .cueInSwitchTab,
@@ -650,6 +436,783 @@ struct LibraryView: View {
                 userInfo: [CueInShellNotification.formulaIDUserInfoKey: id.uuidString]
             )
         }
+    }
+}
+
+// MARK: - TimeMaps list page (unified: yours + included)
+
+private struct IdentifiedTimeMapRow: Identifiable {
+    var id: String { "\(isYours ? "y" : "n")-\(formula.id.uuidString)" }
+    let formula: DayFormulaTemplate
+    let isYours: Bool
+}
+
+private struct LibraryTimeMapsListPage: View {
+    @Binding var libraryEpoch: Int
+    let onUseTimeMap: (UUID) -> Void
+    let onDeleteRequest: (DayFormulaTemplate) -> Void
+
+    @AppStorage(CueInAppDataKeys.hideBundledDummyTestDayTimeMap) private var hideBundledDummyTestDayTimeMap = false
+    @State private var query = ""
+
+    private var queryTrimmed: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var userLayouts: [DayFormulaTemplate] {
+        _ = libraryEpoch
+        _ = hideBundledDummyTestDayTimeMap
+        let base = FormulaLibraryService.customSchedules()
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return filterSchedules(base)
+    }
+
+    private var includedLayouts: [DayFormulaTemplate] {
+        _ = libraryEpoch
+        _ = hideBundledDummyTestDayTimeMap
+        let base = FormulaLibraryService.bundledLibraryTemplates
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return filterSchedules(base)
+    }
+
+    private var combinedLayoutRows: [IdentifiedTimeMapRow] {
+        userLayouts.map { IdentifiedTimeMapRow(formula: $0, isYours: true) }
+            + includedLayouts.map { IdentifiedTimeMapRow(formula: $0, isYours: false) }
+    }
+
+    private func filterSchedules(_ list: [DayFormulaTemplate]) -> [DayFormulaTemplate] {
+        let q = queryTrimmed.lowercased()
+        guard !q.isEmpty else { return list }
+        return list.filter {
+            $0.name.lowercased().contains(q)
+                || $0.summary.lowercased().contains(q)
+                || $0.previewTitles.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        List {
+            if combinedLayoutRows.isEmpty {
+                ContentUnavailableView(
+                    "No TimeMaps",
+                    systemImage: "rectangle.split.3x1",
+                    description: Text(queryTrimmed.isEmpty ? "Save a day from TimeMap or use included layouts." : "Nothing matches your search.")
+                )
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            } else {
+                Section {
+                    ForEach(combinedLayoutRows) { row in
+                        timeMapListRow(row.formula, isYours: row.isYours)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(CueInColors.background)
+        .navigationTitle("TimeMaps")
+        .cueInNavigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, prompt: "Search TimeMaps")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                NavigationLink(value: LibraryTimeMapNav.newTimeMapEditor) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(CueInColors.textPrimary)
+                }
+            }
+        }
+    }
+
+    private func timeMapListRow(_ formula: DayFormulaTemplate, isYours: Bool) -> some View {
+        HStack(spacing: CueInSpacing.md) {
+            Image(systemName: formula.symbol)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(CueInColors.textPrimary)
+                .frame(width: 40, height: 40)
+                .background(CueInColors.surfaceSecondary.opacity(0.88), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(formula.name)
+                    .font(CueInTypography.bodyMedium)
+                    .foregroundStyle(CueInColors.textPrimary)
+                    .lineLimit(2)
+                Text("\(formula.blockCount) blocks · \(formula.targetDurationLabel) · \(isYours ? "Yours" : "Included")")
+                    .font(CueInTypography.micro)
+                    .foregroundStyle(CueInColors.textTertiary)
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                onUseTimeMap(formula.id)
+            } label: {
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(CueInColors.accentFocus)
+            }
+            .buttonStyle(.borderless)
+
+            if isYours {
+                Button {
+                    onDeleteRequest(formula)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(CueInColors.textTertiary)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Time blocks hub (saved + drill into each TimeMap)
+
+private struct LibraryTimeBlocksHubPage: View {
+    @Binding var libraryEpoch: Int
+    let onInsertBlock: (DayFormulaBlockTemplate) -> Void
+    let onDeleteBlockRequest: (DayFormulaBlockTemplate) -> Void
+
+    @AppStorage(CueInAppDataKeys.hideBundledDummyTestDayTimeMap) private var hideBundledDummyTestDayTimeMap = false
+    @State private var query = ""
+
+    private var queryTrimmed: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var savedBlocks: [DayFormulaBlockTemplate] {
+        _ = libraryEpoch
+        _ = hideBundledDummyTestDayTimeMap
+        let base = FormulaLibraryService.customBlockPresets()
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        return filterUserBlocks(base)
+    }
+
+    private var parentMaps: [DayFormulaTemplate] {
+        _ = libraryEpoch
+        _ = hideBundledDummyTestDayTimeMap
+        return FormulaLibraryService.bundledLibraryTemplates
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private var filteredParentMaps: [DayFormulaTemplate] {
+        let q = queryTrimmed.lowercased()
+        guard !q.isEmpty else { return parentMaps }
+        return parentMaps.filter {
+            $0.name.lowercased().contains(q)
+                || $0.blocks.contains(where: { b in
+                    b.title.lowercased().contains(q) || b.type.label.lowercased().contains(q)
+                })
+        }
+    }
+
+    private func filterUserBlocks(_ list: [DayFormulaBlockTemplate]) -> [DayFormulaBlockTemplate] {
+        let q = queryTrimmed.lowercased()
+        guard !q.isEmpty else { return list }
+        return list.filter { $0.title.lowercased().contains(q) || $0.type.label.lowercased().contains(q) }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                if savedBlocks.isEmpty {
+                    Text("No saved block presets")
+                        .font(CueInTypography.caption)
+                        .foregroundStyle(CueInColors.textTertiary)
+                        .listRowBackground(Color.clear)
+                } else {
+                    ForEach(savedBlocks) { block in
+                        blockPresetRow(block: block, canDelete: true)
+                    }
+                }
+            } header: {
+                Text("Saved")
+                    .font(CueInTypography.micro)
+                    .foregroundStyle(CueInColors.textTertiary)
+                    .textCase(.uppercase)
+            }
+
+            Section {
+                if filteredParentMaps.isEmpty {
+                    Text(parentMaps.isEmpty ? "No included TimeMaps" : "No matches")
+                        .font(CueInTypography.caption)
+                        .foregroundStyle(CueInColors.textTertiary)
+                        .listRowBackground(Color.clear)
+                } else {
+                    ForEach(filteredParentMaps) { formula in
+                        NavigationLink(value: LibraryTimeMapNav.timeMapBlocksDetail(formula.id)) {
+                            HStack(spacing: CueInSpacing.md) {
+                                Image(systemName: formula.symbol)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(CueInColors.textPrimary)
+                                    .frame(width: 36, height: 36)
+                                    .background(CueInColors.surfaceSecondary.opacity(0.88), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(formula.name)
+                                        .font(CueInTypography.bodyMedium)
+                                        .foregroundStyle(CueInColors.textPrimary)
+                                        .lineLimit(2)
+                                    Text("\(formula.blocks.count) blocks")
+                                        .font(CueInTypography.micro)
+                                        .foregroundStyle(CueInColors.textTertiary)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+            } header: {
+                Text("From TimeMaps")
+                    .font(CueInTypography.micro)
+                    .foregroundStyle(CueInColors.textTertiary)
+                    .textCase(.uppercase)
+            } footer: {
+                Text("Open a TimeMap to browse its blocks without loading one long list.")
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(CueInColors.textTertiary)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(CueInColors.background)
+        .navigationTitle("Time blocks")
+        .cueInNavigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, prompt: "Search blocks & TimeMaps")
+    }
+
+    private func blockPresetRow(block: DayFormulaBlockTemplate, canDelete: Bool) -> some View {
+        HStack(spacing: CueInSpacing.md) {
+            Image(systemName: block.timelineGlyph ?? block.type.icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(CueInColors.textSecondary)
+                .frame(width: 32, height: 32)
+                .background(CueInColors.surfaceSecondary.opacity(0.75), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(block.title)
+                    .font(CueInTypography.bodyMedium)
+                    .foregroundStyle(CueInColors.textPrimary)
+                    .lineLimit(2)
+                Text(ScheduleBlockFormat.durationLabel(minutes: block.durationMinutes))
+                    .font(CueInTypography.micro)
+                    .foregroundStyle(CueInColors.textTertiary)
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                onInsertBlock(block)
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(CueInColors.accentFocus)
+            }
+            .buttonStyle(.borderless)
+
+            if canDelete {
+                Button {
+                    onDeleteBlockRequest(block)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(CueInColors.textTertiary)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Blocks from one TimeMap
+
+private struct LibraryTimeMapBlocksDetailPage: View {
+    let formulaID: UUID
+    let libraryEpoch: Int
+    let onInsertBlock: (DayFormulaBlockTemplate) -> Void
+
+    @AppStorage(CueInAppDataKeys.hideBundledDummyTestDayTimeMap) private var hideBundledDummyTestDayTimeMap = false
+    @State private var query = ""
+
+    private var queryTrimmed: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var formula: DayFormulaTemplate? {
+        _ = libraryEpoch
+        _ = hideBundledDummyTestDayTimeMap
+        return FormulaLibraryService.bundledLibraryTemplates.first(where: { $0.id == formulaID })
+    }
+
+    private var blocks: [DayFormulaBlockTemplate] {
+        guard let formula else { return [] }
+        let q = queryTrimmed.lowercased()
+        guard !q.isEmpty else { return formula.blocks }
+        return formula.blocks.filter {
+            $0.title.lowercased().contains(q) || $0.type.label.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        Group {
+            if let formula {
+                List {
+                    if blocks.isEmpty {
+                        ContentUnavailableView(
+                            formula.blocks.isEmpty ? "No blocks" : "No results",
+                            systemImage: formula.blocks.isEmpty ? "square.dashed" : "magnifyingglass",
+                            description: Text(
+                                formula.blocks.isEmpty
+                                    ? "This TimeMap has no block rows."
+                                    : "Try a different search."
+                            )
+                        )
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    } else {
+                        Section {
+                            ForEach(blocks) { block in
+                                HStack(spacing: CueInSpacing.md) {
+                                    Image(systemName: block.timelineGlyph ?? block.type.icon)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(CueInColors.textSecondary)
+                                        .frame(width: 32, height: 32)
+                                        .background(CueInColors.surfaceSecondary.opacity(0.75), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(block.title)
+                                            .font(CueInTypography.bodyMedium)
+                                            .foregroundStyle(CueInColors.textPrimary)
+                                            .lineLimit(2)
+                                        Text(ScheduleBlockFormat.durationLabel(minutes: block.durationMinutes))
+                                            .font(CueInTypography.micro)
+                                            .foregroundStyle(CueInColors.textTertiary)
+                                    }
+                                    Spacer(minLength: 0)
+                                    Button {
+                                        onInsertBlock(block)
+                                    } label: {
+                                        Image(systemName: "plus.circle.fill")
+                                            .font(.system(size: 22, weight: .semibold))
+                                            .foregroundStyle(CueInColors.accentFocus)
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                                .padding(.vertical, 4)
+                            }
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(CueInColors.background)
+                .navigationTitle(formula.name)
+                .cueInNavigationBarTitleDisplayMode(.inline)
+                .searchable(text: $query, prompt: "Search blocks")
+            } else {
+                ContentUnavailableView(
+                    "TimeMap unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text("This layout is no longer in the library.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(CueInColors.background)
+                .navigationTitle("Blocks")
+                .cueInNavigationBarTitleDisplayMode(.inline)
+            }
+        }
+    }
+}
+
+// MARK: - New TimeMap editor (library)
+
+private struct LibraryIdentifiedBlockID: Identifiable, Hashable {
+    let id: UUID
+}
+
+/// Snapshot for block editor sheet (matches ``TodayView``’s ``BlockEditSheetItem`` pattern).
+private struct LibraryBlockEditSheetItem: Identifiable {
+    let id: UUID
+    let blockID: UUID
+    var block: DayBlock
+
+    init(block: DayBlock) {
+        self.id = UUID()
+        self.blockID = block.id
+        self.block = block
+    }
+}
+
+private struct LibraryNewTimeMapEditorView: View {
+    @Bindable private var viewModel = TodayViewModel.shared
+    @Binding var libraryEpoch: Int
+
+    @State private var didSeedSession = false
+    @State private var dayModeBeforeEditor: DayEngineMode?
+    @State private var draggedScheduleBlockID: UUID?
+    @State private var blockTitleEdit: LibraryBlockEditSheetItem?
+    @State private var blockAddTask: LibraryIdentifiedBlockID?
+    @State private var blockDeleteConfirm: LibraryIdentifiedBlockID?
+    @State private var isJiggleRearrangeMode = false
+    @State private var showFormulaScheduleSaveSheet = false
+    @State private var showBlockLibrary = false
+    @State private var showMoreAddOptions = false
+
+    @AppStorage(TodayDisplayPreferences.showScheduleStartTime) private var showScheduleStartTime = true
+    @AppStorage(TodayDisplayPreferences.showScheduleDuration) private var showScheduleDuration = false
+    @AppStorage(TodayDisplayPreferences.showScheduleTimeRange) private var showScheduleTimeRange = false
+    @AppStorage(TodayDisplayPreferences.scheduleDesign) private var scheduleDesignRaw = TodayDisplayPreferences.ScheduleDesign.glass.rawValue
+    @AppStorage(TodayDisplayPreferences.canvasDotsBackground) private var canvasDotsBackground = false
+    @AppStorage(TodayDisplayPreferences.scheduleBlockTimerStyle) private var scheduleBlockTimerStyleRaw
+        = TodayDisplayPreferences.ScheduleBlockTimerStyle.ring.rawValue
+    @AppStorage(TodayDisplayPreferences.scheduleBlockTimerShowsSeconds) private var scheduleBlockTimerShowsSeconds = false
+
+    private var scheduleDesign: TodayDisplayPreferences.ScheduleDesign {
+        TodayDisplayPreferences.migratedScheduleDesign(from: scheduleDesignRaw)
+    }
+
+    private var scheduleBlockTimerStyle: TodayDisplayPreferences.ScheduleBlockTimerStyle {
+        TodayDisplayPreferences.migratedScheduleBlockTimerStyle(from: scheduleBlockTimerStyleRaw)
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Group {
+                if canvasDotsBackground {
+                    CanvasDotsBackgroundView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    CueInColors.background
+                }
+            }
+            .ignoresSafeArea()
+
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: CueInSpacing.md) {
+                    editorChromeStrip
+
+                    if viewModel.isFormulaPreviewing,
+                       viewModel.hasFormulaTemplate,
+                       !viewModel.shouldShowScheduleEmptyCallout {
+                        FormulaSchedulePreviewStatsBar(
+                            blocks: viewModel.todayScheduleBlocks,
+                            showsSaveButton: viewModel.isFormulaPreviewScheduleDirty,
+                            onSave: { showFormulaScheduleSaveSheet = true }
+                        )
+                        .padding(.horizontal, CueInSpacing.screenHorizontal)
+                    }
+
+                    if viewModel.shouldShowScheduleEmptyCallout {
+                        ScheduleEmptyCalloutView()
+                    } else {
+                        ScheduleBlockTimelineView(
+                            blocks: viewModel.todayScheduleBlocks,
+                            currentBlockID: viewModel.currentBlockID,
+                            scheduleDesign: scheduleDesign,
+                            useCanvasLiquidGlass: canvasDotsBackground,
+                            frozenLiveProgressDate: viewModel.formulaSchedulePausedAt,
+                            showsScheduledTime: false,
+                            showsStartTime: showScheduleStartTime,
+                            showsDuration: showScheduleDuration,
+                            showsTimeRange: showScheduleTimeRange,
+                            showsFinishControl: false,
+                            showsCompletedToggle: viewModel.isFormulaMode,
+                            isLiveRun: false,
+                            timerStyle: scheduleBlockTimerStyle,
+                            showsTimerSeconds: scheduleBlockTimerShowsSeconds,
+                            draggedBlockID: $draggedScheduleBlockID,
+                            canRearrangeBlock: { blockID in
+                                viewModel.canRearrangeFormulaBlock(blockID: blockID)
+                            },
+                            canUseBlockContextMenu: { blockID in
+                                viewModel.canUseBlockContextMenu(blockID: blockID)
+                            },
+                            canDeleteFromContextMenu: { blockID in
+                                viewModel.canDeleteFormulaBlock(blockID: blockID)
+                            },
+                            onMoveBlock: { sourceID, targetID in
+                                viewModel.moveFormulaBlock(sourceID: sourceID, before: targetID)
+                            },
+                            onToggleTask: { blockID, taskID in
+                                viewModel.toggleTask(blockID: blockID, taskID: taskID)
+                            },
+                            onCompleteBlock: { blockID in
+                                viewModel.completeBlock(blockID: blockID)
+                            },
+                            onFinishBlockKeepingPending: { blockID in
+                                viewModel.finishBlockKeepingPending(blockID: blockID)
+                            },
+                            onRevertCompletedBlock: { blockID in
+                                viewModel.revertCompletedBlock(blockID: blockID)
+                            },
+                            onContextEdit: { block in
+                                blockTitleEdit = LibraryBlockEditSheetItem(block: block)
+                            },
+                            onContextAddTask: { blockID in
+                                blockAddTask = LibraryIdentifiedBlockID(id: blockID)
+                            },
+                            onContextRearrange: { _ in
+                                isJiggleRearrangeMode = true
+                            },
+                            onContextDelete: { blockID in
+                                blockDeleteConfirm = LibraryIdentifiedBlockID(id: blockID)
+                            },
+                            onSwipeCommitDelete: { blockID in
+                                viewModel.deleteFormulaBlock(blockID: blockID)
+                            },
+                            isJiggleRearrangeMode: isJiggleRearrangeMode
+                        )
+                    }
+                }
+                .padding(.bottom, CueInLayout.scrollBottomInset + CueInLayout.fabPlusDiameter + 28)
+            }
+            .scrollDisabled(draggedScheduleBlockID != nil)
+
+            bottomPlusControl
+                .padding(.trailing, CueInSpacing.screenHorizontal)
+                .padding(.bottom, CueInLayout.scrollBottomInset + 8)
+        }
+        .navigationTitle(viewModel.formulaScheduleNavigationTitle)
+        .cueInNavigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: CueInToolbarPlacement.topBarTrailing) {
+                if isJiggleRearrangeMode {
+                    Button("Done") { isJiggleRearrangeMode = false }
+                        .fontWeight(.semibold)
+                        .foregroundStyle(CueInColors.textPrimary)
+                } else if viewModel.isFormulaPreviewScheduleDirty {
+                    Button("Save") { showFormulaScheduleSaveSheet = true }
+                        .fontWeight(.semibold)
+                        .foregroundStyle(CueInColors.textPrimary)
+                }
+            }
+        }
+        .onAppear {
+            guard !didSeedSession else { return }
+            dayModeBeforeEditor = viewModel.dayEngineMode
+            if viewModel.dayEngineMode != .formulaBased {
+                viewModel.setDayEngineMode(.formulaBased)
+            }
+            viewModel.createNewUserAlgorithmFromRoutineTemplate()
+            didSeedSession = true
+        }
+        .onDisappear {
+            if let prior = dayModeBeforeEditor, prior != .formulaBased {
+                viewModel.setDayEngineMode(prior)
+            }
+            libraryEpoch += 1
+        }
+        .sheet(isPresented: $showFormulaScheduleSaveSheet) {
+            let seed = viewModel.formulaScheduleSaveSheetSeed
+            FormulaScheduleSaveSheet(
+                initialName: seed.name,
+                initialSymbol: seed.symbol,
+                initialSummary: seed.summary,
+                allowsUpdateExisting: viewModel.isSelectedFormulaUserSavedSchedule,
+                scheduleIDExcludedWhenUpdating: viewModel.selectedFormulaID,
+                onCancel: { showFormulaScheduleSaveSheet = false },
+                onCommit: { name, symbol, summary, intent in
+                    if viewModel.saveCurrentPreviewSchedule(
+                        name: name,
+                        symbol: symbol,
+                        summary: summary,
+                        intent: intent
+                    ) {
+                        showFormulaScheduleSaveSheet = false
+                    } else {
+                        CueInToastCenter.shared.showWarning(
+                            icon: "text.badge.xmark",
+                            title: "Name already used",
+                            message: "That schedule name is taken. Pick another name."
+                        )
+                    }
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
+        .sheet(item: $blockTitleEdit) { item in
+            ScheduleBlockEditSheet(
+                block: item.block,
+                availableScopes: viewModel.scheduleMakerTaskScopes,
+                onSave: { draft in
+                    viewModel.applyFormulaBlockEdits(blockID: item.blockID, draft: draft)
+                    blockTitleEdit = nil
+                },
+                onCancel: { blockTitleEdit = nil }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
+        .sheet(item: $blockAddTask) { box in
+            AddTaskToBlockSheet(
+                onAdd: { text in
+                    viewModel.addTemplateTaskToFormulaBlock(blockID: box.id, title: text)
+                    blockAddTask = nil
+                },
+                onCancel: { blockAddTask = nil }
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
+        .sheet(isPresented: $showBlockLibrary) {
+            BlockTemplateLibrarySheet(
+                onPick: { template in
+                    _ = viewModel.insertFormulaBlock(from: template)
+                    showBlockLibrary = false
+                },
+                onDismiss: { showBlockLibrary = false }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
+        .sheet(isPresented: $showMoreAddOptions) {
+            CueInBottomSheet(title: "Add block", onDismiss: { showMoreAddOptions = false }) {
+                VStack(alignment: .leading, spacing: CueInSpacing.sm) {
+                    SheetActionRow(
+                        icon: "rectangle.stack.fill",
+                        title: "Time block",
+                        subtitle: "45 min focus slice"
+                    ) {
+                        showMoreAddOptions = false
+                        viewModel.insertFormulaBlock(
+                            title: "New Block",
+                            type: .focus,
+                            flowMode: .blocking,
+                            durationMinutes: 45
+                        )
+                    }
+                    SheetActionRow(
+                        icon: "books.vertical.fill",
+                        title: "From block library",
+                        subtitle: "Saved shapes and samples"
+                    ) {
+                        showMoreAddOptions = false
+                        showBlockLibrary = true
+                    }
+                    SheetActionRow(
+                        icon: "repeat",
+                        title: "Routine block",
+                        subtitle: "Repeatable routine slice"
+                    ) {
+                        showMoreAddOptions = false
+                        viewModel.insertFormulaBlock(
+                            title: "Routine Block",
+                            type: .routine,
+                            flowMode: .blocking,
+                            durationMinutes: 30,
+                            tasks: [
+                                DayTask(title: "First step", isPrimary: true, isRepeating: true)
+                            ],
+                            isRepeatable: true
+                        )
+                    }
+                    SheetActionRow(
+                        icon: "bolt.fill",
+                        title: "Quick item",
+                        subtitle: "Small flowing slice"
+                    ) {
+                        showMoreAddOptions = false
+                        viewModel.insertFormulaBlock(
+                            title: "Quick Item",
+                            type: .mini,
+                            flowMode: .flowing,
+                            durationMinutes: 10
+                        )
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
+        .confirmationDialog(
+            "Delete this block?",
+            isPresented: Binding(
+                get: { blockDeleteConfirm != nil },
+                set: { if !$0 { blockDeleteConfirm = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let id = blockDeleteConfirm?.id {
+                    viewModel.deleteFormulaBlock(blockID: id)
+                }
+                blockDeleteConfirm = nil
+            }
+            Button("Cancel", role: .cancel) {
+                blockDeleteConfirm = nil
+            }
+        } message: {
+            Text("The rest of the day will be re-timed. This can’t be undone.")
+        }
+    }
+
+    private var editorChromeStrip: some View {
+        HStack(spacing: CueInSpacing.sm) {
+            Image(systemName: "square.and.pencil")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(CueInColors.textTertiary)
+            Text("Layout editor · changes stay in preview until you Save")
+                .font(CueInTypography.caption)
+                .foregroundStyle(CueInColors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, CueInSpacing.screenHorizontal)
+        .padding(.vertical, CueInSpacing.sm)
+        .background(CueInColors.surfacePrimary.opacity(0.55), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(CueInColors.cardBorder.opacity(0.55), lineWidth: 0.5)
+        )
+        .padding(.horizontal, CueInSpacing.screenHorizontal)
+    }
+
+    @ViewBuilder
+    private var bottomPlusControl: some View {
+        #if os(iOS)
+        FloatingPlusButton(
+            onTap: {
+                viewModel.insertFormulaBlock(
+                    title: "New Block",
+                    type: .focus,
+                    flowMode: .blocking,
+                    durationMinutes: 45
+                )
+            },
+            onLongPress: {
+                showMoreAddOptions = true
+            },
+            accessibilityLabelText: "Add time block",
+            accessibilityHintOverride: "Tap to add a block. Hold for more insert options."
+        )
+        #else
+        Menu {
+            Button("Time block (45m)") {
+                viewModel.insertFormulaBlock(
+                    title: "New Block",
+                    type: .focus,
+                    flowMode: .blocking,
+                    durationMinutes: 45
+                )
+            }
+            Button("Block library…") { showBlockLibrary = true }
+        } label: {
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundStyle(CueInColors.accentFocus)
+        }
+        #endif
     }
 }
 

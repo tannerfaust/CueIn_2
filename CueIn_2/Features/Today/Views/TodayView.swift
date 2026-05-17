@@ -8,7 +8,6 @@ struct TodayView: View {
     @State private var viewModel = TodayViewModel.shared
     @Bindable private var tasksStore = TasksStore.shared
     @State private var showFormulaPickerSheet = false
-    @State private var showScheduleMakerSheet = false
     @State private var showFormulaScheduleSaveSheet = false
     @State private var showSettingsSheet = false
     @State private var showScheduleStartSheet = false
@@ -270,7 +269,7 @@ struct TodayView: View {
                         } label: {
                             Image(systemName: (viewModel.isFormulaRunStopped || viewModel.isFormulaSchedulePaused) ? "play.fill" : "pause.fill")
                         }
-                        .accessibilityLabel((viewModel.isFormulaRunStopped || viewModel.isFormulaSchedulePaused) ? "Resume schedule" : "Pause schedule")
+                        .accessibilityLabel((viewModel.isFormulaRunStopped || viewModel.isFormulaSchedulePaused) ? "Resume TimeMap" : "Pause TimeMap")
                         .foregroundStyle(CueInColors.textPrimary)
                     }
 
@@ -290,9 +289,9 @@ struct TodayView: View {
                         viewModel.selectFormula(formulaID)
                         showFormulaPickerSheet = false
                     },
-                    onCreate: {
+                    onNewTimeMap: {
                         showFormulaPickerSheet = false
-                        showScheduleMakerSheet = true
+                        viewModel.createNewUserAlgorithmFromRoutineTemplate()
                     },
                     onDismiss: { showFormulaPickerSheet = false }
                 )
@@ -380,26 +379,6 @@ struct TodayView: View {
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
             }
-        }
-        .sheet(isPresented: $showScheduleMakerSheet) {
-            ScheduleMakerSheet(
-                availableScopes: viewModel.scheduleMakerTaskScopes,
-                onSave: { formula in
-                    if viewModel.saveCreatedFormula(formula) {
-                        showScheduleMakerSheet = false
-                    } else {
-                        CueInToastCenter.shared.showWarning(
-                            icon: "text.badge.xmark",
-                            title: "Name already used",
-                            message: "That schedule name is taken. Pick another name."
-                        )
-                    }
-                },
-                onDismiss: { showScheduleMakerSheet = false }
-            )
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }
         .sheet(isPresented: $showFormulaScheduleSaveSheet) {
             let seed = viewModel.formulaScheduleSaveSheetSeed
@@ -588,13 +567,13 @@ struct TodayView: View {
                     Label("Settings", systemImage: "gearshape")
                 }
             } else {
-                Button("Choose schedule…") {
+                Button("Choose TimeMap…") {
                     showFormulaPickerSheet = true
                 }
                 Button {
-                    showScheduleMakerSheet = true
+                    viewModel.createNewUserAlgorithmFromRoutineTemplate()
                 } label: {
-                    Label("Make schedule…", systemImage: "plus.square")
+                    Label("New schedule", systemImage: "plus.square")
                 }
                 Button {
                     viewModel.restartFormulaDay()

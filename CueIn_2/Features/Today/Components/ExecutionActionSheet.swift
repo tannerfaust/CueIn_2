@@ -58,8 +58,8 @@ struct ExecutionActionSheet: View {
         if viewModel.isFormulaSchedulePaused {
             SheetActionRow(
                 icon: "play.fill",
-                title: "Resume Schedule",
-                subtitle: "Continue the run; blocks shift by the time you were paused",
+                title: "Resume TimeMap",
+                subtitle: "Continue the run; time blocks shift by the time you were paused",
                 tint: CueInColors.accentFocus
             ) {
                 viewModel.resumeFormulaScheduleAfterPause()
@@ -71,7 +71,7 @@ struct ExecutionActionSheet: View {
             SheetActionRow(
                 icon: "checkmark.circle",
                 title: "Finish Current Block",
-                subtitle: "Mark this block complete and move the schedule forward",
+                subtitle: "Mark this time block complete and move the TimeMap forward",
                 tint: Color(red: 0.42, green: 0.82, blue: 0.55)
             ) {
                 viewModel.finishActiveBlock()
@@ -81,8 +81,8 @@ struct ExecutionActionSheet: View {
 
             SheetActionRow(
                 icon: "pause.fill",
-                title: "Pause Schedule",
-                subtitle: "Freeze blocks and timeline; day progress keeps moving",
+                title: "Pause TimeMap",
+                subtitle: "Freeze time blocks and timeline; day progress keeps moving",
                 tint: CueInColors.accentFocus
             ) {
                 viewModel.pauseFormulaSchedule()
@@ -108,8 +108,8 @@ struct ExecutionActionSheet: View {
                 icon: "play.fill",
                 title: viewModel.isFormulaRunStopped ? "Resume Day" : "Start Day",
                 subtitle: viewModel.isFormulaRunStopped
-                    ? "Continue the formula run from where you left off"
-                    : "Lock times and begin the first block",
+                    ? "Continue the TimeMap run from where you left off"
+                    : "Lock times and begin the first time block",
                 tint: CueInColors.accentFocus
             ) {
                 if viewModel.isFormulaRunStopped {
@@ -125,7 +125,7 @@ struct ExecutionActionSheet: View {
             SheetActionRow(
                 icon: "arrow.counterclockwise",
                 title: "Reset to Preview",
-                subtitle: "Discard this run and edit the formula layout again",
+                subtitle: "Discard this run and edit the TimeMap layout again",
                 tint: CueInColors.textSecondary
             ) {
                 viewModel.restartFormulaDay()
@@ -136,8 +136,8 @@ struct ExecutionActionSheet: View {
         if viewModel.isFormulaRunLive || viewModel.isFormulaSchedulePaused {
             SheetActionRow(
                 icon: "arrow.counterclockwise",
-                title: "Reset Schedule",
-                subtitle: "Discard this run and return to the editable schedule",
+                title: "Reset TimeMap",
+                subtitle: "Discard this run and return to the editable TimeMap",
                 tint: CueInColors.textSecondary
             ) {
                 viewModel.restartFormulaDay()
@@ -148,8 +148,8 @@ struct ExecutionActionSheet: View {
         if viewModel.isFormulaRunLive || viewModel.isFormulaSchedulePaused || viewModel.isFormulaRunStopped {
             SheetActionRow(
                 icon: "calendar.badge.minus",
-                title: "Clear the Schedule",
-                subtitle: "Remove the current schedule from Today",
+                title: "Clear the TimeMap",
+                subtitle: "Remove the current TimeMap from Today",
                 tint: Color.red
             ) {
                 viewModel.clearSchedule()

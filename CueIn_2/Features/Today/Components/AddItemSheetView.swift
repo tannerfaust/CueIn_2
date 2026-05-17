@@ -17,7 +17,7 @@ struct AddItemSheetView: View {
                 if let onChangeFormula {
                     SheetActionRow(
                         icon: "arrow.triangle.2.circlepath",
-                        title: "Change Schedule",
+                        title: "Change TimeMap",
                         subtitle: "Switch today’s framework"
                     ) { onChangeFormula() }
                 }

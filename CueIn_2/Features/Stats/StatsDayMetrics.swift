@@ -86,19 +86,19 @@ enum StatsDayMetrics {
             let blended = 0.55 * blockRatio + 0.45 * vmTaskRatio
             let caption: String
             if viewModel.isFormulaRunStopped {
-                caption = "Finished day · blocks & tasks"
+                caption = "Finished day · time blocks & tasks"
             } else if viewModel.isFormulaSchedulePaused {
-                caption = "Paused · \(viewModel.remainingBlockCount) blocks left"
+                caption = "Paused · \(viewModel.remainingBlockCount) time blocks left"
             } else {
-                caption = "\(viewModel.completedBlockCount)/\(denom) blocks · tasks"
+                caption = "\(viewModel.completedBlockCount)/\(denom) time blocks · tasks"
             }
             return (min(max(blended, 0), 1), caption, true)
         }
 
         if viewModel.dayEngineMode == .formulaBased {
             let caption = viewModel.hasFormulaTemplate
-                ? "Start the schedule to track adherence"
-                : "Build a schedule on Blocks"
+                ? "Start your TimeMap to track adherence"
+                : "Pick or build a TimeMap on the TimeMap tab"
             return (0, caption, false)
         }
 

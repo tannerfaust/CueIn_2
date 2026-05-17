@@ -5,6 +5,8 @@ import Foundation
 enum CueInAppDataKeys {
     /// When `true`, bundled demo content is removed: empty Tasks store and empty task-led Today blocks.
     static let gimmickDemoRemoved = "cuein.data.gimmickDemoRemoved.v1"
+    /// When `true`, the bundled “Test day (empty blocks)” starter scheme is omitted from TimeMap lists and libraries.
+    static let hideBundledDummyTestDayTimeMap = "cuein.data.hideBundledDummyTestDayTimeMap.v1"
 }
 
 // MARK: - CueInAppDataService
@@ -64,6 +66,7 @@ enum CueInAppDataService {
         defaults.removeObject(forKey: DayEngineMode.storageKey)
         defaults.removeObject(forKey: AppTab.storageKey)
         defaults.removeObject(forKey: CueInAppDataKeys.gimmickDemoRemoved)
+        defaults.removeObject(forKey: CueInAppDataKeys.hideBundledDummyTestDayTimeMap)
         FormulaLibraryService.clearUserSavedTemplates()
         TasksStore.shared.replaceWithGimmickSeed()
         GoalStrategyStore.shared.replaceWithGimmickSeed()

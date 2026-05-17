@@ -1,7 +1,7 @@
 import Foundation
 
 // MARK: - DayEngineMode
-/// High-level Today modes (timeline vs formula schedule), switched from the ⋯ menu.
+/// High-level Today modes (timeline vs TimeMap), switched from the ⋯ menu.
 
 enum DayEngineMode: String, CaseIterable, Identifiable, Codable {
     /// Declared first so `allCases` matches top-bar toggle order (left → right).
@@ -14,14 +14,14 @@ enum DayEngineMode: String, CaseIterable, Identifiable, Codable {
 
     var label: String {
         switch self {
-        case .formulaBased: return "Blocks"
+        case .formulaBased: return "TimeMap"
         case .taskLed: return "Timeline"
         }
     }
 
     var compactLabel: String {
         switch self {
-        case .formulaBased: return "Blocks"
+        case .formulaBased: return "TimeMap"
         case .taskLed: return "Timeline"
         }
     }

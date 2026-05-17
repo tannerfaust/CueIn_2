@@ -28,6 +28,8 @@ struct AppShellView: View {
     @State private var showHubOverflowSheet = false
     @State private var showStatsOverflowSheet = false
     @State private var auxiliaryTaskSheet: AuxiliaryTaskSheet?
+    @State private var quickCaptureEditorDraft: TaskItem?
+    @State private var quickCaptureExpanded = false
     @State private var showExecutionSheet = false
     @State private var showTimelineCapture = false
     @State private var showScheduleBlockTaskSheet = false
@@ -68,8 +70,11 @@ struct AppShellView: View {
                     }
                     .transition(.opacity)
             }
-            bottomFeedbackAndBar
-            devNotebookFloatingControl
+            if !quickCaptureComposerIsPresented {
+                bottomFeedbackAndBar
+                devNotebookFloatingControl
+            }
+            quickCaptureComposerOverlay
         }
         .onAppear {
             selectedTab = resolvedSelectedTab
@@ -103,15 +108,6 @@ struct AppShellView: View {
                 Task { await SupabaseAuthStore.shared.validateStoredSession() }
             }
         }
-        .sheet(isPresented: $showShellQuickCapture) {
-            QuickCaptureSheet(
-                onDismiss: { showShellQuickCapture = false },
-                onExpand: { _ in showShellQuickCapture = false }
-            )
-            .presentationDetents([.medium, .large])
-            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
-            .presentationDragIndicator(.visible)
-        }
         .sheet(isPresented: $showAntiTodoCapture) {
             AntiTodoCaptureSheet(store: .shared, onDismiss: { showAntiTodoCapture = false })
                 .presentationDetents([.medium])
@@ -123,15 +119,6 @@ struct AppShellView: View {
                 .presentationDetents([.medium])
                 .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
                 .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $showTimelineCapture) {
-            QuickCaptureSheet(
-                onDismiss: { showTimelineCapture = false },
-                onExpand:  { _ in showTimelineCapture = false }
-            )
-            .presentationDetents([.medium, .large])
-            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
-            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showScheduleBlockTaskSheet) {
             ScheduleQuickAddTaskSheet(
@@ -188,6 +175,19 @@ struct AppShellView: View {
                 .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
             }
         }
+        .sheet(item: $quickCaptureEditorDraft) { draft in
+            TaskDetailSheet(
+                mode: .create,
+                store: .shared,
+                configureCreateDraft: { item in
+                    item = draft
+                },
+                onDismiss: { quickCaptureEditorDraft = nil }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
         .sheet(isPresented: $showDevCaptureSheet) {
             DevNotebookCaptureSheet(isPresented: $showDevCaptureSheet, defaultKind: .moduleIdea) { kind, body in
                 let snap = DevNotebookContext.shared.makeSnapshot()
@@ -227,6 +227,114 @@ struct AppShellView: View {
                 break
             }
             selectedTab = tab
+        }
+    }
+
+    private func openQuickCaptureEditor(_ draft: TaskItem) {
+        dismissQuickCaptureComposer()
+        deferPresentation {
+            quickCaptureEditorDraft = draft
+        }
+    }
+
+    @ViewBuilder
+    private var quickCaptureComposerOverlay: some View {
+        if quickCaptureComposerIsPresented {
+            ZStack(alignment: .bottom) {
+                Color.black.opacity(quickCaptureExpanded ? 0.10 : 0.001)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        dismissQuickCaptureComposer()
+                    }
+
+                VStack(spacing: 0) {
+                    quickCaptureComposerHandle
+                    QuickCaptureSheet(
+                        onDismiss: dismissQuickCaptureComposer,
+                        onExpand: openQuickCaptureEditor,
+                        showsDragHandle: false,
+                        presentationMode: quickCaptureExpanded ? .full : .compactComposer
+                    )
+                }
+                .background(CueInColors.surfacePrimary)
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: CueInSheetPresentation.cornerRadius,
+                        bottomLeadingRadius: 0,
+                        bottomTrailingRadius: 0,
+                        topTrailingRadius: CueInSheetPresentation.cornerRadius,
+                        style: .continuous
+                    )
+                )
+                .shadow(color: .black.opacity(0.08), radius: 16, x: 0, y: -4)
+                .frame(maxWidth: .infinity, alignment: .bottom)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .gesture(quickCaptureComposerDrag)
+            }
+            .zIndex(20)
+        }
+    }
+
+    private var quickCaptureComposerHandle: some View {
+        Capsule()
+            .fill(CueInColors.textTertiary.opacity(0.42))
+            .frame(width: 42, height: 5)
+            .frame(maxWidth: .infinity)
+            .frame(height: 34)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(quickCaptureComposerAnimation) {
+                    quickCaptureExpanded.toggle()
+                }
+            }
+            .accessibilityLabel(quickCaptureExpanded ? "Collapse task composer" : "Expand task composer")
+    }
+
+    private var quickCaptureComposerDrag: some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .local)
+            .onEnded { value in
+                let vertical = value.translation.height
+                let predicted = value.predictedEndTranslation.height
+                let drag = abs(predicted) > abs(vertical) ? predicted : vertical
+
+                withAnimation(quickCaptureComposerAnimation) {
+                    if drag < -18 {
+                        quickCaptureExpanded = true
+                    } else if drag > 28 {
+                        if quickCaptureExpanded {
+                            quickCaptureExpanded = false
+                        } else {
+                            dismissQuickCaptureComposer()
+                        }
+                    }
+                }
+            }
+    }
+
+    private var quickCaptureComposerAnimation: Animation {
+        .interactiveSpring(response: 0.28, dampingFraction: 0.9, blendDuration: 0.08)
+    }
+
+    private var quickCaptureComposerIsPresented: Bool {
+        showShellQuickCapture || showTimelineCapture
+    }
+
+    private func presentQuickCaptureComposer(timeline: Bool = false) {
+        dismissFabOverflow()
+        quickCaptureExpanded = false
+        if timeline {
+            showTimelineCapture = true
+        } else {
+            showShellQuickCapture = true
+        }
+    }
+
+    private func dismissQuickCaptureComposer() {
+        withAnimation(quickCaptureComposerAnimation) {
+            showShellQuickCapture = false
+            showTimelineCapture = false
+            quickCaptureExpanded = false
         }
     }
 
@@ -381,6 +489,7 @@ struct AppShellView: View {
 
     private var floatingPlusAccessibilityLabel: String {
         switch selectedTab {
+        case .schedule: return "Add time block"
         case .antiTodo: return "Add anti to-do"
         case .quantifiedSelf: return "New tracker"
         case .pomodoro, .sounds: return "Quick capture"
@@ -435,8 +544,15 @@ struct AppShellView: View {
                         showAntiTodoCapture = true
                     } else if selectedTab == .quantifiedSelf {
                         NotificationCenter.default.post(name: .cueInShowAddMeasureTracker, object: nil)
+                    } else if selectedTab == .schedule, todayMode == .formulaBased {
+                        todayViewModel.insertFormulaBlock(
+                            title: "New Block",
+                            type: .focus,
+                            flowMode: .blocking,
+                            durationMinutes: 45
+                        )
                     } else {
-                        showShellQuickCapture = true
+                        presentQuickCaptureComposer()
                     }
                 },
                 onLongPress: {
@@ -559,7 +675,9 @@ struct AppShellView: View {
         [
             .init(icon: "calendar.day.timeline.left", title: "Timeline capture", subtitle: "Add straight to the day stream") {
                 dismissFabOverflow()
-                deferPresentation { showTimelineCapture = true }
+                deferPresentation {
+                    presentQuickCaptureComposer(timeline: true)
+                }
             },
         ]
     }
@@ -662,7 +780,7 @@ struct AppShellView: View {
 
     private func deferPresentation(_ body: @escaping () -> Void) {
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(150))
+            try? await Task.sleep(for: .milliseconds(90))
             body()
         }
     }

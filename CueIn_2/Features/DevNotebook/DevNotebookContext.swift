@@ -28,7 +28,7 @@ final class DevNotebookContext {
             let engine = DayEngineMode(rawValue: modeRaw) ?? .taskLed
             switch engine {
             case .formulaBased:
-                segments.append("Blocks")
+                segments.append("TimeMap")
             case .taskLed:
                 let vmRaw = UserDefaults.standard.string(forKey: TodayDisplayPreferences.taskLedViewMode)
                     ?? TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue
@@ -53,7 +53,7 @@ final class DevNotebookContext {
     private var captureModuleLabel: String {
         switch selectedTab {
         case .schedule:
-            return "Blocks"
+            return "TimeMap"
         case .taskLed:
             let vmRaw = UserDefaults.standard.string(forKey: TodayDisplayPreferences.taskLedViewMode)
                 ?? TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue

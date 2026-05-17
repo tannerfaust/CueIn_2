@@ -235,7 +235,7 @@ struct RunningLineView: View {
         VStack(alignment: .leading, spacing: CueInSpacing.sm) {
             HStack(alignment: .firstTextBaseline, spacing: CueInSpacing.sm) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(isStopped ? "Paused" : "Schedule")
+                    Text(isStopped ? "Paused" : "TimeMap")
                         .font(CueInTypography.micro)
                         .foregroundStyle(CueInColors.textTertiary)
                         .textCase(.uppercase)

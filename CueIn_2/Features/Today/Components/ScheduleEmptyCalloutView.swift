@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - ScheduleEmptyCalloutView
-/// Shown when Schedule mode has no template — directs people to the floating + control.
+/// Shown when TimeMap mode has no template — directs people to the floating + control.
 
 struct ScheduleEmptyCalloutView: View {
     var body: some View {
@@ -9,7 +9,7 @@ struct ScheduleEmptyCalloutView: View {
             Spacer()
                 .frame(height: 48)
 
-            Text("Make or choose your schedule")
+            Text("Make or choose your TimeMap")
                 .font(CueInTypography.title)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(
@@ -45,7 +45,7 @@ struct ScheduleEmptyCalloutView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 360)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Make or choose your schedule")
+        .accessibilityLabel("Make or choose your TimeMap")
         .accessibilityHint("Opens from the add button beside the tab bar.")
     }
 }

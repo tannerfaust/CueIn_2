@@ -73,7 +73,7 @@ struct ScheduleStartSetupSheet: View {
                 ],
                 spacing: CueInSpacing.sm
             ) {
-                metricTile(value: "\(preview.blockCount)", label: "Blocks", icon: "rectangle.stack.fill")
+                metricTile(value: "\(preview.blockCount)", label: "Time blocks", icon: "rectangle.stack.fill")
                 metricTile(value: Self.durationLabel(minutes: preview.nominalMinutes), label: "Planned", icon: "clock.fill")
                 metricTile(value: "\(preview.openExecutionTaskCount)", label: "Open tasks", icon: "tray.full.fill")
                 metricTile(value: "\(preview.pinnedBlockCount)", label: "Pinned", icon: "pin.fill", tint: preview.pinnedBlockCount > 0 ? CueInColors.warning : CueInColors.textTertiary)
@@ -103,7 +103,7 @@ struct ScheduleStartSetupSheet: View {
             }
 
             DatePicker(
-                "Schedule end",
+                "TimeMap end",
                 selection: $draftScheduleEnd,
                 displayedComponents: [.date, .hourAndMinute]
             )
@@ -271,7 +271,7 @@ struct ScheduleStartSetupSheet: View {
                 .foregroundStyle(CueInColors.textTertiary)
                 .padding(.top, 2)
 
-            Text("Schedule keeps block order, fills from Execution on start, then recalculates durations to land on your chosen end time.")
+            Text("Your TimeMap keeps time block order, fills from Execution on start, then recalculates durations to land on your chosen end time.")
                 .font(CueInTypography.caption)
                 .foregroundStyle(CueInColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

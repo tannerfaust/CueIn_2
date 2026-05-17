@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - ScheduleBlockEditSheet
-/// Same block editor as the schedule builder (`ScheduleBlockEditorForm`), for editing a live formula block.
+/// Block editor for a live formula block on Today (uses ``ScheduleBlockEditorForm``).
 
 struct ScheduleBlockEditSheet: View {
     private let allowsPoolFillSource: Bool
@@ -45,8 +45,7 @@ struct ScheduleBlockEditSheet: View {
 
     var body: some View {
         NavigationStack {
-            // Mirror `FormulaPickerSheet`: vertical scroll, non-empty title so the system
-            // navigation bar gets the same scroll-edge / unified toolbar treatment as Schedules.
+            // Vertical scroll + non-empty title so the system navigation bar matches other Today sheets.
             ScrollView(.vertical, showsIndicators: false) {
                 ScheduleBlockEditorForm(
                     block: $draft,

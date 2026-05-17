@@ -54,7 +54,7 @@ private enum BlockEditorInfoTopic: String, Identifiable {
         case .poolFill:
             return "Narrows which Timeline cards autofill can pull in: field, project, optional deep-work–only, and how candidates are ordered before packing."
         case .savePreset:
-            return "Stores this block’s setup under Saved in the block library so you can reuse the shape on other days. It’s one block template, not a full schedule."
+            return "Stores this block’s setup under Saved in the TimeMap block library so you can reuse the shape on other days. It’s one TimeMap block template, not a full TimeMap."
         }
     }
 }
@@ -570,7 +570,7 @@ struct ScheduleBlockEditorForm: View {
     }
 
     private var schedulingSection: some View {
-        editorSettingsCard(title: "Schedule") {
+        editorSettingsCard(title: "Time block") {
             VStack(alignment: .leading, spacing: CueInSpacing.sm) {
                 HStack(alignment: .center, spacing: CueInSpacing.sm) {
                     Toggle(isOn: $block.pinsToClock) {

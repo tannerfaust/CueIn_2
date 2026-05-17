@@ -24,10 +24,10 @@ private struct HubToolDefinition: Identifiable {
         HubToolDefinition(id: "pomodoro",       systemImage: "timer",               title: "Timer",      subtitle: "Focus intervals"),
         HubToolDefinition(id: "sounds",         systemImage: "waveform",            title: "Sounds",     subtitle: "Focus audio"),
         HubToolDefinition(id: "quantifiedSelf", systemImage: "chart.xyaxis.line",   title: "Measures",   subtitle: "Quantified self"),
-        HubToolDefinition(id: "library",        systemImage: "rectangle.stack.fill.badge.plus", title: "Library", subtitle: "Bookmarks & block library"),
+        HubToolDefinition(id: "library",        systemImage: "rectangle.stack.fill.badge.plus", title: "Library", subtitle: "Bookmarks & TimeMap library"),
         HubToolDefinition(id: "planning",       systemImage: "calendar",            title: "Planning",   subtitle: "Week & month view"),
         HubToolDefinition(id: "routines",       systemImage: "arrow.triangle.2.circlepath", title: "Routines", subtitle: "Repeatable systems"),
-        HubToolDefinition(id: "schedules",      systemImage: "doc.text.fill",       title: "Schedules",  subtitle: "Day & week templates"),
+        HubToolDefinition(id: "schedules",      systemImage: "doc.text.fill",       title: "TimeMaps",  subtitle: "Saved day layouts"),
         HubToolDefinition(id: "ai",             systemImage: "brain.head.profile",  title: "AI Tools",   subtitle: "Smart assistance"),
         HubToolDefinition(id: "integrations",   systemImage: "link",                title: "Integrations", subtitle: "Connect your stack"),
     ]
@@ -277,7 +277,7 @@ struct HubView: View {
                 id: "jump-tab-\(tab.rawValue)",
                 systemImage: tab.icon,
                 title: tab.label,
-                subtitle: "Formula-based day",
+                subtitle: "TimeMap day",
                 onSelect: onSelect
             )
         case .taskLed:
@@ -593,8 +593,8 @@ struct HubView: View {
         let s = FormulaLibraryService.customSchedules().count
         let b = FormulaLibraryService.customBlockPresets().count
         let total = t + s + b
-        if total == 0 { return "Tasks tab & Blocks tab" }
-        return "\(t) bookmarked · \(s) day layouts · \(b) block presets"
+        if total == 0 { return "Tasks tab & TimeMap tab" }
+        return "\(t) bookmarked · \(s) TimeMaps · \(b) TimeMap block presets"
     }
 
     private var planningTileSubtitle: String {

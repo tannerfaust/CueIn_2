@@ -4,7 +4,7 @@ import SwiftUI
 /// Primary destinations that can appear in CueIn's bottom navigation.
 
 enum AppTab: String, CaseIterable, Identifiable {
-    /// Formula / day-schedule surface (time blocks).
+    /// TimeMap / day layout surface (time blocks).
     case schedule
     /// Unified task-led day (To-do vs Timeline follows ``TodayDisplayPreferences.taskLedViewMode``).
     case taskLed
@@ -82,7 +82,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .schedule: return "Blocks"
+        case .schedule: return "TimeMap"
         /// Fallback only; the tab bar reads ``TodayDisplayPreferences.TaskLedViewMode`` for the live title.
         case .taskLed: return "Timeline"
         case .tasks: return "Tasks"
@@ -101,7 +101,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     /// Short titles for the navbar customization list (static; task-led tab covers both To-do and Timeline).
     var rearrangementPickerLabel: String {
         switch self {
-        case .schedule: return "Blocks"
+        case .schedule: return "TimeMap"
         case .taskLed: return "To-do / Timeline"
         default: return label
         }

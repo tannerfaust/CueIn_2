@@ -11,7 +11,7 @@ struct TimelessRunSetupSheet: View {
     var body: some View {
         CueInBottomSheet(title: "Timeless run", onDismiss: onCancel) {
             VStack(alignment: .leading, spacing: CueInSpacing.lg) {
-                Text("Choose when your run should end. Blocks stretch or compress to fit that window.")
+                Text("Choose when your run should end. Time blocks stretch or compress to fit that window.")
                     .font(CueInTypography.caption)
                     .foregroundStyle(CueInColors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

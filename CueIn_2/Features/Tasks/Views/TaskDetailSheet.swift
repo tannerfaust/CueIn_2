@@ -75,7 +75,8 @@ struct TaskDetailSheet: View {
                 CueInEditorToolbar(
                     saveEnabled: canSave,
                     onClose: onDismiss,
-                    onSave: save
+                    onSave: save,
+                    showsCloseButton: false
                 ) {
                     projectHeaderChip
                 }

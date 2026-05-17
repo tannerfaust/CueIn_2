@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - BlockTemplateLibrarySheet
-/// Pick a **block** shape: your saved copies, or individual blocks from bundled sample days (not whole schedules).
+/// Pick a **TimeMap block** shape: your saved copies, or individual blocks from bundled sample days (not whole TimeMaps).
 
 private struct LibraryEntry: Identifiable {
     let id: String
@@ -51,7 +51,7 @@ struct BlockTemplateLibrarySheet: View {
                 )
             )
         }
-        for formula in FormulaLibraryService.allSchedules {
+        for formula in FormulaLibraryService.bundledLibraryTemplates {
             for b in exampleBlocks(in: formula) {
                 rows.append(
                     LibraryEntry(
@@ -76,7 +76,7 @@ struct BlockTemplateLibrarySheet: View {
             List {
                 if searchMissesEverything {
                     Section {
-                        Text("No matching blocks")
+                        Text("No matching TimeMap blocks")
                             .font(CueInTypography.caption)
                             .foregroundStyle(CueInColors.textTertiary)
                     }
@@ -105,7 +105,7 @@ struct BlockTemplateLibrarySheet: View {
                                 }
                         }
                     } header: {
-                        Text("Blocks")
+                        Text("TimeMap blocks")
                             .font(CueInTypography.captionMedium)
                             .foregroundStyle(CueInColors.textSecondary)
                             .textCase(nil)
@@ -114,8 +114,8 @@ struct BlockTemplateLibrarySheet: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .searchable(text: $query, prompt: "Search blocks")
-            .navigationTitle("Block library")
+            .searchable(text: $query, prompt: "Search TimeMap blocks")
+            .navigationTitle("TimeMap block library")
             .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

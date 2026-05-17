@@ -111,7 +111,7 @@ struct StatsView: View {
                     )
                     ringLegend(
                         color: CueInColors.accentFocus,
-                        title: "Blocks",
+                        title: "TimeMap",
                         caption: snapshot.algorithmCaption
                     )
                     ringLegend(
@@ -164,7 +164,7 @@ struct StatsView: View {
 
                 HStack(spacing: CueInSpacing.xl) {
                     statRing(value: snapshot.awakeProgress, label: "Awake")
-                    statRing(value: snapshot.algorithmProgress, label: "Blocks")
+                    statRing(value: snapshot.algorithmProgress, label: "TimeMap")
                     statRing(value: snapshot.todayTasksProgress, label: "Tasks")
                 }
                 .frame(maxWidth: .infinity)

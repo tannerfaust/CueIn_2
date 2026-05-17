@@ -20,6 +20,7 @@ struct CueInEditorToolbar<Principal: View>: ToolbarContent {
     let onSave: () -> Void
     var saveForeground: Color = CueInColors.accentFocus
     var saveButtonStyle: CueInEditorSaveButtonStyle = .blueCircle
+    var showsCloseButton = true
     @ViewBuilder let principal: () -> Principal
 
     init(
@@ -28,6 +29,7 @@ struct CueInEditorToolbar<Principal: View>: ToolbarContent {
         onSave: @escaping () -> Void,
         saveForeground: Color = CueInColors.accentFocus,
         saveButtonStyle: CueInEditorSaveButtonStyle = .blueCircle,
+        showsCloseButton: Bool = true,
         @ViewBuilder principal: @escaping () -> Principal
     ) {
         self.saveEnabled = saveEnabled
@@ -35,6 +37,7 @@ struct CueInEditorToolbar<Principal: View>: ToolbarContent {
         self.onSave = onSave
         self.saveForeground = saveForeground
         self.saveButtonStyle = saveButtonStyle
+        self.showsCloseButton = showsCloseButton
         self.principal = principal
     }
 
@@ -46,8 +49,10 @@ struct CueInEditorToolbar<Principal: View>: ToolbarContent {
 
     @ToolbarContentBuilder
     private var toolbarItems: some ToolbarContent {
-        ToolbarItem(placement: .cancellationAction) {
-            CueInLiquidGlassToolbarIconButton(role: .close, action: onClose)
+        if showsCloseButton {
+            ToolbarItem(placement: .cancellationAction) {
+                CueInLiquidGlassToolbarIconButton(role: .close, action: onClose)
+            }
         }
 
         ToolbarItem(placement: .principal) {

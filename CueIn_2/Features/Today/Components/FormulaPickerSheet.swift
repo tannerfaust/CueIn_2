@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - FormulaPickerSheet
-/// Minimal picker for selecting which schedule drives the Today runtime.
+/// Minimal picker for selecting which TimeMap drives the Today runtime.
 ///
 /// **Sheet blur:** The frosted “Liquid Glass” / system sheet is the *default* when the presenter
 /// does **not** use `.presentationBackground` with an opaque `Color` (that flattens the sheet).
@@ -10,14 +10,29 @@ struct FormulaPickerSheet: View {
     let formulas: [DayFormulaTemplate]
     let selectedFormulaID: UUID?
     let onSelect: (UUID) -> Void
-    let onCreate: () -> Void
+    /// Starts a blank TimeMap on Today (saved starter + selected). Omit to hide the toolbar control.
+    let onNewTimeMap: (() -> Void)?
     let onDismiss: () -> Void
+
+    init(
+        formulas: [DayFormulaTemplate],
+        selectedFormulaID: UUID?,
+        onSelect: @escaping (UUID) -> Void,
+        onNewTimeMap: (() -> Void)? = nil,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.formulas = formulas
+        self.selectedFormulaID = selectedFormulaID
+        self.onSelect = onSelect
+        self.onNewTimeMap = onNewTimeMap
+        self.onDismiss = onDismiss
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: CueInSpacing.md) {
-                    Text("Choose the schedule that should drive today.")
+                    Text("Choose the TimeMap that should drive today.")
                         .font(CueInTypography.caption)
                         .foregroundStyle(CueInColors.textSecondary)
                         .padding(.horizontal, CueInSpacing.screenHorizontal)
@@ -64,7 +79,7 @@ struct FormulaPickerSheet: View {
 
                                         HStack(spacing: CueInSpacing.sm) {
                                             metric(text: formula.targetDurationLabel)
-                                            metric(text: "\(formula.blockCount) blocks")
+                                            metric(text: "\(formula.blockCount) time blocks")
                                             if formula.executionFilledBlockCount > 0 {
                                                 metric(text: "\(formula.executionFilledBlockCount) dynamic")
                                             } else {
@@ -88,7 +103,7 @@ struct FormulaPickerSheet: View {
                 }
             }
             .background(CueInColors.background)
-            .navigationTitle("Schedules")
+            .navigationTitle("Choose TimeMap")
             .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -96,10 +111,12 @@ struct FormulaPickerSheet: View {
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        onCreate()
-                    } label: {
-                        Label("Make", systemImage: "plus")
+                    if let onNewTimeMap {
+                        Button {
+                            onNewTimeMap()
+                        } label: {
+                            Label("New", systemImage: "plus")
+                        }
                     }
                 }
             }
