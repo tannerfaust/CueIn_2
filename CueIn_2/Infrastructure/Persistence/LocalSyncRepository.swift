@@ -69,6 +69,15 @@ final class LocalSyncRepository {
         return try modelContext.fetch(descriptor)
     }
 
+    func hasPendingMutation(table: SupabaseTable, recordID: UUID) throws -> Bool {
+        let tableName = table.rawValue
+        var descriptor = FetchDescriptor<LocalSyncMutation>(
+            predicate: #Predicate { $0.tableName == tableName && $0.recordID == recordID }
+        )
+        descriptor.fetchLimit = 1
+        return try !modelContext.fetch(descriptor).isEmpty
+    }
+
     func clearPendingMutations(for table: SupabaseTable) throws {
         let tableName = table.rawValue
         let descriptor = FetchDescriptor<LocalSyncMutation>(
@@ -132,6 +141,8 @@ final class LocalSyncRepository {
         if let existing = try modelContext.fetch(descriptor).first {
             existing.operationRawValue = operation.rawValue
             existing.payloadData = payloadData
+            existing.createdAt = Date()
+            existing.attempts = 0
             existing.lastError = nil
             return
         }

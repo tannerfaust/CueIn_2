@@ -11,10 +11,17 @@ struct SupabaseConfiguration: Equatable {
 
     static var current: SupabaseConfiguration? {
         let defaults = UserDefaults.standard
-        let rawURL = defaults.string(forKey: urlDefaultsKey)
-            ?? Bundle.main.object(forInfoDictionaryKey: "SUPABASE_URL") as? String
-        let rawAnonKey = defaults.string(forKey: anonKeyDefaultsKey)
-            ?? Bundle.main.object(forInfoDictionaryKey: "SUPABASE_ANON_KEY") as? String
+        let bundledURL = usableBundledString(for: "SUPABASE_URL")
+        let bundledAnonKey = usableBundledString(for: "SUPABASE_ANON_KEY")
+
+        #if DEBUG
+        let rawURL = bundledURL ?? usableDefaultsString(for: urlDefaultsKey, defaults: defaults)
+        let rawAnonKey = bundledAnonKey ?? usableDefaultsString(for: anonKeyDefaultsKey, defaults: defaults)
+        #else
+        let rawURL = bundledURL
+        let rawAnonKey = bundledAnonKey
+        #endif
+
         let rawRedirectURL = defaults.string(forKey: redirectURLDefaultsKey) ?? "cuein://auth/callback"
 
         guard
@@ -63,12 +70,37 @@ struct SupabaseConfiguration: Equatable {
         return components.url
     }
 
+    private static func usableBundledString(for key: String) -> String? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return nil }
+        return usableConfigurationString(value)
+    }
+
+    private static func usableDefaultsString(for key: String, defaults: UserDefaults) -> String? {
+        guard let value = defaults.string(forKey: key) else { return nil }
+        return usableConfigurationString(value)
+    }
+
+    private static func usableConfigurationString(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.hasPrefix("$("),
+              !trimmed.localizedCaseInsensitiveContains("replace_with")
+        else {
+            return nil
+        }
+        return trimmed
+    }
+
     var authBaseURL: URL {
         projectURL.appending(path: "auth/v1")
     }
 
     var restBaseURL: URL {
         projectURL.appending(path: "rest/v1")
+    }
+
+    var functionsBaseURL: URL {
+        projectURL.appending(path: "functions/v1")
     }
 }
 

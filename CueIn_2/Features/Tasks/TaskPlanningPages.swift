@@ -75,7 +75,7 @@ struct TaskPriorityMatrixPage: View {
         }
         .background(CueInColors.background.ignoresSafeArea())
         .navigationTitle("Priority")
-        .navigationBarTitleDisplayMode(.inline)
+        .cueInNavigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -309,7 +309,7 @@ struct TaskInitiativesPage: View {
         }
         .background(CueInColors.background.ignoresSafeArea())
         .navigationTitle("Fields")
-        .navigationBarTitleDisplayMode(.inline)
+        .cueInNavigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -455,9 +455,9 @@ struct TaskProjectsPage: View {
         }
         .background(CueInColors.background.ignoresSafeArea())
         .navigationTitle("Projects")
-        .navigationBarTitleDisplayMode(.inline)
+        .cueInNavigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                 Menu {
                     Button {
                         onCreateProject(nil)

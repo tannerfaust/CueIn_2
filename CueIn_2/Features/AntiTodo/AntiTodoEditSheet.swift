@@ -82,9 +82,9 @@ struct AntiTodoEditSheet: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(CueInColors.background)
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                     Button("Cancel") {
                         onDismiss()
                         dismiss()
@@ -96,7 +96,7 @@ struct AntiTodoEditSheet: View {
                         .font(CueInTypography.bodyMedium)
                         .foregroundStyle(CueInColors.textPrimary)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                     Button("Save") {
                         var next = item
                         next.title = trimmed

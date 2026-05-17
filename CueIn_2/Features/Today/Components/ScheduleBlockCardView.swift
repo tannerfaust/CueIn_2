@@ -977,7 +977,76 @@ struct ScheduleBlockCardView: View {
     }
 }
 
-private struct BlockMainInteractionGestureView: UIViewRepresentable {
+#if os(macOS)
+private struct BlockMainInteractionGestureView: View {
+    let actions: ScheduleBlockMainRowGestureActions
+    let onSwipeChanged: (CGFloat) -> Void
+    let onSwipeEnded: (CGFloat, CGFloat) -> Void
+
+    @State private var longPressStarted = false
+
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 12)
+                    .onChanged { value in
+                        onSwipeChanged(value.translation.width)
+                    }
+                    .onEnded { value in
+                        onSwipeEnded(value.translation.width, value.predictedEndTranslation.width - value.translation.width)
+                    }
+            )
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.25)
+                    .onEnded { _ in
+                        guard actions.allowsLongPress else { return }
+                        longPressStarted = true
+                        actions.onBegan(.zero)
+                    }
+            )
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if longPressStarted {
+                            actions.onChanged(value.location)
+                        }
+                    }
+                    .onEnded { _ in
+                        if longPressStarted {
+                            longPressStarted = false
+                            actions.onEnded()
+                        }
+                    }
+            )
+            .onTapGesture {
+                actions.onTapped()
+            }
+    }
+}
+
+private struct HorizontalSwipeGestureView: View {
+    let onChanged: (CGFloat) -> Void
+    let onEnded: (CGFloat, CGFloat) -> Void
+
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 12)
+                    .onChanged { value in
+                        onChanged(value.translation.width)
+                    }
+                    .onEnded { value in
+                        onEnded(value.translation.width, value.predictedEndTranslation.width - value.translation.width)
+                    }
+            )
+    }
+}
+#endif
+
+#if os(iOS)
+private struct BlockMainInteractionUIKitGestureView: UIViewRepresentable {
     let actions: ScheduleBlockMainRowGestureActions
     let onSwipeChanged: (CGFloat) -> Void
     let onSwipeEnded: (CGFloat, CGFloat) -> Void
@@ -1025,11 +1094,11 @@ private struct BlockMainInteractionGestureView: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var parent: BlockMainInteractionGestureView
+        var parent: BlockMainInteractionUIKitGestureView
         weak var pan: UIPanGestureRecognizer?
         weak var longPress: UILongPressGestureRecognizer?
 
-        init(parent: BlockMainInteractionGestureView) {
+        init(parent: BlockMainInteractionUIKitGestureView) {
             self.parent = parent
         }
 
@@ -1099,7 +1168,7 @@ private struct BlockMainInteractionGestureView: UIViewRepresentable {
     }
 }
 
-private struct HorizontalSwipeGestureView: UIViewRepresentable {
+private struct HorizontalSwipeUIKitGestureView: UIViewRepresentable {
     let onChanged: (CGFloat) -> Void
     let onEnded: (CGFloat, CGFloat) -> Void
 
@@ -1126,9 +1195,9 @@ private struct HorizontalSwipeGestureView: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var parent: HorizontalSwipeGestureView
+        var parent: HorizontalSwipeUIKitGestureView
 
-        init(parent: HorizontalSwipeGestureView) {
+        init(parent: HorizontalSwipeUIKitGestureView) {
             self.parent = parent
         }
 
@@ -1155,6 +1224,10 @@ private struct HorizontalSwipeGestureView: UIViewRepresentable {
         }
     }
 }
+
+private typealias BlockMainInteractionGestureView = BlockMainInteractionUIKitGestureView
+private typealias HorizontalSwipeGestureView = HorizontalSwipeUIKitGestureView
+#endif
 
 // MARK: - Liquid glass block chrome
 
@@ -1185,7 +1258,7 @@ private struct ScheduleBlockGlassDesignModifier: ViewModifier {
 
     @ViewBuilder
     private func liquidGlassBody(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             let tint: Color = isCurrentBlock
                 ? runningPrimary.opacity(0.16)
                 : Color.white.opacity(0.10)

@@ -52,10 +52,10 @@ struct QuantifiedSelfView: View {
             }
             .background(CueInColors.background.ignoresSafeArea())
             .navigationTitle("Measures")
-            .navigationBarTitleDisplayMode(.large)
+            .cueInNavigationBarTitleDisplayMode(.large)
             .toolbar {
                 if let onRequestDismiss {
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                         Button(action: onRequestDismiss) {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 17, weight: .semibold))

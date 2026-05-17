@@ -69,8 +69,8 @@ struct TaskDetailSheet: View {
                 editorAccessory
             }
             .navigationTitle("Task")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(CueInThemePreference.current.colorScheme, for: .navigationBar)
+            .cueInNavigationBarTitleDisplayMode(.inline)
+            .cueInNavigationToolbarColorScheme()
             .toolbar {
                 CueInEditorToolbar(
                     saveEnabled: canSave,

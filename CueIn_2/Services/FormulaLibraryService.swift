@@ -6,6 +6,7 @@ import Foundation
 enum FormulaLibraryService {
     private static let customSchedulesKey = "cuein.customSchedules.v1"
     private static let customBlockPresetsKey = "cuein.customBlockPresets.v1"
+    private static var suppressSyncRecording = false
 
     static var allSchedules: [DayFormulaTemplate] {
         library + customSchedules()
@@ -32,6 +33,7 @@ enum FormulaLibraryService {
         }
         guard let data = try? JSONEncoder().encode(presets) else { return false }
         UserDefaults.standard.set(data, forKey: customBlockPresetsKey)
+        recordSyncSnapshot()
         return true
     }
 
@@ -41,6 +43,7 @@ enum FormulaLibraryService {
         presets.removeAll { $0.id == id }
         guard let data = try? JSONEncoder().encode(presets) else { return }
         UserDefaults.standard.set(data, forKey: customBlockPresetsKey)
+        recordSyncSnapshot()
     }
 
     static func customSchedules() -> [DayFormulaTemplate] {
@@ -48,7 +51,42 @@ enum FormulaLibraryService {
         return (try? JSONDecoder().decode([DayFormulaTemplate].self, from: data)) ?? []
     }
 
-    static func saveCustomSchedule(_ schedule: DayFormulaTemplate) {
+    /// Bundled + user schedules. Names are unique in the library (case-insensitive, trimmed).
+    static func existingScheduleConflictingWithName(
+        _ rawName: String,
+        excludingScheduleID: UUID?
+    ) -> DayFormulaTemplate? {
+        let key = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !key.isEmpty else { return nil }
+        return allSchedules.first { schedule in
+            if let excludingScheduleID, schedule.id == excludingScheduleID { return false }
+            return schedule.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == key
+        }
+    }
+
+    /// Picks a display name that does not collide with ``allSchedules`` (excluding one id when renaming that row).
+    static func uniquedScheduleDisplayName(startingWith base: String, excludingScheduleID: UUID?) -> String {
+        let root = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        let stem = root.isEmpty ? "Untitled schedule" : root
+        if existingScheduleConflictingWithName(stem, excludingScheduleID: excludingScheduleID) == nil {
+            return stem
+        }
+        var index = 2
+        while index < 10_000 {
+            let candidate = "\(stem) \(index)"
+            if existingScheduleConflictingWithName(candidate, excludingScheduleID: excludingScheduleID) == nil {
+                return candidate
+            }
+            index += 1
+        }
+        return stem + " " + UUID().uuidString.prefix(6)
+    }
+
+    @discardableResult
+    static func saveCustomSchedule(_ schedule: DayFormulaTemplate) -> Bool {
+        if existingScheduleConflictingWithName(schedule.name, excludingScheduleID: schedule.id) != nil {
+            return false
+        }
         var schedules = customSchedules()
         if let index = schedules.firstIndex(where: { $0.id == schedule.id }) {
             schedules[index] = schedule
@@ -56,14 +94,61 @@ enum FormulaLibraryService {
             schedules.append(schedule)
         }
 
+        guard let data = try? JSONEncoder().encode(schedules) else { return false }
+        UserDefaults.standard.set(data, forKey: customSchedulesKey)
+        recordSyncSnapshot()
+        return true
+    }
+
+    /// Removes one user-saved day formula from the library (bundled templates are not stored here).
+    static func removeCustomSchedule(id: UUID) {
+        var schedules = customSchedules()
+        schedules.removeAll { $0.id == id }
         guard let data = try? JSONEncoder().encode(schedules) else { return }
         UserDefaults.standard.set(data, forKey: customSchedulesKey)
+        recordSyncSnapshot()
+        Task { @MainActor in
+            TodayViewModel.shared.reloadAvailableFormulasFromLibrary()
+        }
     }
 
     /// Removes user-created day formulas and saved block presets (bundled templates stay on disk in code).
     static func clearUserSavedTemplates() {
         UserDefaults.standard.removeObject(forKey: customSchedulesKey)
         UserDefaults.standard.removeObject(forKey: customBlockPresetsKey)
+        recordSyncSnapshot()
+    }
+
+    static func syncPayload() -> [String: String] {
+        let defaults = UserDefaults.standard
+        return [
+            "custom_schedules": defaults.data(forKey: customSchedulesKey)?.base64EncodedString() ?? "",
+            "custom_block_presets": defaults.data(forKey: customBlockPresetsKey)?.base64EncodedString() ?? ""
+        ]
+    }
+
+    static func applySyncPayload(_ payload: [String: String]) {
+        suppressSyncRecording = true
+        let defaults = UserDefaults.standard
+        applyBase64Payload(payload["custom_schedules"], key: customSchedulesKey, defaults: defaults)
+        applyBase64Payload(payload["custom_block_presets"], key: customBlockPresetsKey, defaults: defaults)
+        suppressSyncRecording = false
+        TodayViewModel.shared.reloadAvailableFormulasFromLibrary()
+    }
+
+    private static func applyBase64Payload(_ value: String?, key: String, defaults: UserDefaults) {
+        guard let value, !value.isEmpty, let data = Data(base64Encoded: value) else {
+            defaults.removeObject(forKey: key)
+            return
+        }
+        defaults.set(data, forKey: key)
+    }
+
+    private static func recordSyncSnapshot() {
+        guard !suppressSyncRecording else { return }
+        Task { @MainActor in
+            CueInSyncRuntimeBridge.shared.recordFormulaLibrarySnapshot()
+        }
     }
 
     static let library: [DayFormulaTemplate] = [

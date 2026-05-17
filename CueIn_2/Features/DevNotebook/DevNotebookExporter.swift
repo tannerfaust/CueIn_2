@@ -1,6 +1,10 @@
 import Foundation
 import SwiftUI
+#if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 // MARK: - Format
 
@@ -126,6 +130,7 @@ enum DevNotebookExporter {
 
 // MARK: - Share (AirDrop, Files, Mail, …)
 
+#if os(iOS)
 struct DevNotebookActivityView: UIViewControllerRepresentable {
     let activityItems: [Any]
 
@@ -135,3 +140,34 @@ struct DevNotebookActivityView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
+#elseif os(macOS)
+struct DevNotebookActivityView: View {
+    let activityItems: [Any]
+
+    var body: some View {
+        VStack(spacing: CueInSpacing.md) {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 32, weight: .semibold))
+                .foregroundStyle(CueInColors.accentFocus)
+            Text("Export ready")
+                .font(CueInTypography.title)
+                .foregroundStyle(CueInColors.textPrimary)
+            Text("Open the exported file from Finder or share it using macOS.")
+                .font(CueInTypography.body)
+                .foregroundStyle(CueInColors.textSecondary)
+                .multilineTextAlignment(.center)
+            if let url = activityItems.compactMap({ $0 as? URL }).first {
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } label: {
+                    Label("Show in Finder", systemImage: "folder")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(32)
+        .frame(minWidth: 360, minHeight: 260)
+        .background(CueInColors.background)
+    }
+}
+#endif

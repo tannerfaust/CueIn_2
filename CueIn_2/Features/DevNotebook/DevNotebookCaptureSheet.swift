@@ -72,7 +72,7 @@ struct DevNotebookCaptureSheet: View {
                 .scrollDismissesKeyboard(.interactively)
             }
             .navigationTitle("Dev note")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {

@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(iOS)
 import UIKit
+#endif
 
 // MARK: - ExecutionTimelineView
 /// A **vertical time-axis calendar** of the day — Motion-style.
@@ -210,7 +212,7 @@ private struct DayPillGlassModifier: ViewModifier {
     let isToday: Bool
 
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             content
                 .clipShape(Capsule(style: .continuous))
                 .glassEffect(
@@ -923,7 +925,9 @@ private struct MotionTaskCard: View {
                     dragOriginStart = nil
                     if wasActuallyDragging {
                         let proposed = snappedStart(forOffset: value.translation.height)
+                        #if os(iOS)
                         UISelectionFeedbackGenerator().selectionChanged()
+                        #endif
                         onMove(proposed)
                     }
                 case nil:
@@ -938,7 +942,9 @@ private struct MotionTaskCard: View {
             closeActions(animated: true)
             isDragging = true
             dragOriginStart = task.startDate
+            #if os(iOS)
             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            #endif
         }
         let proposed = snappedStart(forOffset: value.translation.height)
         dragPreviewStart = proposed
@@ -972,11 +978,15 @@ private struct MotionTaskCard: View {
                 revealActions()
             }
         } else if tx > completeSwipeThreshold {
+            #if os(iOS)
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            #endif
             onToggle()
             resetHorizontalOffset()
         } else if tx < revealSwipeThreshold || vx < -300 {
+            #if os(iOS)
             UISelectionFeedbackGenerator().selectionChanged()
+            #endif
             revealActions()
         } else {
             resetHorizontalOffset()
@@ -1030,7 +1040,7 @@ private enum CardInteractionMode {
 /// both dark panels and tinted cards that slide underneath it.
 private struct NowPillGlassModifier: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             content
                 .clipShape(Capsule(style: .continuous))
                 .glassEffect(
@@ -1054,4 +1064,3 @@ private struct NowPillGlassModifier: ViewModifier {
         }
     }
 }
-

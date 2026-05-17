@@ -8,6 +8,7 @@
 
 /* Begin PBXFileReference section */
 		C26D96082F99948600B4E972 /* CueIn_2.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CueIn_2.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C26D96202F99970000B4E972 /* CueIn_macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = CueIn_macOS.app; path = CueIn.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -20,6 +21,13 @@
 
 /* Begin PBXFrameworksBuildPhase section */
 		C26D96052F99948600B4E972 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C26D96222F99970000B4E972 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -41,6 +49,7 @@
 			isa = PBXGroup;
 			children = (
 				C26D96082F99948600B4E972 /* CueIn_2.app */,
+				C26D96202F99970000B4E972 /* CueIn_macOS.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +79,28 @@
 			productReference = C26D96082F99948600B4E972 /* CueIn_2.app */;
 			productType = "com.apple.product-type.application";
 		};
+		C26D96212F99970000B4E972 /* CueIn_macOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C26D96262F99970000B4E972 /* Build configuration list for PBXNativeTarget "CueIn_macOS" */;
+			buildPhases = (
+				C26D96232F99970000B4E972 /* Sources */,
+				C26D96222F99970000B4E972 /* Frameworks */,
+				C26D96242F99970000B4E972 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C26D960A2F99948600B4E972 /* CueIn_2 */,
+			);
+			name = CueIn_macOS;
+			packageProductDependencies = (
+			);
+			productName = CueIn_macOS;
+			productReference = C26D96202F99970000B4E972 /* CueIn_macOS.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -81,6 +112,9 @@
 				LastUpgradeCheck = 2630;
 				TargetAttributes = {
 					C26D96072F99948600B4E972 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+					C26D96212F99970000B4E972 = {
 						CreatedOnToolsVersion = 26.3;
 					};
 				};
@@ -100,6 +134,7 @@
 			projectRoot = "";
 			targets = (
 				C26D96072F99948600B4E972 /* CueIn_2 */,
+				C26D96212F99970000B4E972 /* CueIn_macOS */,
 			);
 		};
 /* End PBXProject section */
@@ -112,10 +147,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C26D96242F99970000B4E972 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		C26D96042F99948600B4E972 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C26D96232F99970000B4E972 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -272,6 +321,7 @@
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPABASE_ANON_KEY = "sb_publishable_3_m6w-vIYkbmQ-h9zRHP7Q_rJhN8vrU";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -315,6 +365,7 @@
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPABASE_ANON_KEY = "sb_publishable_3_m6w-vIYkbmQ-h9zRHP7Q_rJhN8vrU";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -322,6 +373,78 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C26D96272F99970000B4E972 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RHY3UVH272;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Config/Info-macOS.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "TannerFaust.CueIn-2.mac";
+				PRODUCT_NAME = CueIn;
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPABASE_ANON_KEY = "sb_publishable_3_m6w-vIYkbmQ-h9zRHP7Q_rJhN8vrU";
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		C26D96282F99970000B4E972 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RHY3UVH272;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Config/Info-macOS.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "TannerFaust.CueIn-2.mac";
+				PRODUCT_NAME = CueIn;
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPABASE_ANON_KEY = "sb_publishable_3_m6w-vIYkbmQ-h9zRHP7Q_rJhN8vrU";
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};
@@ -342,6 +465,15 @@
 			buildConfigurations = (
 				C26D96142F99948800B4E972 /* Debug */,
 				C26D96152F99948800B4E972 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C26D96262F99970000B4E972 /* Build configuration list for PBXNativeTarget "CueIn_macOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C26D96272F99970000B4E972 /* Debug */,
+				C26D96282F99970000B4E972 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -95,12 +95,12 @@ struct GoalEditorSheet: View {
                 }
             }
             .navigationTitle(isEditing ? "Edit Goal" : "New Goal")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                     Button("Cancel") { onDismiss() }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                     Button("Done") { save() }
                         .fontWeight(.semibold)
                         .disabled(!canSave)
@@ -217,12 +217,12 @@ struct GoalStageEditorSheet: View {
                 }
             }
             .navigationTitle(isEditing ? "Edit Stage" : "New Stage")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                     Button("Cancel") { onDismiss() }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                     Button("Done") { save() }
                         .fontWeight(.semibold)
                         .disabled(!canSave)
@@ -338,12 +338,12 @@ struct GoalSubgoalEditorSheet: View {
                 }
             }
             .navigationTitle(isEditing ? "Edit Subgoal" : "New Subgoal")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                     Button("Cancel") { onDismiss() }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                     Button("Done") { save() }
                         .fontWeight(.semibold)
                         .disabled(!canSave)
@@ -458,9 +458,9 @@ struct GoalWorkLinkPickerSheet: View {
                 }
             }
             .navigationTitle("Link Work")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                     Button("Done") { onDismiss() }
                         .fontWeight(.semibold)
                 }

@@ -28,7 +28,7 @@ struct AntiTodoListView: View {
             }
             .background(CueInColors.background.ignoresSafeArea())
             .navigationTitle("Anti To‑do")
-            .navigationBarTitleDisplayMode(.large)
+            .cueInNavigationBarTitleDisplayMode(.large)
         }
         .cueInPreferredColorScheme()
         .sheet(item: $editingItem) { item in

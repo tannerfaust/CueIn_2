@@ -69,10 +69,8 @@ struct CueInBottomSheet<Content: View>: View {
                 }
             }
             .navigationTitle(onEditorDiscard == nil ? title : "")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(onEditorDiscard == nil ? .visible : .hidden, for: .navigationBar)
-            .toolbarBackground(onEditorDiscard == nil ? Material.bar : Material.ultraThin, for: .navigationBar)
-            .toolbarColorScheme(CueInThemePreference.current.colorScheme, for: .navigationBar)
+            .cueInNavigationBarTitleDisplayMode(.inline)
+            .cueInNavigationToolbarChrome(isVisible: onEditorDiscard == nil)
             .toolbar {
                 if let onEditorDiscard {
                     CueInEditorToolbar(

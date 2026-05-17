@@ -121,7 +121,7 @@ struct ScheduleBlockTimelineView: View {
 
     @ViewBuilder
     private var blockStack: some View {
-        if scheduleDesign == .glass, #available(iOS 26.0, *) {
+        if scheduleDesign == .glass, #available(iOS 26.0, macOS 26.0, *) {
             GlassEffectContainer(spacing: blockStackSpacing) {
                 blockRows
             }
@@ -513,8 +513,9 @@ private extension CGRect {
 // MARK: - Reorder engine (uses shared ReorderEngine)
 
 
-// MARK: - UILongPressGestureRecognizer Wrapper
+// MARK: - Long press drag wrapper
 
+#if os(iOS)
 struct LongPressDragView: UIViewRepresentable {
     let onBegan: (CGPoint) -> Void
     let onChanged: (CGPoint) -> Void
@@ -711,3 +712,32 @@ final class StationaryHoldDragGestureRecognizer: UIGestureRecognizer {
         hypot(end.x - start.x, end.y - start.y)
     }
 }
+#else
+struct LongPressDragView: View {
+    let onBegan: (CGPoint) -> Void
+    let onChanged: (CGPoint) -> Void
+    let onEnded: () -> Void
+    let onCancelled: () -> Void
+    let onTapped: () -> Void
+    var minimumPressDuration: TimeInterval = 0.18
+    var allowableMovement: CGFloat = 18
+    var recognizesSimultaneouslyWithScroll: Bool = false
+
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: allowableMovement)
+                    .onChanged { value in
+                        onChanged(value.location)
+                    }
+                    .onEnded { _ in
+                        onEnded()
+                    }
+            )
+            .simultaneousGesture(
+                TapGesture().onEnded(onTapped)
+            )
+    }
+}
+#endif

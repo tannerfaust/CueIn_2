@@ -1,6 +1,8 @@
 import Foundation
 import Observation
+#if os(iOS)
 import UIKit
+#endif
 
 // MARK: - Focus coach token
 
@@ -358,8 +360,10 @@ final class PomodoroStore {
     }
 
     private func syncIdleTimer() {
+        #if os(iOS)
         let lock = keepScreenAwakeDuringWork && isRunning && phase == .work
         UIApplication.shared.isIdleTimerDisabled = lock
+        #endif
     }
 
     private func scheduleEndNotificationIfNeeded() async {

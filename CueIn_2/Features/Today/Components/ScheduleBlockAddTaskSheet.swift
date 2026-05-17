@@ -35,7 +35,7 @@ struct ScheduleBlockAddTaskSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(CueInColors.surfacePrimary)
             .navigationTitle("Add task")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") {
@@ -43,7 +43,7 @@ struct ScheduleBlockAddTaskSheet: View {
                     }
                     .foregroundStyle(CueInColors.textPrimary)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                     Button {
                         CueInHaptics.impact(.light)
                         path.append(LibraryRoute.library)
@@ -123,12 +123,12 @@ private struct TaskLibraryPickerView: View {
         .background(CueInColors.background)
         .searchable(
             text: $searchText,
-            placement: .navigationBarDrawer(displayMode: .always),
+            placement: CueInSearchPlacement.navigationBarDrawerAlways,
             prompt: "Search by title, field, or project"
         )
         .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Choose from tasks")
-        .navigationBarTitleDisplayMode(.large)
+        .cueInNavigationBarTitleDisplayMode(.large)
     }
 
     private var scopeChips: some View {

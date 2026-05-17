@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(iOS)
 import UIKit
+#endif
 
 // MARK: - ScheduleBlockEditorForm
 /// Shared editor: duration, ``BlockFlowMode``, scheduling flags, task source, tasks / pool fill.
@@ -375,8 +377,10 @@ struct ScheduleBlockEditorForm: View {
     private func runSavePreset() {
         guard let save = onSavePreset, canPersistBlockAsPreset else { return }
 
+        #if os(iOS)
         UIImpactFeedbackGenerator(style: .medium).prepare()
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        #endif
 
         let ok = save()
 
@@ -384,7 +388,9 @@ struct ScheduleBlockEditorForm: View {
         savePresetBannerDismiss = nil
 
         if ok {
+            #if os(iOS)
             UINotificationFeedbackGenerator().notificationOccurred(.success)
+            #endif
             withAnimation(.spring(response: 0.38, dampingFraction: 0.88)) {
                 savePresetBanner = .success
             }
@@ -398,7 +404,9 @@ struct ScheduleBlockEditorForm: View {
                 savePresetBannerDismiss = nil
             }
         } else {
+            #if os(iOS)
             UINotificationFeedbackGenerator().notificationOccurred(.error)
+            #endif
             withAnimation(.easeOut(duration: 0.22)) {
                 savePresetBanner = .failure
             }
@@ -959,7 +967,7 @@ struct ScheduleBlockEditorForm: View {
                             Text(hourRowTitle(hour)).tag(hour)
                         }
                     }
-                    .pickerStyle(.wheel)
+                    .cueInWheelPickerStyle()
                     .frame(maxWidth: .infinity)
 
                     Picker("Minutes", selection: durationMinutesComponentBinding) {
@@ -967,7 +975,7 @@ struct ScheduleBlockEditorForm: View {
                             Text(minuteRowTitle(minutes: mins)).tag(mins)
                         }
                     }
-                    .pickerStyle(.wheel)
+                    .cueInWheelPickerStyle()
                     .frame(maxWidth: .infinity)
 
                     Picker("Seconds", selection: durationSecondsComponentBinding) {
@@ -975,7 +983,7 @@ struct ScheduleBlockEditorForm: View {
                             Text(minuteRowTitle(minutes: secs)).tag(secs)
                         }
                     }
-                    .pickerStyle(.wheel)
+                    .cueInWheelPickerStyle()
                     .frame(maxWidth: .infinity)
                 }
                 .frame(height: 180)
@@ -984,7 +992,7 @@ struct ScheduleBlockEditorForm: View {
             }
             .padding(.top, 8)
             .navigationTitle("Timer")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
@@ -1350,7 +1358,7 @@ private struct AutofillPickOrderPickerSheet: View {
             .scrollContentBackground(.hidden)
             .background(CueInColors.background)
             .navigationTitle("Autofill order")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
@@ -1451,7 +1459,7 @@ private struct ScheduleBlockAppearancePickerSheet: View {
             }
             .background(CueInColors.background)
             .navigationTitle("Look")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

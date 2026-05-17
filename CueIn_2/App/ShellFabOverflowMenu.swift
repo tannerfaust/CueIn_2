@@ -1,5 +1,7 @@
 import SwiftUI
 
+#if os(iOS)
+
 // MARK: - ShellFabOverflowMenu
 /// Long-press FAB overflow: same liquid-glass approach as ``ScheduleBlockContextMenu``
 /// (native `glassEffect` + `GlassEffectContainer` on iOS 26). Does **not** participate in
@@ -127,3 +129,5 @@ private extension View {
         modifier(ShellFabMenuGlassChrome())
     }
 }
+
+#endif

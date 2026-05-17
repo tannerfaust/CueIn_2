@@ -102,7 +102,11 @@ final class GoalStrategyStore {
     }
 
     func deleteGoal(_ id: UUID) {
+        let deletedGoal = goals.first { $0.id == id }
         goals.removeAll { $0.id == id }
+        if let deletedGoal {
+            CueInSyncRuntimeBridge.shared.recordDeletedGoal(deletedGoal)
+        }
     }
 
     func setGoalStatus(_ id: UUID, status: GoalStatus) {
@@ -408,6 +412,9 @@ final class GoalStrategyStore {
     }
 
     func clearAllGoalsData() {
+        for goal in goals {
+            CueInSyncRuntimeBridge.shared.recordDeletedGoal(goal)
+        }
         goals = []
     }
 

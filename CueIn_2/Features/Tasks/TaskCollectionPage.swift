@@ -33,7 +33,7 @@ struct TaskCollectionPage: View {
         }
         .background(CueInColors.background.ignoresSafeArea())
         .navigationTitle(kind.title)
-        .navigationBarTitleDisplayMode(.inline)
+        .cueInNavigationBarTitleDisplayMode(.inline)
         .sheet(item: $actionTask) { task in
             TaskRowActionsSheet(
                 task: task,

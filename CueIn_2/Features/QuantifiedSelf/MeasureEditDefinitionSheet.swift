@@ -92,7 +92,7 @@ struct MeasureEditDefinitionSheet: View {
             .scrollContentBackground(.hidden)
             .background(CueInColors.background.ignoresSafeArea())
             .navigationTitle("Edit tracker")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: onDismiss)
@@ -226,7 +226,7 @@ private struct TaskLinkPickerSheet: View {
             .scrollContentBackground(.hidden)
             .background(CueInColors.background.ignoresSafeArea())
             .navigationTitle("Link task")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, prompt: "Search tasks")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -276,7 +276,7 @@ private struct GoalLinkPickerSheet: View {
             .scrollContentBackground(.hidden)
             .background(CueInColors.background.ignoresSafeArea())
             .navigationTitle("Link goal")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close", action: onDismiss)

@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(iOS)
 import UIKit
+#endif
 
 // MARK: - TodayTodoView
 /// Task-led Today presentation backed by the shared execution pool (`TasksStore.todayTasks`).
@@ -15,7 +17,9 @@ struct TodayTodoView: View {
     @AppStorage(TodayDisplayPreferences.todoShowCompletedSection) private var showCompletedSection = true
     @State private var isTodoReordering = false
     @State private var viewportFrame: CGRect = .zero
+    #if os(iOS)
     @State private var todoScrollView: UIScrollView?
+    #endif
 
     private var blockStyle: TodayDisplayPreferences.TodoTaskBlockStyle {
         TodayDisplayPreferences.migratedTodoTaskBlockStyle(from: blockStyleRaw)
@@ -86,7 +90,11 @@ struct TodayTodoView: View {
             .padding(.top, CueInSpacing.sm)
             .padding(.bottom, CueInLayout.scrollBottomInset)
             .background {
+                #if os(iOS)
                 TodayTodoScrollViewResolver(scrollView: $todoScrollView)
+                #else
+                Color.clear
+                #endif
             }
         }
         .background {
@@ -114,6 +122,7 @@ struct TodayTodoView: View {
     }
 
     private func autoScrollTodoList(by deltaY: CGFloat) {
+        #if os(iOS)
         guard let scrollView = todoScrollView,
               abs(deltaY) > 0.5
         else { return }
@@ -131,6 +140,7 @@ struct TodayTodoView: View {
             CGPoint(x: current.x, y: nextY),
             animated: false
         )
+        #endif
     }
 }
 
@@ -141,6 +151,7 @@ private struct TodayTodoViewportPreferenceKey: PreferenceKey {
     }
 }
 
+#if os(iOS)
 private struct TodayTodoScrollViewResolver: UIViewRepresentable {
     @Binding var scrollView: UIScrollView?
 
@@ -204,6 +215,7 @@ private extension UIView {
         return nil
     }
 }
+#endif
 
 // MARK: - TodayTodoHeader
 

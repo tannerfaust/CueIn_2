@@ -133,7 +133,7 @@ struct ScheduleQuickAddTaskSheet: View {
     private var taskTitleField: some View {
         TextField("Task name", text: $title)
             .font(CueInTypography.bodyMedium)
-            .textInputAutocapitalization(.sentences)
+            .cueInSentencesAutocapitalization()
             .padding(CueInSpacing.md)
             .background(CueInColors.surfaceSecondary, in: RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous))
             .foregroundStyle(CueInColors.textPrimary)

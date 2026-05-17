@@ -4,7 +4,7 @@ import SwiftUI
 /// Primary destinations that can appear in CueIn's bottom navigation.
 
 enum AppTab: String, CaseIterable, Identifiable {
-    /// Former formula / day-schedule surface ("Algorithm").
+    /// Formula / day-schedule surface (time blocks).
     case schedule
     /// Unified task-led day (To-do vs Timeline follows ``TodayDisplayPreferences.taskLedViewMode``).
     case taskLed
@@ -82,7 +82,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .schedule: return "Algorithm"
+        case .schedule: return "Blocks"
         /// Fallback only; the tab bar reads ``TodayDisplayPreferences.TaskLedViewMode`` for the live title.
         case .taskLed: return "Timeline"
         case .tasks: return "Tasks"
@@ -101,7 +101,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     /// Short titles for the navbar customization list (static; task-led tab covers both To-do and Timeline).
     var rearrangementPickerLabel: String {
         switch self {
-        case .schedule: return "Algorithm"
+        case .schedule: return "Blocks"
         case .taskLed: return "To-do / Timeline"
         default: return label
         }
@@ -109,7 +109,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .schedule: return "arrow.triangle.branch"
+        case .schedule: return "rectangle.split.3x1.fill"
         case .taskLed: return "calendar.day.timeline.left"
         case .tasks: return "checkmark.circle.fill"
         case .projects: return "folder.fill"
@@ -126,7 +126,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 
     var iconInactive: String {
         switch self {
-        case .schedule: return "arrow.triangle.branch"
+        case .schedule: return "rectangle.split.3x1"
         case .taskLed: return "calendar.day.timeline.left"
         case .tasks: return "checkmark.circle"
         case .projects: return "folder"

@@ -33,6 +33,12 @@ final class TasksStore {
     /// tasks missing from a stored order are appended using `prioritySort`.
     var taskListOrder: [String: [UUID]] = [:]
 
+    /// Full task snapshot from immediately before the user marked a task complete from the Tasks list
+    /// (swipe-right or status popover). Used by the shell FAB undo chip; cleared on timeout, undo, or tab change.
+    var pendingCompleteUndoSnapshot: TaskItem?
+
+    private var pendingCompleteUndoDismissTask: Task<Void, Never>?
+
     // MARK: Init
 
     private init() {
@@ -168,10 +174,46 @@ final class TasksStore {
         recordSyncSnapshot()
     }
 
+    /// Presents the Tasks-tab FAB undo affordance after a swipe (or checkbox popover) marks a task complete.
+    func offerCompleteUndo(preCompletionSnapshot: TaskItem) {
+        pendingCompleteUndoDismissTask?.cancel()
+        pendingCompleteUndoSnapshot = preCompletionSnapshot
+        let capturedID = preCompletionSnapshot.id
+        pendingCompleteUndoDismissTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(5.5))
+            guard !Task.isCancelled else { return }
+            if pendingCompleteUndoSnapshot?.id == capturedID {
+                pendingCompleteUndoSnapshot = nil
+            }
+        }
+    }
+
+    /// Restores the snapshot from ``pendingCompleteUndoSnapshot`` and clears the pending undo.
+    func consumeCompleteUndo() {
+        guard let snap = pendingCompleteUndoSnapshot else { return }
+        pendingCompleteUndoDismissTask?.cancel()
+        pendingCompleteUndoDismissTask = nil
+        pendingCompleteUndoSnapshot = nil
+        updateTask(snap)
+    }
+
+    func clearCompleteUndo() {
+        pendingCompleteUndoDismissTask?.cancel()
+        pendingCompleteUndoDismissTask = nil
+        pendingCompleteUndoSnapshot = nil
+    }
+
     func deleteTask(_ id: UUID) {
+        let deletedTask = tasks.first { $0.id == id }
         tasks.removeAll { $0.id == id }
         for key in Array(taskListOrder.keys) {
             taskListOrder[key]?.removeAll { $0 == id }
+        }
+        if pendingCompleteUndoSnapshot?.id == id {
+            clearCompleteUndo()
+        }
+        if let deletedTask {
+            CueInSyncRuntimeBridge.shared.recordDeletedTask(deletedTask)
         }
         recordSyncSnapshot()
     }
@@ -348,7 +390,9 @@ final class TasksStore {
 
     /// Removes the field, its projects, and clears `fieldID` on any orphaned tasks.
     func deleteField(_ id: UUID) {
-        let projIDs = projects.filter { $0.fieldID == id }.map(\.id)
+        let deletedField = fields.first { $0.id == id }
+        let deletedProjects = projects.filter { $0.fieldID == id }
+        let projIDs = deletedProjects.map(\.id)
         projects.removeAll { $0.fieldID == id }
         fields.removeAll { $0.id == id }
         for i in tasks.indices {
@@ -356,6 +400,12 @@ final class TasksStore {
             if let pid = tasks[i].projectID, projIDs.contains(pid) {
                 tasks[i].projectID = nil
             }
+        }
+        if let deletedField {
+            CueInSyncRuntimeBridge.shared.recordDeletedField(deletedField)
+        }
+        for project in deletedProjects {
+            CueInSyncRuntimeBridge.shared.recordDeletedProject(project)
         }
         recordSyncSnapshot()
     }
@@ -375,9 +425,13 @@ final class TasksStore {
 
     /// Removes the project and clears `projectID` on its tasks (tasks stay on the field).
     func deleteProject(_ id: UUID) {
+        let deletedProject = projects.first { $0.id == id }
         projects.removeAll { $0.id == id }
         for i in tasks.indices where tasks[i].projectID == id {
             tasks[i].projectID = nil
+        }
+        if let deletedProject {
+            CueInSyncRuntimeBridge.shared.recordDeletedProject(deletedProject)
         }
         recordSyncSnapshot()
     }
@@ -640,6 +694,15 @@ final class TasksStore {
 
     /// Clears fields, projects, tasks, and manual list ordering.
     func clearAllTasksData() {
+        for field in fields {
+            CueInSyncRuntimeBridge.shared.recordDeletedField(field)
+        }
+        for project in projects {
+            CueInSyncRuntimeBridge.shared.recordDeletedProject(project)
+        }
+        for task in tasks {
+            CueInSyncRuntimeBridge.shared.recordDeletedTask(task)
+        }
         fields = []
         projects = []
         tasks = []

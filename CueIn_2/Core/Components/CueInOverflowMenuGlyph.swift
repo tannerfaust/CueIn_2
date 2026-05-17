@@ -30,7 +30,7 @@ struct CueInOverflowMenuGlyph: View {
 
 struct CueInStableGlassCircleModifier: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             content
                 .background {
                     Circle()
@@ -48,7 +48,7 @@ struct CueInStableGlassCircleModifier: ViewModifier {
 
 struct CueInStableGlassCapsuleModifier: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             content
                 .background {
                     Capsule(style: .continuous)
@@ -68,7 +68,7 @@ struct CueInStableGlassRoundedRectModifier: ViewModifier {
     let cornerRadius: CGFloat
 
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             content
                 .background {
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)

@@ -48,9 +48,9 @@ struct AntiTodoCaptureSheet: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(CueInColors.background)
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                     Button("Cancel") {
                         onDismiss()
                         dismiss()
@@ -62,7 +62,7 @@ struct AntiTodoCaptureSheet: View {
                         .font(CueInTypography.bodyMedium)
                         .foregroundStyle(CueInColors.textPrimary)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                     Button("Add") {
                         store.add(AntiTodoItem(title: trimmed, timeRule: composedRule))
                         onDismiss()

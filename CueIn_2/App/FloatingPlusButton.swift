@@ -1,5 +1,7 @@
 import SwiftUI
 
+#if os(iOS)
+
 // MARK: - FloatingPlusButton
 /// Circular add button that uses native Liquid Glass on iOS 26.
 
@@ -140,3 +142,5 @@ private struct GlassPressStyle: ButtonStyle {
     }
     .cueInPreferredColorScheme()
 }
+
+#endif

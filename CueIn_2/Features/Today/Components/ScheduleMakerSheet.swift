@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - ScheduleMakerDurationOverview
-/// Live total and per-block time shares while building an algorithm (updates as durations change).
+/// Live total and per-block time shares while building a Blocks schedule (updates as durations change).
 
 private struct ScheduleMakerDurationOverview: View {
     let drafts: [ScheduleBlockDraft]
@@ -137,6 +137,7 @@ struct ScheduleMakerSheet: View {
     @State private var blocks: [ScheduleBlockDraft] = [ScheduleBlockDraft.routineTemplate()]
     @State private var expandedBlockID: UUID?
     @State private var showBlockLibrary = false
+    @State private var scheduleNameConflictMessage: String?
 
     private let symbols = ["calendar", "sparkles", "bolt.fill", "sun.max.fill", "moon.fill", "heart.text.square.fill"]
 
@@ -172,8 +173,11 @@ struct ScheduleMakerSheet: View {
                     expandedBlockID = blocks.first?.id
                 }
             }
-            .navigationTitle("Algorithm")
-            .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: name) { _, _ in
+                scheduleNameConflictMessage = nil
+            }
+            .navigationTitle("Blocks")
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done", action: onDismiss)
@@ -181,7 +185,7 @@ struct ScheduleMakerSheet: View {
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
-                        onSave(makeFormula())
+                        commitSaveIfNameAvailable()
                     } label: {
                         Label("Save", systemImage: "plus")
                     }
@@ -206,27 +210,36 @@ struct ScheduleMakerSheet: View {
     // MARK: - Header (compact)
 
     private var headerRow: some View {
-        HStack(spacing: CueInSpacing.md) {
-            Menu {
-                ForEach(symbols, id: \.self) { candidate in
-                    Button {
-                        symbol = candidate
-                    } label: {
-                        Label(candidate, systemImage: candidate)
+        VStack(alignment: .leading, spacing: CueInSpacing.xs) {
+            HStack(spacing: CueInSpacing.md) {
+                Menu {
+                    ForEach(symbols, id: \.self) { candidate in
+                        Button {
+                            symbol = candidate
+                        } label: {
+                            Label(candidate, systemImage: candidate)
+                        }
                     }
+                } label: {
+                    Image(systemName: symbol)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(CueInColors.textPrimary)
+                        .frame(width: 40, height: 40)
+                        .background(CueInColors.surfaceSecondary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
-            } label: {
-                Image(systemName: symbol)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(CueInColors.textPrimary)
-                    .frame(width: 40, height: 40)
-                    .background(CueInColors.surfaceSecondary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
 
-            TextField("Schedule name", text: $name)
-                .font(CueInTypography.title)
-                .foregroundStyle(CueInColors.textPrimary)
+                TextField("Schedule name", text: $name)
+                    .font(CueInTypography.title)
+                    .foregroundStyle(CueInColors.textPrimary)
+            }
+
+            if let scheduleNameConflictMessage {
+                Text(scheduleNameConflictMessage)
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(CueInColors.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -303,7 +316,7 @@ struct ScheduleMakerSheet: View {
         VStack(spacing: 0) {
             Rectangle().fill(CueInColors.divider).frame(height: 0.5)
             Button {
-                onSave(makeFormula())
+                commitSaveIfNameAvailable()
             } label: {
                 HStack {
                     Text("Save schedule")
@@ -327,6 +340,17 @@ struct ScheduleMakerSheet: View {
     }
 
     // MARK: - Actions
+
+    private func commitSaveIfNameAvailable() {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if FormulaLibraryService.existingScheduleConflictingWithName(trimmed, excludingScheduleID: nil) != nil {
+            scheduleNameConflictMessage = "That name is already used. Change the name to save this schedule."
+            return
+        }
+        scheduleNameConflictMessage = nil
+        onSave(makeFormula())
+    }
 
     private func toggleExpansion(for id: UUID) {
         withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {

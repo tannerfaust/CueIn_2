@@ -1,4 +1,9 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
 
 enum TasksDisplayDensity: String, CaseIterable, Identifiable {
     case minimal
@@ -65,7 +70,7 @@ enum TasksTaskDisplayPrefs {
     static let showPriorityKey = "cuein.tasks.display.showPriority"
 }
 
-struct TasksHomeView: View {
+struct TasksHomeView<RouteDestination: View>: View {
     let store: TasksStore
     let onCreateTask: (TaskDraftDefaults) -> Void
     let onOpenTask: (UUID) -> Void
@@ -74,10 +79,15 @@ struct TasksHomeView: View {
     let onCreateProject: (UUID?) -> Void
     let onPoolMove: (TaskItem, Bool) -> Void
     let onDeleteTask: (TaskItem, String) -> Void
+    @ViewBuilder let routeDestination: (TasksRoute) -> RouteDestination
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedWorklist: TasksWorklistKind = .tasks
     @State private var sidebarPresented = false
+    /// Horizontal follow during interactive dismiss (compact slide-over only).
+    @State private var sidebarInteractiveOffset: CGFloat = 0
+    /// Prefer vertical scrolling in the sidebar until a clear horizontal intent.
+    @State private var sidebarDragAxisLocked: Bool?
     @State private var actionTask: TaskItem?
 
     private var usesPersistentSidebar: Bool {
@@ -85,29 +95,43 @@ struct TasksHomeView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            HStack(spacing: 0) {
-                if usesPersistentSidebar {
+        Group {
+            if usesPersistentSidebar {
+                NavigationSplitView {
                     sidebar
-                        .frame(width: 286)
-                    divider
+                        .navigationSplitViewColumnWidth(min: 260, ideal: 286, max: 360)
+                } detail: {
+                    NavigationStack {
+                        worklist
+                            .navigationDestination(for: TasksRoute.self, destination: routeDestination)
+                    }
                 }
-                worklist
-                    .accessibilityHidden(sidebarPresented && !usesPersistentSidebar)
-            }
+            } else {
+                NavigationStack {
+                    ZStack(alignment: .leading) {
+                        worklist
+                            .accessibilityHidden(sidebarPresented)
 
-            if !usesPersistentSidebar {
-                Color.black.opacity(sidebarPresented ? 0.3 : 0)
-                    .ignoresSafeArea()
-                    .onTapGesture { closeSidebar() }
-                    .allowsHitTesting(sidebarPresented)
+                        Color.black.opacity(compactSidebarScrimOpacity)
+                            .ignoresSafeArea()
+                            .onTapGesture { closeSidebar() }
+                            .allowsHitTesting(sidebarPresented)
 
-                sidebar
-                    .frame(width: min(340, UIScreen.main.bounds.width * 0.86))
-                    .offset(x: sidebarPresented ? 0 : -min(340, UIScreen.main.bounds.width * 0.86))
+                        sidebar
+                            .frame(width: compactSidebarWidth)
+                            .offset(x: compactSidebarOffsetX)
+                            .simultaneousGesture(compactSidebarSwipeToDismissGesture)
+                    }
+                    .navigationDestination(for: TasksRoute.self, destination: routeDestination)
+                }
             }
         }
-        .animation(.snappy(duration: 0.25, extraBounce: 0), value: sidebarPresented)
+        .onChange(of: sidebarPresented) { _, isOpen in
+            if isOpen {
+                sidebarInteractiveOffset = 0
+                sidebarDragAxisLocked = nil
+            }
+        }
         .sheet(item: $actionTask) { task in
             TaskRowActionsSheet(
                 task: task,
@@ -159,29 +183,10 @@ private extension TasksHomeView {
         }
         .background(CueInColors.background.ignoresSafeArea())
         .navigationTitle(selectedTitle)
-        .navigationBarTitleDisplayMode(.inline)
+        .cueInNavigationBarTitleDisplayMode(.inline)
         .toolbar {
             if !usesPersistentSidebar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        sidebarPresented.toggle()
-                    } label: {
-                        Image(systemName: sidebarPresented ? "xmark" : "sidebar.left")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(CueInColors.textPrimary)
-                    }
-                    .accessibilityLabel(sidebarPresented ? "Close library" : "Open task library")
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    onCreateTask(defaultsForCreate)
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(CueInColors.textPrimary)
-                }
-                .accessibilityLabel("New task")
+                TasksWorklistChromeToolbar(sidebarPresented: $sidebarPresented)
             }
         }
     }
@@ -202,20 +207,97 @@ private extension TasksHomeView {
                 closeSidebar()
                 onCreateProject(fieldID)
             },
-            showsCloseButton: !usesPersistentSidebar,
-            onClose: closeSidebar
+            showsTrailingHairline: !usesPersistentSidebar,
+            showsHeaderDisplayPreferencesMenu: usesPersistentSidebar
         )
     }
 
-    var divider: some View {
-        Rectangle()
-            .fill(CueInColors.divider.opacity(0.7))
-            .frame(width: 1)
-            .ignoresSafeArea(edges: .vertical)
+    func closeSidebar() {
+        withAnimation(.snappy(duration: 0.25, extraBounce: 0)) {
+            sidebarPresented = false
+        }
+        sidebarInteractiveOffset = 0
+        sidebarDragAxisLocked = nil
     }
 
-    func closeSidebar() {
-        sidebarPresented = false
+    var compactSidebarWidth: CGFloat {
+        #if os(macOS)
+        min(340, (NSScreen.main?.frame.width ?? 1200) * 0.36)
+        #else
+        min(340, UIScreen.main.bounds.width * 0.86)
+        #endif
+    }
+
+    var compactSidebarOffsetX: CGFloat {
+        if sidebarPresented {
+            return sidebarInteractiveOffset
+        }
+        return -compactSidebarWidth
+    }
+
+    var compactSidebarScrimOpacity: CGFloat {
+        guard sidebarPresented else { return 0 }
+        let w = compactSidebarWidth
+        guard w > 0 else { return 0 }
+        let t = sidebarInteractiveOffset
+        return 0.3 * (1 + t / w)
+    }
+
+    var compactSidebarSwipeToDismissGesture: some Gesture {
+        DragGesture(minimumDistance: 12, coordinateSpace: .local)
+            .onChanged { value in
+                guard sidebarPresented else { return }
+                let dx = value.translation.width
+                let dy = value.translation.height
+
+                if sidebarDragAxisLocked == nil {
+                    let adx = abs(dx)
+                    let ady = abs(dy)
+                    if adx > 14, adx > ady * 1.25 {
+                        sidebarDragAxisLocked = true
+                    } else if ady > 14, ady > adx * 1.25 {
+                        sidebarDragAxisLocked = false
+                    }
+                }
+
+                guard sidebarDragAxisLocked == true else { return }
+
+                let w = compactSidebarWidth
+                sidebarInteractiveOffset = min(0, max(-w, dx))
+            }
+            .onEnded { value in
+                defer {
+                    sidebarDragAxisLocked = nil
+                }
+                guard sidebarPresented else { return }
+
+                let w = compactSidebarWidth
+                let dx = value.translation.width
+                let predicted = value.predictedEndTranslation.width
+                let shouldClose = sidebarDragAxisLocked == true
+                    && (dx < -w * 0.2 || predicted < -w * 0.45)
+
+                if shouldClose {
+                    finishCompactSidebarInteractiveDismiss()
+                } else {
+                    withAnimation(.snappy(duration: 0.22, extraBounce: 0)) {
+                        sidebarInteractiveOffset = 0
+                    }
+                }
+            }
+    }
+
+    /// Animate panel fully off-screen, then clear presented state (avoids offset snap).
+    func finishCompactSidebarInteractiveDismiss() {
+        let w = compactSidebarWidth
+        withAnimation(.snappy(duration: 0.24, extraBounce: 0)) {
+            sidebarInteractiveOffset = -w
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(260))
+            sidebarPresented = false
+            sidebarInteractiveOffset = 0
+        }
     }
 
 }
@@ -380,16 +462,66 @@ private extension TasksHomeView {
     }
 }
 
+// MARK: - Tasks worklist toolbar (compact: glass sidebar + glass overflow, separate items)
 
+private struct CueInToolbarIconPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.90 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
 
-private struct TasksLinearSidebar: View {
-    let store: TasksStore
-    let selectedWorklist: TasksWorklistKind
-    let onSelectWorklist: (TasksWorklistKind) -> Void
-    let onCreateField: () -> Void
-    let onCreateProject: (UUID?) -> Void
-    let showsCloseButton: Bool
-    let onClose: () -> Void
+private struct TasksWorklistChromeToolbar: ToolbarContent {
+    @Binding var sidebarPresented: Bool
+
+    var body: some ToolbarContent {
+        chromeItems
+            .cueInHideSharedToolbarGlassBackground()
+    }
+
+    @ToolbarContentBuilder
+    private var chromeItems: some ToolbarContent {
+        ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
+            Button {
+                withAnimation(.snappy(duration: 0.25, extraBounce: 0)) {
+                    sidebarPresented.toggle()
+                }
+            } label: {
+                Image(systemName: sidebarPresented ? "xmark" : "sidebar.left")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(CueInColors.textPrimary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+                    .modifier(CueInStableGlassCircleModifier())
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(CueInToolbarIconPressStyle())
+            .fixedSize(horizontal: true, vertical: true)
+            .accessibilityLabel(sidebarPresented ? "Close library" : "Open task library")
+        }
+        if sidebarPresented {
+            ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
+                Menu {
+                    TasksTaskDisplayPreferencesMenuContent()
+                } label: {
+                    // Extra layout margin so the 44pt glass circle is not clipped by the
+                    // nav toolbar host during the moment `sidebarPresented` flips off.
+                    CueInOverflowMenuGlyph()
+                        .frame(width: 48, height: 48)
+                }
+                .buttonStyle(.plain)
+                .compositingGroup()
+                .fixedSize(horizontal: true, vertical: true)
+                .accessibilityLabel("Customize task display")
+            }
+        }
+    }
+}
+
+// MARK: - Task list display preferences (shared by sidebar + compact toolbar)
+
+private struct TasksTaskDisplayPreferencesMenuContent: View {
     @AppStorage(TasksTaskDisplayPrefs.densityKey) private var densityRaw = TasksDisplayDensity.compact.rawValue
     @AppStorage(TasksTaskDisplayPrefs.metadataKey) private var metadataRaw = TasksMetadataLevel.balanced.rawValue
     @AppStorage(TasksTaskDisplayPrefs.showProjectKey) private var showProject = true
@@ -398,7 +530,39 @@ private struct TasksLinearSidebar: View {
     @AppStorage(TasksTaskDisplayPrefs.showPriorityKey) private var showPriority = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.lg) {
+        Picker("Density", selection: $densityRaw) {
+            ForEach(TasksDisplayDensity.allCases) { density in
+                Text(density.label).tag(density.rawValue)
+            }
+        }
+
+        Picker("Information", selection: $metadataRaw) {
+            ForEach(TasksMetadataLevel.allCases) { level in
+                Text(level.label).tag(level.rawValue)
+            }
+        }
+
+        Divider()
+
+        Toggle("Show project", isOn: $showProject)
+        Toggle("Show dates", isOn: $showDue)
+        Toggle("Show estimate", isOn: $showEstimate)
+        Toggle("Show priority", isOn: $showPriority)
+    }
+}
+
+private struct TasksLinearSidebar: View {
+    let store: TasksStore
+    let selectedWorklist: TasksWorklistKind
+    let onSelectWorklist: (TasksWorklistKind) -> Void
+    let onCreateField: () -> Void
+    let onCreateProject: (UUID?) -> Void
+    let showsTrailingHairline: Bool
+    /// Split layout: overflow menu in sidebar header. Compact: menu is separate leading toolbar item when drawer is open.
+    let showsHeaderDisplayPreferencesMenu: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.sm) {
             sidebarHeader
 
             ScrollView(.vertical, showsIndicators: false) {
@@ -431,56 +595,38 @@ private struct TasksLinearSidebar: View {
                 .padding(.bottom, CueInLayout.scrollBottomInset)
             }
         }
-        .padding(.top, CueInSpacing.base)
+        .padding(.top, CueInSpacing.xs)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(CueInColors.surfacePrimary.ignoresSafeArea())
         .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(CueInColors.divider.opacity(0.75))
-                .frame(width: 1)
-                .ignoresSafeArea(edges: .vertical)
-        }
-    }
-
-    private var sidebarHeader: some View {
-        HStack {
-            Spacer()
-            Menu {
-                displayMenuContent
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 20, weight: .regular))
-                    .foregroundStyle(CueInColors.textSecondary)
-                    .frame(width: 34, height: 34)
-                    .contentShape(Circle())
+            if showsTrailingHairline {
+                Rectangle()
+                    .fill(CueInColors.divider.opacity(0.75))
+                    .frame(width: 1)
+                    .ignoresSafeArea(edges: .vertical)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Customize task display")
         }
-        .padding(.horizontal, CueInSpacing.base)
-        .padding(.bottom, CueInSpacing.xs)
     }
 
     @ViewBuilder
-    private var displayMenuContent: some View {
-        Picker("Density", selection: $densityRaw) {
-            ForEach(TasksDisplayDensity.allCases) { density in
-                Text(density.label).tag(density.rawValue)
+    private var sidebarHeader: some View {
+        if showsHeaderDisplayPreferencesMenu {
+            HStack(alignment: .center, spacing: CueInSpacing.sm) {
+                Spacer(minLength: 0)
+                Menu {
+                    TasksTaskDisplayPreferencesMenuContent()
+                } label: {
+                    CueInOverflowMenuGlyph()
+                        .frame(width: 48, height: 48)
+                }
+                .buttonStyle(.plain)
+                .fixedSize(horizontal: true, vertical: true)
+                .compositingGroup()
+                .accessibilityLabel("Customize task display")
             }
+            .padding(.horizontal, CueInSpacing.md)
+            .padding(.vertical, 2)
         }
-
-        Picker("Information", selection: $metadataRaw) {
-            ForEach(TasksMetadataLevel.allCases) { level in
-                Text(level.label).tag(level.rawValue)
-            }
-        }
-
-        Divider()
-
-        Toggle("Show project", isOn: $showProject)
-        Toggle("Show dates", isOn: $showDue)
-        Toggle("Show estimate", isOn: $showEstimate)
-        Toggle("Show priority", isOn: $showPriority)
     }
 
     private var tasksCount: Int {

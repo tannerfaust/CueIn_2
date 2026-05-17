@@ -181,6 +181,30 @@ struct GoalDTO: SupabaseSyncRecord {
     }
 }
 
+struct ScheduleRecordDTO: SupabaseSyncRecord {
+    var id: UUID
+    var userID: UUID
+    var kind: String
+    var recordDate: Date?
+    var payload: [String: String]
+    var createdAt: Date
+    var updatedAt: Date
+    var deletedAt: Date?
+    var syncVersion: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userID = "user_id"
+        case kind
+        case recordDate = "record_date"
+        case payload
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case deletedAt = "deleted_at"
+        case syncVersion = "sync_version"
+    }
+}
+
 struct AppLayoutSettingDTO: SupabaseSyncRecord {
     var id: UUID
     var userID: UUID

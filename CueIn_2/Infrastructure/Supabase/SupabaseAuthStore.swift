@@ -141,23 +141,72 @@ final class SupabaseAuthStore {
         }
     }
 
+    func validateStoredSession() async {
+        guard let current = session else { return }
+        if current.isExpired {
+            await refreshIfNeeded()
+            return
+        }
+        do {
+            let user = try await client.user(accessToken: current.accessToken)
+            if user != current.user {
+                var next = current
+                next.user = user
+                save(next)
+            }
+        } catch {
+            if Self.shouldClearSession(for: error) {
+                clearStaleSessionAfterBackendRejection()
+            }
+        }
+    }
+
     func signOut() async {
         guard let current = session else {
             tokenStore.clear()
             return
         }
-        await perform {
-            try await self.client.signOut(current)
-            self.clearSession()
+        isWorking = true
+        lastError = nil
+        lastAuthNotice = nil
+        do {
+            try await client.signOut(current)
+            clearSession()
+        } catch {
+            if Self.shouldClearSession(for: error) {
+                clearSession()
+                lastAuthNotice = "Session cleared."
+            } else {
+                lastError = error.localizedDescription
+            }
         }
+        isWorking = false
     }
 
     func deleteAccount() async {
         guard let current = session else { return }
-        await perform {
-            try await self.client.deleteAccount(session: current)
-            self.clearSession()
+        isWorking = true
+        lastError = nil
+        lastAuthNotice = nil
+        do {
+            try await client.deleteAccount(session: current)
+            clearSession()
+            lastAuthNotice = "Account deleted."
+        } catch {
+            if Self.shouldClearSession(for: error) {
+                clearSession()
+                lastAuthNotice = "This account was already deleted. Local session cleared."
+            } else {
+                lastError = error.localizedDescription
+            }
         }
+        isWorking = false
+    }
+
+    func clearStaleSessionAfterBackendRejection() {
+        clearSession()
+        lastError = nil
+        lastAuthNotice = "Your account session is no longer valid. Sign in again to sync."
     }
 
     func makeAppleRequest(_ request: ASAuthorizationAppleIDRequest) {
@@ -174,7 +223,11 @@ final class SupabaseAuthStore {
         do {
             try await operation()
         } catch {
-            lastError = error.localizedDescription
+            if Self.shouldClearSession(for: error) {
+                clearStaleSessionAfterBackendRejection()
+            } else {
+                lastError = error.localizedDescription
+            }
         }
         isWorking = false
     }
@@ -209,6 +262,11 @@ final class SupabaseAuthStore {
     private func clearSession() {
         session = nil
         tokenStore.clear()
+    }
+
+    private static func shouldClearSession(for error: Error) -> Bool {
+        guard let clientError = error as? SupabaseClientError else { return false }
+        return clientError.invalidatesAuthSession
     }
 
     private static func randomNonce(length: Int = 32) -> String {

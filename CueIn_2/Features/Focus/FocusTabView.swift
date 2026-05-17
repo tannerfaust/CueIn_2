@@ -19,10 +19,10 @@ struct FocusTabView: View {
             .scrollDismissesKeyboard(.immediately)
             .background(CueInColors.background.ignoresSafeArea())
             .navigationTitle("Sounds")
-            .navigationBarTitleDisplayMode(.large)
+            .cueInNavigationBarTitleDisplayMode(.large)
             .toolbar {
                 if let onRequestReturnToHub {
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                         Button(action: onRequestReturnToHub) {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 17, weight: .semibold))

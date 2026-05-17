@@ -95,7 +95,7 @@ struct TaskSearchSheet: View {
                     .focused($queryFocused)
                     .submitLabel(.search)
                     .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
+                    .cueInNoAutocapitalization()
 
                 if !query.isEmpty {
                     Button {

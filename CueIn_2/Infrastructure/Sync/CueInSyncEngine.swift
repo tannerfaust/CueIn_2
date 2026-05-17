@@ -14,11 +14,15 @@ enum CueInSyncState: Equatable {
 @MainActor
 final class CueInSyncEngine {
     static let shared = CueInSyncEngine()
+    private static let formulaLibraryRecordKind = "formula_library"
+    private static let formulaLibraryRecordDate = Date(timeIntervalSince1970: 0)
 
     private let client: SupabaseClient
     private let authStore: SupabaseAuthStore
     private var repository: LocalSyncRepository?
     private var scheduledSyncTask: Task<Void, Never>?
+    private var isSyncInFlight = false
+    private var needsSyncAfterCurrent = false
 
     var state: CueInSyncState = .idle
 
@@ -52,6 +56,21 @@ final class CueInSyncEngine {
     }
 
     func syncNow() async {
+        if isSyncInFlight {
+            needsSyncAfterCurrent = true
+            return
+        }
+        isSyncInFlight = true
+        defer {
+            isSyncInFlight = false
+            if needsSyncAfterCurrent {
+                needsSyncAfterCurrent = false
+                Task { @MainActor in
+                    await self.syncNow()
+                }
+            }
+        }
+
         scheduledSyncTask?.cancel()
         scheduledSyncTask = nil
         guard let repository else {
@@ -76,7 +95,12 @@ final class CueInSyncEngine {
             let now = Date()
             state = .synced(now)
         } catch {
-            state = .failed(error.localizedDescription)
+            if let clientError = error as? SupabaseClientError, clientError.invalidatesAuthSession {
+                authStore.clearStaleSessionAfterBackendRejection()
+                state = .blocked("Sign in to sync.")
+            } else {
+                state = .failed(error.localizedDescription)
+            }
         }
     }
 
@@ -111,7 +135,6 @@ final class CueInSyncEngine {
     }
 
     private func enqueueWorkspaceSnapshot(tasksStore: TasksStore, goalStore: GoalStrategyStore, userID: UUID) {
-        let now = Date()
         for field in tasksStore.fields {
             enqueue(FieldDTO(field: field, userID: userID, syncVersion: 1), table: .fields)
         }
@@ -124,18 +147,112 @@ final class CueInSyncEngine {
         for goal in goalStore.goals {
             enqueue(GoalDTO(goal: goal, userID: userID, syncVersion: 1), table: .goals)
         }
+        enqueueFormulaLibrarySnapshot(userID: userID)
+        enqueueAppLayoutSnapshot(userID: userID)
+    }
 
-        let layout = AppLayoutSettingDTO(
-            id: UUID(),
+    func enqueueFormulaLibrarySnapshot() {
+        guard let userID = authStore.session?.user.id else { return }
+        enqueueFormulaLibrarySnapshot(userID: userID)
+    }
+
+    func enqueueAppLayoutSnapshot() {
+        guard let userID = authStore.session?.user.id else { return }
+        enqueueAppLayoutSnapshot(userID: userID)
+    }
+
+    private func enqueueFormulaLibrarySnapshot(userID: UUID) {
+        let now = Date()
+        let record = ScheduleRecordDTO(
+            id: UUID.cueInDeterministicID(userID: userID, key: "schedule_record:\(Self.formulaLibraryRecordKind)"),
             userID: userID,
-            key: AppTab.storageKey,
-            payload: ["tabs": UserDefaults.standard.string(forKey: AppTab.storageKey) ?? AppTab.storageValue(for: AppTab.defaultTabs)],
+            kind: Self.formulaLibraryRecordKind,
+            recordDate: Self.formulaLibraryRecordDate,
+            payload: FormulaLibraryService.syncPayload(),
             createdAt: now,
             updatedAt: now,
             deletedAt: nil,
             syncVersion: 1
         )
+        enqueue(record, table: .scheduleRecords)
+    }
+
+    private func enqueueAppLayoutSnapshot(userID: UUID) {
+        let layout = AppLayoutSettingDTO(
+            id: UUID.cueInDeterministicID(userID: userID, key: "app_layout:\(AppTab.storageKey)"),
+            userID: userID,
+            key: AppTab.storageKey,
+            payload: [
+                "tabs": UserDefaults.standard.string(forKey: AppTab.storageKey) ?? AppTab.storageValue(for: AppTab.defaultTabs),
+                "task_led_view_mode": UserDefaults.standard.string(forKey: TodayDisplayPreferences.taskLedViewMode)
+                    ?? TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue
+            ],
+            createdAt: Date(),
+            updatedAt: Date(),
+            deletedAt: nil,
+            syncVersion: 1
+        )
         enqueue(layout, table: .appLayoutSettings)
+    }
+
+    func enqueueWorkspaceDeletion(tasksStore: TasksStore, goalStore: GoalStrategyStore) {
+        guard let repository, let userID = authStore.session?.user.id else { return }
+        let now = Date()
+        do {
+            var deletedFields = Set<UUID>()
+            var deletedProjects = Set<UUID>()
+            var deletedTasks = Set<UUID>()
+            var deletedGoals = Set<UUID>()
+
+            for var record in try repository.records(FieldDTO.self, table: .fields, userID: userID) where record.deletedAt == nil {
+                record.updatedAt = now
+                record.deletedAt = now
+                record.syncVersion += 1
+                try repository.upsert(record, table: .fields, enqueueMutation: true)
+                deletedFields.insert(record.id)
+            }
+
+            for var record in try repository.records(ProjectDTO.self, table: .projects, userID: userID) where record.deletedAt == nil {
+                record.updatedAt = now
+                record.deletedAt = now
+                record.syncVersion += 1
+                try repository.upsert(record, table: .projects, enqueueMutation: true)
+                deletedProjects.insert(record.id)
+            }
+
+            for var record in try repository.records(TaskDTO.self, table: .tasks, userID: userID) where record.deletedAt == nil {
+                record.updatedAt = now
+                record.deletedAt = now
+                record.syncVersion += 1
+                try repository.upsert(record, table: .tasks, enqueueMutation: true)
+                deletedTasks.insert(record.id)
+            }
+
+            for var record in try repository.records(GoalDTO.self, table: .goals, userID: userID) where record.deletedAt == nil {
+                record.updatedAt = now
+                record.deletedAt = now
+                record.syncVersion += 1
+                try repository.upsert(record, table: .goals, enqueueMutation: true)
+                deletedGoals.insert(record.id)
+            }
+
+            for field in tasksStore.fields where !deletedFields.contains(field.id) {
+                try repository.upsert(FieldDTO(field: field, userID: userID, deletedAt: now), table: .fields, enqueueMutation: true)
+            }
+            for project in tasksStore.projects where !deletedProjects.contains(project.id) {
+                try repository.upsert(ProjectDTO(project: project, userID: userID, deletedAt: now), table: .projects, enqueueMutation: true)
+            }
+            for task in tasksStore.tasks where !deletedTasks.contains(task.id) {
+                try repository.upsert(TaskDTO(task: task, userID: userID, deletedAt: now), table: .tasks, enqueueMutation: true)
+            }
+            for goal in goalStore.goals where !deletedGoals.contains(goal.id) {
+                try repository.upsert(GoalDTO(goal: goal, userID: userID, deletedAt: now), table: .goals, enqueueMutation: true)
+            }
+
+            scheduleSync()
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
     }
 
     private func pushPendingMutations(repository: LocalSyncRepository, session: SupabaseAuthSession) async throws {
@@ -168,7 +285,7 @@ final class CueInSyncEngine {
         case .goals:
             try await client.upsert([try decoder.decode(GoalDTO.self, from: payload)], table: table, session: session)
         case .scheduleRecords:
-            return
+            try await client.upsert([try decoder.decode(ScheduleRecordDTO.self, from: payload)], table: table, session: session)
         case .appLayoutSettings:
             try await client.upsert([try decoder.decode(AppLayoutSettingDTO.self, from: payload)], table: table, session: session)
         }
@@ -179,6 +296,7 @@ final class CueInSyncEngine {
         try await pull(ProjectDTO.self, table: .projects, repository: repository, session: session)
         try await pull(TaskDTO.self, table: .tasks, repository: repository, session: session)
         try await pull(GoalDTO.self, table: .goals, repository: repository, session: session)
+        try await pull(ScheduleRecordDTO.self, table: .scheduleRecords, repository: repository, session: session)
         try await pull(AppLayoutSettingDTO.self, table: .appLayoutSettings, repository: repository, session: session)
     }
 
@@ -195,9 +313,15 @@ final class CueInSyncEngine {
             session: session
         )
         for record in records {
+            if record.deletedAt == nil,
+               try repository.hasPendingMutation(table: table, recordID: record.id) {
+                continue
+            }
             try repository.upsert(record, table: table, enqueueMutation: false)
         }
-        repository.setLastPullDate(Date(), for: table)
+        if let newestUpdatedAt = records.map(\.updatedAt).max() {
+            repository.setLastPullDate(newestUpdatedAt, for: table)
+        }
     }
 
     private func applyCachedWorkspace(repository: LocalSyncRepository, userID: UUID) throws {
@@ -223,7 +347,20 @@ final class CueInSyncEngine {
 
         TasksStore.shared.replaceFromSync(fields: fields, projects: projects, tasks: tasks)
         GoalStrategyStore.shared.replaceFromSync(goals)
+        applyCachedScheduleRecords(repository: repository, userID: userID)
         applyCachedLayoutSettings(repository: repository, userID: userID)
+    }
+
+    private func applyCachedScheduleRecords(repository: LocalSyncRepository, userID: UUID) {
+        guard let formulaLibrary = try? repository.records(ScheduleRecordDTO.self, table: .scheduleRecords, userID: userID)
+            .filter({ $0.deletedAt == nil && $0.kind == Self.formulaLibraryRecordKind })
+            .sorted(by: { $0.updatedAt > $1.updatedAt })
+            .first
+        else {
+            return
+        }
+
+        FormulaLibraryService.applySyncPayload(formulaLibrary.payload)
     }
 
     private func applyCachedLayoutSettings(repository: LocalSyncRepository, userID: UUID) {
@@ -238,5 +375,8 @@ final class CueInSyncEngine {
         }
 
         UserDefaults.standard.set(AppTab.storageValue(for: AppTab.storedTabs(from: tabs)), forKey: AppTab.storageKey)
+        if let taskLedViewMode = layout.payload["task_led_view_mode"], !taskLedViewMode.isEmpty {
+            UserDefaults.standard.set(taskLedViewMode, forKey: TodayDisplayPreferences.taskLedViewMode)
+        }
     }
 }

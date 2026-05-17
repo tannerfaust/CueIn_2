@@ -98,7 +98,7 @@ enum StatsDayMetrics {
         if viewModel.dayEngineMode == .formulaBased {
             let caption = viewModel.hasFormulaTemplate
                 ? "Start the schedule to track adherence"
-                : "Build a schedule on Algorithm"
+                : "Build a schedule on Blocks"
             return (0, caption, false)
         }
 

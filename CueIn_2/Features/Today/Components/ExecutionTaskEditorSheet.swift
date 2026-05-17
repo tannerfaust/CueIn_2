@@ -37,9 +37,9 @@ struct ExecutionTaskEditorSheet: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(CueInColors.background)
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                     Button("Cancel") { dismiss() }
                         .foregroundStyle(CueInColors.textSecondary)
                 }
@@ -48,7 +48,7 @@ struct ExecutionTaskEditorSheet: View {
                         .font(CueInTypography.bodyMedium)
                         .foregroundStyle(CueInColors.textPrimary)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                     Button("Done") {
                         onSave(draft)
                         dismiss()

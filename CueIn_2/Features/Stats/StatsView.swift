@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - StatsView
-/// Stats tab: Activity-style rings driven by Algorithm adherence, awake window, and Today tasks.
+/// Stats tab: Activity-style rings driven by Blocks (schedule) adherence, awake window, and Today tasks.
 /// Page-specific settings live in the navigation menu (⋯).
 
 struct StatsView: View {
@@ -70,9 +70,9 @@ struct StatsView: View {
                 todayViewModel.currentTime = Date()
             }
             .navigationTitle("Stats")
-            .navigationBarTitleDisplayMode(.large)
+            .cueInNavigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                     Menu {
                         Button {
                             showStatsSettings = true
@@ -111,7 +111,7 @@ struct StatsView: View {
                     )
                     ringLegend(
                         color: CueInColors.accentFocus,
-                        title: "Algorithm",
+                        title: "Blocks",
                         caption: snapshot.algorithmCaption
                     )
                     ringLegend(
@@ -164,7 +164,7 @@ struct StatsView: View {
 
                 HStack(spacing: CueInSpacing.xl) {
                     statRing(value: snapshot.awakeProgress, label: "Awake")
-                    statRing(value: snapshot.algorithmProgress, label: "Algorithm")
+                    statRing(value: snapshot.algorithmProgress, label: "Blocks")
                     statRing(value: snapshot.todayTasksProgress, label: "Tasks")
                 }
                 .frame(maxWidth: .infinity)

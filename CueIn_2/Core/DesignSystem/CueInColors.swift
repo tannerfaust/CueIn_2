@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(iOS)
 import UIKit
+#endif
 
 enum CueInThemePreference: String, CaseIterable, Identifiable {
     case dark
@@ -84,13 +86,13 @@ enum CueInColors {
     // MARK: Text
 
     /// High-emphasis text.
-    static var textPrimary: Color { themed(dark: .white, light: .black, darkOpacity: 0.92, lightOpacity: 0.88) }
+    static var textPrimary: Color { themed(dark: Color.white, light: Color.black, darkOpacity: 0.92, lightOpacity: 0.88) }
 
     /// Medium-emphasis text
-    static var textSecondary: Color { themed(dark: .white, light: .black, darkOpacity: 0.55, lightOpacity: 0.56) }
+    static var textSecondary: Color { themed(dark: Color.white, light: Color.black, darkOpacity: 0.55, lightOpacity: 0.56) }
 
     /// Low-emphasis / metadata
-    static var textTertiary: Color { themed(dark: .white, light: .black, darkOpacity: 0.30, lightOpacity: 0.34) }
+    static var textTertiary: Color { themed(dark: Color.white, light: Color.black, darkOpacity: 0.30, lightOpacity: 0.34) }
 
     // MARK: Semantic — only used for actual meaning
 
@@ -106,14 +108,14 @@ enum CueInColors {
     // MARK: Subtle tints — very muted, only for differentiation
 
     /// Active block subtle tint
-    static var activeHint: Color { themed(dark: .white, light: .black, darkOpacity: 0.06, lightOpacity: 0.035) }
+    static var activeHint: Color { themed(dark: Color.white, light: Color.black, darkOpacity: 0.06, lightOpacity: 0.035) }
 
     // MARK: Dividers
 
-    static var divider: Color { themed(dark: .white, light: .black, darkOpacity: 0.08, lightOpacity: 0.08) }
+    static var divider: Color { themed(dark: Color.white, light: Color.black, darkOpacity: 0.08, lightOpacity: 0.08) }
 
     /// Card border — very subtle
-    static var cardBorder: Color { themed(dark: .white, light: .black, darkOpacity: 0.06, lightOpacity: 0.07) }
+    static var cardBorder: Color { themed(dark: Color.white, light: Color.black, darkOpacity: 0.06, lightOpacity: 0.07) }
 
     // MARK: Block-type accents
     /// Muted accent colors used as thin rails / chip tints on the Today timeline.
@@ -158,21 +160,17 @@ enum CueInColors {
     static let scheduleBlockAccentSwatches: [UInt32] = scheduleBlockAppearanceHexChoices
 
     private static func themed(dark: UInt, light: UInt) -> Color {
-        Color(UIColor { _ in
-            UIColor(hex: CueInThemePreference.current == .light ? light : dark)
-        })
+        Color(hex: CueInThemePreference.current == .light ? light : dark)
     }
 
     private static func themed(
-        dark: UIColor,
-        light: UIColor,
+        dark: Color,
+        light: Color,
         darkOpacity: CGFloat,
         lightOpacity: CGFloat
     ) -> Color {
-        Color(UIColor { _ in
-            let isLight = CueInThemePreference.current == .light
-            return (isLight ? light : dark).withAlphaComponent(isLight ? lightOpacity : darkOpacity)
-        })
+        let isLight = CueInThemePreference.current == .light
+        return (isLight ? light : dark).opacity(isLight ? lightOpacity : darkOpacity)
     }
 }
 
@@ -191,6 +189,7 @@ extension Color {
     }
 }
 
+#if os(iOS)
 private extension UIColor {
     convenience init(hex: UInt, alpha: CGFloat = 1.0) {
         self.init(
@@ -201,3 +200,4 @@ private extension UIColor {
         )
     }
 }
+#endif

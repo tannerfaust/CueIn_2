@@ -27,21 +27,21 @@ struct CueInGlassModifier: ViewModifier {
     var shadow: CueInGlassShadow? = nil
 
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             glassContent(content)
         } else {
             fallbackContent(content)
         }
     }
 
-    @available(iOS 26.0, *)
+    @available(iOS 26.0, macOS 26.0, *)
     @ViewBuilder
     private func glassContent(_ content: Content) -> some View {
         let base = applyGlassEffect(to: content)
         applyDecoration(to: base)
     }
 
-    @available(iOS 26.0, *)
+    @available(iOS 26.0, macOS 26.0, *)
     @ViewBuilder
     private func applyGlassEffect(to content: Content) -> some View {
         switch shape {

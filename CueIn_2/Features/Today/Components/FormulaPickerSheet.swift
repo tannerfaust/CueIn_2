@@ -89,7 +89,7 @@ struct FormulaPickerSheet: View {
             }
             .background(CueInColors.background)
             .navigationTitle("Schedules")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done", action: onDismiss)

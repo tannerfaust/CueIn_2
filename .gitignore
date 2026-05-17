@@ -12,3 +12,6 @@ xcuserdata/
 *.swo
 .env
 .env.*
+
+# Supabase CLI local cache (linked project metadata)
+supabase/.temp/

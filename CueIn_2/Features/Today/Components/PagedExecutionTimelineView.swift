@@ -69,7 +69,7 @@ struct PagedExecutionTimelineView: View {
                 .tag(index)
             }
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
+        .cueInPageTabViewStyle()
         .onChange(of: daysPageIdentity) { _, _ in
             clampSelectedIndexToValidDayRange()
         }

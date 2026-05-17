@@ -39,6 +39,7 @@ struct ReorderableTaskList: View {
                         store: store,
                         onToggle: { store.toggleComplete(t.id) },
                         onOpen: { onOpenTask(t.id) },
+                        onOfferCompleteUndo: { snap in store.offerCompleteUndo(preCompletionSnapshot: snap) },
                         onDelete: {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 onDeleteTask(t, listKey)

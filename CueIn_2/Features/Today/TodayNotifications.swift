@@ -3,6 +3,10 @@ import Foundation
 extension Notification.Name {
     static let cueInShowTodayFormulaPicker = Notification.Name("cuein.today.showFormulaPicker")
     static let cueInShowScheduleStartSetup = Notification.Name("cuein.today.showScheduleStartSetup")
+    /// Switch to Blocks (formula) mode and select a saved day formula. Use ``CueInShellNotification/formulaIDUserInfoKey``.
+    static let cueInApplySavedFormula = Notification.Name("cuein.today.applySavedFormula")
+    /// Opens the floating block template library (same as long-press + on Blocks).
+    static let cueInOpenBlockTemplateLibrary = Notification.Name("cuein.today.openBlockTemplateLibrary")
     /// Switch shell to the Pomodoro tab (Hub tile, deep links, etc.).
     static let cueInOpenFocus = Notification.Name("cuein.focus.open")
     /// Switch shell to the focus audio tab.
@@ -16,4 +20,6 @@ extension Notification.Name {
 enum CueInShellNotification {
     /// `String` — ``AppTab/rawValue``.
     static let switchTabUserInfoKey = "cuein.shell.tab"
+    /// `String` — ``UUID/uuidString`` for ``Notification.Name/cueInApplySavedFormula``.
+    static let formulaIDUserInfoKey = "cuein.shell.formulaID"
 }

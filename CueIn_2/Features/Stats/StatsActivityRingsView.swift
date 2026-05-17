@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - StatsActivityRingsView
-/// Concentric progress rings (Activity-style): outer = awake window, middle = algorithm, inner = today tasks.
+/// Concentric progress rings (Activity-style): outer = awake window, middle = Blocks schedule, inner = today tasks.
 
 struct StatsActivityRingsView: View {
     var snapshot: StatsDaySnapshot
@@ -20,7 +20,7 @@ struct StatsActivityRingsView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Activity rings")
         .accessibilityValue(
-            "Awake day \(Int(snapshot.awakeProgress * 100)) percent, algorithm \(Int(snapshot.algorithmProgress * 100)) percent, today tasks \(Int(snapshot.todayTasksProgress * 100)) percent"
+            "Awake day \(Int(snapshot.awakeProgress * 100)) percent, blocks \(Int(snapshot.algorithmProgress * 100)) percent, today tasks \(Int(snapshot.todayTasksProgress * 100)) percent"
         )
     }
 

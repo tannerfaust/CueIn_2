@@ -33,11 +33,11 @@ struct GoalsHomeView: View {
             .padding(.bottom, CueInLayout.scrollBottomInset)
         }
         .background(CueInColors.background.ignoresSafeArea())
-        .navigationBarTitleDisplayMode(.inline)
+        .cueInNavigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(showsHubBackButton)
         .toolbar {
             if showsHubBackButton {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                     Button {
                         dismiss()
                     } label: {
@@ -167,7 +167,7 @@ struct GoalDetailView: View {
                     if viewMode == .list {
                         StrategyListView(goal: goal, store: store, tasksStore: tasksStore, onPresentSheet: onPresentSheet)
                     } else {
-                        StrategyRoadmapView(goal: goal, store: store, tasksStore: tasksStore, onPresentSheet: onPresentSheet)
+                        StrategyCanvasView(goal: goal, store: store, tasksStore: tasksStore, onPresentSheet: onPresentSheet)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -178,11 +178,11 @@ struct GoalDetailView: View {
             }
         }
         .background(CueInColors.background.ignoresSafeArea())
-        .navigationBarTitleDisplayMode(.inline)
+        .cueInNavigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(showsHubBackButton)
         .toolbar {
             if showsHubBackButton {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                     Button {
                         dismiss()
                     } label: {
@@ -415,119 +415,234 @@ struct StrategyListView: View {
     }
 }
 
-// MARK: - StrategyRoadmapView (Minimalist Sequential Timeline)
+// MARK: - StrategyCanvasView (Structured Roadmap)
 
-struct StrategyRoadmapView: View {
+struct StrategyCanvasView: View {
     let goal: Goal
     let store: GoalStrategyStore
     let tasksStore: TasksStore
     let onPresentSheet: (GoalStrategySheet) -> Void
     
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 24) {
-                ForEach(goal.stages.indices, id: \.self) { index in
-                    roadmapColumn(stage: goal.stages[index], index: index)
-                }
-                
-                Button(action: { onPresentSheet(.createStage(goalID: goal.id)) }) {
-                    VStack(spacing: 8) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 20))
-                        Text("Add Stage")
-                            .font(CueInTypography.captionMedium)
-                    }
-                    .foregroundStyle(CueInColors.textTertiary)
-                    .frame(width: 260, height: 100)
-                    .background(CueInColors.surfacePrimary)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(CueInColors.cardBorder, style: StrokeStyle(lineWidth: 1, dash: [4])))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(CueInSpacing.screenHorizontal)
-            .padding(.top, CueInSpacing.md)
-        }
-    }
+    @State private var isEditing = false
     
-    private func roadmapColumn(stage: GoalStage, index: Int) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header
-            VStack(alignment: .leading, spacing: 4) {
-                Text("PHASE \(index + 1)")
-                    .font(CueInTypography.micro)
-                    .foregroundStyle(CueInColors.textTertiary)
-                Text(stage.title)
-                    .font(CueInTypography.headline)
-                    .foregroundStyle(CueInColors.textPrimary)
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            CueInDottedCanvas()
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+            
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    ForEach(Array(goal.stages.enumerated()), id: \.element.id) { index, stage in
+                        stageBlock(stage: stage, index: index)
+                        
+                        // Connecting line
+                        if index < goal.stages.count - 1 || isEditing {
+                            connectingLine
+                        }
+                    }
+                    
+                    if isEditing {
+                        addStageNode
+                    }
+                }
+                .padding(.vertical, 40)
+                .padding(.horizontal, CueInSpacing.screenHorizontal)
+                .frame(maxWidth: .infinity)
             }
             
-            // Subgoals
-            VStack(spacing: 8) {
-                ForEach(stage.subgoals) { subgoal in
-                    roadmapSubgoalCard(stage: stage, subgoal: subgoal)
-                }
-                
-                Button(action: { onPresentSheet(.createSubgoal(goalID: goal.id, stageID: stage.id)) }) {
-                    HStack {
-                        Image(systemName: "plus")
-                        Text("Add Subgoal")
-                    }
-                    .font(CueInTypography.caption)
-                    .foregroundStyle(CueInColors.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(CueInColors.surfacePrimary)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
+            editToggleButton
         }
-        .frame(width: 260)
     }
     
-    private func roadmapSubgoalCard(stage: GoalStage, subgoal: GoalSubgoal) -> some View {
+    private var editToggleButton: some View {
+        Button {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                isEditing.toggle()
+            }
+        } label: {
+            Text(isEditing ? "Done Editing" : "Edit Roadmap")
+                .font(CueInTypography.captionMedium)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(isEditing ? CueInColors.accentFocus : CueInColors.surfacePrimary.opacity(0.85), in: Capsule())
+                .overlay(Capsule().strokeBorder(CueInColors.cardBorder, lineWidth: 0.5))
+                .foregroundStyle(isEditing ? Color.white : CueInColors.textPrimary)
+                .shadow(color: Color.black.opacity(0.1), radius: 5, y: 2)
+        }
+        .buttonStyle(.plain)
+        .padding()
+    }
+    
+    private var connectingLine: some View {
+        Rectangle()
+            .fill(CueInColors.textTertiary.opacity(0.4))
+            .frame(width: 2, height: 40)
+    }
+    
+    private var addStageNode: some View {
+        Button {
+            onPresentSheet(.createStage(goalID: goal.id))
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: "plus")
+                    .font(.system(size: 20))
+                Text("Add Phase")
+                    .font(CueInTypography.captionMedium)
+            }
+            .foregroundStyle(CueInColors.textTertiary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 80)
+            .background(CueInColors.surfacePrimary)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(CueInColors.cardBorder, style: StrokeStyle(lineWidth: 1, dash: [4])))
+        }
+        .buttonStyle(.plain)
+    }
+    
+    private func stageBlock(stage: GoalStage, index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Stage Header
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("PHASE \(index + 1)")
+                        .font(CueInTypography.micro)
+                        .foregroundStyle(CueInColors.textTertiary)
+                    Text(stage.title)
+                        .font(CueInTypography.headline)
+                        .foregroundStyle(CueInColors.textPrimary)
+                }
+                Spacer()
+                Menu {
+                    Button("Edit Phase") { onPresentSheet(.editStage(goalID: goal.id, stageID: stage.id)) }
+                    if stage.status != .completed {
+                        Button("Mark Completed") { store.setStageStatus(goalID: goal.id, stageID: stage.id, status: .completed) }
+                    }
+                    Button("Delete Phase", role: .destructive) { store.deleteStage(goalID: goal.id, stageID: stage.id) }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(CueInColors.textSecondary)
+                        .frame(width: 32, height: 32)
+                        .background(Color.black.opacity(0.001))
+                }
+            }
+            .padding(20)
+            .background(stage.status == .active ? CueInColors.surfaceSecondary : CueInColors.surfacePrimary)
+            
+            Divider().background(CueInColors.divider)
+            
+            // Subgoals List
+            VStack(spacing: 0) {
+                ForEach(stage.subgoals) { subgoal in
+                    subgoalRow(stage: stage, subgoal: subgoal)
+                    if subgoal.id != stage.subgoals.last?.id || isEditing {
+                        Divider().background(CueInColors.divider).padding(.leading, 48)
+                    }
+                }
+                
+                if isEditing {
+                    Button {
+                        onPresentSheet(.createSubgoal(goalID: goal.id, stageID: stage.id))
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 18))
+                            Text("Add Subgoal")
+                                .font(CueInTypography.bodyMedium)
+                        }
+                        .foregroundStyle(CueInColors.textSecondary)
+                        .padding(.vertical, 16)
+                        .padding(.horizontal, 20)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .background(CueInColors.surfacePrimary)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(stage.status == .active ? CueInColors.accentFocus : CueInColors.cardBorder, lineWidth: stage.status == .active ? 2 : 1)
+        )
+        .shadow(color: Color.black.opacity(0.05), radius: 10, y: 4)
+    }
+    
+    private func subgoalRow(stage: GoalStage, subgoal: GoalSubgoal) -> some View {
         let progress = store.progress(subgoal: subgoal, tasksStore: tasksStore)
         let isDone = progress >= 0.999
         
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
+        return HStack(spacing: 12) {
+            Circle()
+                .strokeBorder(isDone ? CueInColors.success : CueInColors.textTertiary, lineWidth: 1.5)
+                .background(isDone ? CueInColors.success : Color.clear, in: Circle())
+                .frame(width: 18, height: 18)
+                .overlay {
+                    if isDone {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .onTapGesture {
+                    let newStatus: GoalSubgoalStatus = isDone ? .open : .completed
+                    store.setSubgoalStatus(goalID: goal.id, stageID: stage.id, subgoalID: subgoal.id, status: newStatus)
+                }
+            
+            VStack(alignment: .leading, spacing: 4) {
                 Text(subgoal.title)
                     .font(CueInTypography.body)
                     .foregroundStyle(isDone ? CueInColors.textTertiary : CueInColors.textPrimary)
                     .strikethrough(isDone, color: CueInColors.textTertiary)
-                    .lineLimit(2)
-                Spacer()
-            }
-            
-            if !subgoal.linkedWork.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "link")
-                    Text("\(subgoal.linkedWork.count) Linked")
-                }
-                .font(CueInTypography.micro)
-                .foregroundStyle(CueInColors.textTertiary)
-            }
-            
-            // Progress Bar
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(CueInColors.surfaceTertiary)
-                    Capsule().fill(isDone ? CueInColors.success : CueInColors.textSecondary)
-                        .frame(width: max(0, geo.size.width * progress))
+                
+                if !subgoal.linkedWork.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "link")
+                        Text("\(subgoal.linkedWork.count) Linked")
+                    }
+                    .font(CueInTypography.micro)
+                    .foregroundStyle(CueInColors.textTertiary)
                 }
             }
-            .frame(height: 3)
+            
+            Spacer()
+            
+            Menu {
+                Button("Edit Subgoal") { onPresentSheet(.editSubgoal(goalID: goal.id, stageID: stage.id, subgoalID: subgoal.id)) }
+                Button("Link Work") { onPresentSheet(.linkWork(goalID: goal.id, stageID: stage.id, subgoalID: subgoal.id)) }
+                Button("Delete Subgoal", role: .destructive) { store.deleteSubgoal(goalID: goal.id, stageID: stage.id, subgoalID: subgoal.id) }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .foregroundStyle(CueInColors.textTertiary)
+                    .padding(8)
+                    .background(Color.black.opacity(0.001))
+            }
         }
-        .padding(12)
-        .background(CueInColors.surfaceSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(CueInColors.cardBorder, lineWidth: 0.5)
-        )
-        .onTapGesture {
-            onPresentSheet(.editSubgoal(goalID: goal.id, stageID: stage.id, subgoalID: subgoal.id))
+        .padding(.vertical, 12)
+        .padding(.horizontal, 20)
+        .background(CueInColors.surfacePrimary)
+    }
+}
+
+// MARK: - CueInDottedCanvas
+
+struct CueInDottedCanvas: View {
+    var body: some View {
+        Canvas { context, size in
+            let dotSize: CGFloat = 2
+            let spacing: CGFloat = 40
+            let rows = Int(size.height / spacing)
+            let cols = Int(size.width / spacing)
+            
+            var path = Path()
+            for row in 0...rows {
+                for col in 0...cols {
+                    let rect = CGRect(x: CGFloat(col) * spacing, y: CGFloat(row) * spacing, width: dotSize, height: dotSize)
+                    path.addEllipse(in: rect)
+                }
+            }
+            context.fill(path, with: .color(CueInColors.textTertiary.opacity(0.3)))
         }
     }
 }

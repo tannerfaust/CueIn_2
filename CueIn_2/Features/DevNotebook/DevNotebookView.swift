@@ -62,9 +62,9 @@ struct DevNotebookView: View {
         .scrollContentBackground(.hidden)
         .background(CueInColors.background)
         .navigationTitle("Dev notebook")
-        .navigationBarTitleDisplayMode(.inline)
+        .cueInNavigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                 Button {
                     dismiss()
                 } label: {
@@ -74,7 +74,7 @@ struct DevNotebookView: View {
                 }
                 .accessibilityLabel("Back")
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                 Menu {
                     Section("All notes") {
                         Button("Markdown (.md)", systemImage: "doc.richtext") {
@@ -102,7 +102,7 @@ struct DevNotebookView: View {
                 .accessibilityLabel("Export notebook")
             }
 
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                 Menu {
                     Button("New note", systemImage: "square.and.pencil") {
                         showCompose = true

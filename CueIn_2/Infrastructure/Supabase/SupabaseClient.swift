@@ -22,6 +22,13 @@ enum SupabaseClientError: LocalizedError {
             return "Backend decode error at \(path): \(message). Body: \(body)"
         }
     }
+
+    var invalidatesAuthSession: Bool {
+        guard case let .server(status, message) = self else { return false }
+        guard status == 401 || status == 403 else { return false }
+        return message.localizedCaseInsensitiveContains("user_not_found")
+            || message.localizedCaseInsensitiveContains("User from sub claim in JWT does not exist")
+    }
 }
 
 @MainActor
@@ -181,19 +188,9 @@ final class SupabaseClient {
 
     func deleteAccount(session: SupabaseAuthSession) async throws {
         let config = try configuration()
-        let profile = ProfileDTO(
-            id: session.user.id,
-            displayName: nil,
-            avatarURL: nil,
-            createdAt: Date(),
-            updatedAt: Date(),
-            deletedAt: Date(),
-            syncVersion: 1
-        )
-        try await upsert([profile], table: .profiles, session: session)
         let _: EmptyResponse = try await request(
-            baseURL: config.authBaseURL,
-            path: "logout",
+            baseURL: config.functionsBaseURL,
+            path: "delete-account",
             method: "POST",
             body: EmptyBody(),
             config: config,
@@ -270,6 +267,8 @@ enum SupabaseTable: String, CaseIterable {
         switch self {
         case .appLayoutSettings:
             return "user_id,key"
+        case .scheduleRecords:
+            return "user_id,kind,record_date"
         default:
             return "id"
         }

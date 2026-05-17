@@ -9,6 +9,7 @@ struct TodayView: View {
     @Bindable private var tasksStore = TasksStore.shared
     @State private var showFormulaPickerSheet = false
     @State private var showScheduleMakerSheet = false
+    @State private var showFormulaScheduleSaveSheet = false
     @State private var showSettingsSheet = false
     @State private var showScheduleStartSheet = false
     @State private var draftScheduleEnd = Date().addingTimeInterval(8 * 3600)
@@ -89,7 +90,7 @@ struct TodayView: View {
 
     private var todayChromeTitle: String {
         if viewModel.isFormulaMode {
-            return "Algorithm"
+            return viewModel.formulaScheduleNavigationTitle
         }
         if viewModel.isTaskLedMode {
             return taskLedViewMode.title
@@ -123,7 +124,8 @@ struct TodayView: View {
                                             isStopped: viewModel.isFormulaRunStopped
                                         )
                                     } else if !viewModel.shouldShowScheduleEmptyCallout,
-                                        viewModel.isFormulaPreviewing || viewModel.isFormulaRunStopped {
+                                        viewModel.isFormulaRunStopped,
+                                        !viewModel.headerStatusLine.isEmpty {
                                         Text(viewModel.headerStatusLine)
                                             .font(CueInTypography.caption)
                                             .foregroundStyle(CueInColors.textTertiary)
@@ -131,11 +133,15 @@ struct TodayView: View {
                                             .padding(.top, CueInSpacing.xs)
                                     }
 
-                                    if viewModel.isFormulaPreviewing, viewModel.hasFormulaTemplate {
-                                        Text("Start locks times and begins the first block.")
-                                            .font(CueInTypography.caption)
-                                            .foregroundStyle(CueInColors.textTertiary)
-                                            .padding(.horizontal, CueInSpacing.screenHorizontal)
+                                    if viewModel.isFormulaPreviewing,
+                                        viewModel.hasFormulaTemplate,
+                                        !viewModel.shouldShowScheduleEmptyCallout {
+                                        FormulaSchedulePreviewStatsBar(
+                                            blocks: viewModel.todayScheduleBlocks,
+                                            showsSaveButton: viewModel.isFormulaPreviewScheduleDirty,
+                                            onSave: { showFormulaScheduleSaveSheet = true }
+                                        )
+                                        .padding(.horizontal, CueInSpacing.screenHorizontal)
                                     }
 
                                     if viewModel.shouldShowScheduleEmptyCallout {
@@ -230,11 +236,19 @@ struct TodayView: View {
             .onReceive(NotificationCenter.default.publisher(for: .cueInShowScheduleStartSetup)) { _ in
                 presentScheduleStart()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .cueInApplySavedFormula)) { note in
+                guard let raw = note.userInfo?[CueInShellNotification.formulaIDUserInfoKey] as? String,
+                      let id = UUID(uuidString: raw)
+                else { return }
+                viewModel.setDayEngineMode(.formulaBased)
+                viewModel.reloadAvailableFormulasFromLibrary()
+                viewModel.selectFormula(id)
+            }
             .background(CueInColors.background)
             .navigationTitle(todayChromeTitle)
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: CueInToolbarPlacement.topBarTrailing) {
                     if isJiggleRearrangeMode {
                         Button("Done") { isJiggleRearrangeMode = false }
                             .fontWeight(.semibold)
@@ -371,12 +385,49 @@ struct TodayView: View {
             ScheduleMakerSheet(
                 availableScopes: viewModel.scheduleMakerTaskScopes,
                 onSave: { formula in
-                    viewModel.saveCreatedFormula(formula)
-                    showScheduleMakerSheet = false
+                    if viewModel.saveCreatedFormula(formula) {
+                        showScheduleMakerSheet = false
+                    } else {
+                        CueInToastCenter.shared.showWarning(
+                            icon: "text.badge.xmark",
+                            title: "Name already used",
+                            message: "That schedule name is taken. Pick another name."
+                        )
+                    }
                 },
                 onDismiss: { showScheduleMakerSheet = false }
             )
             .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
+        .sheet(isPresented: $showFormulaScheduleSaveSheet) {
+            let seed = viewModel.formulaScheduleSaveSheetSeed
+            FormulaScheduleSaveSheet(
+                initialName: seed.name,
+                initialSymbol: seed.symbol,
+                initialSummary: seed.summary,
+                allowsUpdateExisting: viewModel.isSelectedFormulaUserSavedSchedule,
+                scheduleIDExcludedWhenUpdating: viewModel.selectedFormulaID,
+                onCancel: { showFormulaScheduleSaveSheet = false },
+                onCommit: { name, symbol, summary, intent in
+                    if viewModel.saveCurrentPreviewSchedule(
+                        name: name,
+                        symbol: symbol,
+                        summary: summary,
+                        intent: intent
+                    ) {
+                        showFormulaScheduleSaveSheet = false
+                    } else {
+                        CueInToastCenter.shared.showWarning(
+                            icon: "text.badge.xmark",
+                            title: "Name already used",
+                            message: "That schedule name is taken. Pick another name."
+                        )
+                    }
+                }
+            )
+            .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }

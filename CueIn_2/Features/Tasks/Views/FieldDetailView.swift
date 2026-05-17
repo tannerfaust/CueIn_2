@@ -36,7 +36,7 @@ struct FieldDetailView: View {
         }
         .background(CueInColors.background)
         .devNotebookScreen(field.map { "Field: \($0.name)" } ?? "Field")
-        .navigationBarTitleDisplayMode(.inline)
+        .cueInNavigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 if let field {
@@ -50,7 +50,7 @@ struct FieldDetailView: View {
                     }
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                 Menu {
                     Button {
                         creatingTask = true

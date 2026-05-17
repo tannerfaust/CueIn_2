@@ -53,7 +53,7 @@ private struct LiquidGlassToolbarCircleModifier: ViewModifier {
     let role: CueInLiquidGlassToolbarRole
 
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             content
                 .background {
                     Circle()
@@ -126,7 +126,7 @@ extension ToolbarContent {
     /// Navigation bar items get an extra system Liquid Glass layer; combined with our own `glassEffect` it reads as a double ring. Hide it for custom glass controls.
     @ToolbarContentBuilder
     func cueInHideSharedToolbarGlassBackground() -> some ToolbarContent {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             sharedBackgroundVisibility(.hidden)
         } else {
             self

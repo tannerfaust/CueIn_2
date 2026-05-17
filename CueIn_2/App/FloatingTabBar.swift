@@ -1,5 +1,7 @@
 import SwiftUI
 
+#if os(iOS)
+
 // MARK: - FloatingTabBar
 /// Floating Liquid Glass tab bar tuned to match the native iOS 26 visual language.
 
@@ -157,3 +159,5 @@ private struct TabBarGlassModifier: ViewModifier {
     }
     .cueInPreferredColorScheme()
 }
+
+#endif

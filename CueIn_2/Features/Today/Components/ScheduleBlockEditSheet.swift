@@ -73,8 +73,8 @@ struct ScheduleBlockEditSheet: View {
             .scrollDismissesKeyboard(.interactively)
             .background(CueInColors.background)
             .navigationTitle("Block")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(CueInThemePreference.current.colorScheme, for: .navigationBar)
+            .cueInNavigationBarTitleDisplayMode(.inline)
+            .cueInNavigationToolbarColorScheme()
             .toolbar {
                 CueInEditorToolbar(
                     saveEnabled: !draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,

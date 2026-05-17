@@ -1,5 +1,7 @@
 import SwiftUI
 
+#if os(iOS)
+
 // MARK: - AppShellView
 /// Root container with content flowing under a floating bottom control cluster.
 
@@ -35,6 +37,7 @@ struct AppShellView: View {
     @State private var auxiliaryTabOpenedFromHub: AppTab? = nil
     @AppStorage("cuein.devNotebook.showCaptureButton") private var showDevNotebookCaptureButton = false
     @Bindable private var toastCenter = CueInToastCenter.shared
+    @Bindable private var tasksStore = TasksStore.shared
     @Bindable private var todayViewModel = TodayViewModel.shared
     @Bindable private var devNotebookContext = DevNotebookContext.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -73,8 +76,14 @@ struct AppShellView: View {
             applyNavigationSideEffects(for: selectedTab)
             DevNotebookContext.shared.selectedTab = selectedTab
         }
+        .task {
+            await SupabaseAuthStore.shared.validateStoredSession()
+        }
         .onChange(of: selectedTab) { _, newValue in
             if fabOverflowPresented { fabOverflowPresented = false }
+            if newValue != .tasks {
+                tasksStore.clearCompleteUndo()
+            }
             if newValue == .hub {
                 auxiliaryTabOpenedFromHub = nil
             } else if newValue != .pomodoro && newValue != .sounds {
@@ -91,6 +100,7 @@ struct AppShellView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 PomodoroStore.shared.refreshFromWallClockIfNeeded()
+                Task { await SupabaseAuthStore.shared.validateStoredSession() }
             }
         }
         .sheet(isPresented: $showShellQuickCapture) {
@@ -200,6 +210,9 @@ struct AppShellView: View {
         .onReceive(NotificationCenter.default.publisher(for: .cueInOpenSounds)) { _ in
             auxiliaryTabOpenedFromHub = .sounds
             selectedTab = .sounds
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .cueInOpenBlockTemplateLibrary)) { _ in
+            showFabBlockLibrary = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .cueInSwitchTab)) { note in
             guard let raw = note.userInfo?[CueInShellNotification.switchTabUserInfoKey] as? String,
@@ -392,7 +405,20 @@ struct AppShellView: View {
     private var floatingFabColumn: some View {
         let showExecution = isTodayDestination(selectedTab) && shouldShowFloatingExecutionButton
         let rows = fabOverflowRows
+        let showTasksCompleteUndo = selectedTab == .tasks && tasksStore.pendingCompleteUndoSnapshot != nil
         return VStack(spacing: CueInLayout.floatingFabVerticalSpacing) {
+            if showTasksCompleteUndo {
+                TasksFloatingCompleteUndoChip {
+                    dismissFabOverflow()
+                    tasksStore.consumeCompleteUndo()
+                }
+                .transition(
+                    .asymmetric(
+                        insertion: .offset(y: 12).combined(with: .opacity).combined(with: .scale(scale: 0.9, anchor: .bottom)),
+                        removal: .opacity.combined(with: .scale(scale: 0.94, anchor: .bottom))
+                    )
+                )
+            }
             if showExecution {
                 FloatingLightningButton { showExecutionSheet = true }
                     .transition(
@@ -431,6 +457,7 @@ struct AppShellView: View {
             }
         }
         .animation(fabSpring, value: showExecution)
+        .animation(fabSpring, value: showTasksCompleteUndo)
         .dynamicTypeSize(.xSmall ... .large)
     }
 
@@ -683,3 +710,5 @@ private struct BottomSafeAreaKey: PreferenceKey {
     AppShellView()
         .cueInPreferredColorScheme()
 }
+
+#endif

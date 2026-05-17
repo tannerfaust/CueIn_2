@@ -17,6 +17,8 @@ struct TaskItemRow: View {
 
     let onToggle: () -> Void
     let onOpen: () -> Void
+    /// Called with the pre-mutation task when the row marks **complete** via swipe-right or the checkbox status popover.
+    var onOfferCompleteUndo: ((TaskItem) -> Void)? = nil
     var onDelete: () -> Void = {}
     var onSchedule: (Date?) -> Void = { _ in }
     var onMoreActions: () -> Void = {}
@@ -204,6 +206,11 @@ struct TaskItemRow: View {
         .buttonStyle(.plain)
         .popover(isPresented: $isStatusPopoverPresented) {
             CueInTaskStatusPopoverContent(selection: task.status) { status in
+                let snap = task
+                let willComplete = !snap.isCompleted && status == .completed
+                if willComplete {
+                    onOfferCompleteUndo?(snap)
+                }
                 store.setTodayTodoTaskStatus(id: task.id, status: status)
                 isStatusPopoverPresented = false
             }
@@ -324,7 +331,11 @@ struct TaskItemRow: View {
                 let crossedLeft = w < moreActionsThreshold
 
                 if crossedRight {
+                    let pre = task
                     completeHaptic.toggle()
+                    if !pre.isCompleted {
+                        onOfferCompleteUndo?(pre)
+                    }
                     onToggle()
                 } else if crossedLeft {
                     selectHaptic.toggle()

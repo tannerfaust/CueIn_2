@@ -43,7 +43,7 @@ struct MeasureAddTrackerSheet: View {
             }
             .background(CueInColors.background.ignoresSafeArea())
             .navigationTitle("New tracker")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: onDismiss)

@@ -24,6 +24,7 @@ private struct HubToolDefinition: Identifiable {
         HubToolDefinition(id: "pomodoro",       systemImage: "timer",               title: "Timer",      subtitle: "Focus intervals"),
         HubToolDefinition(id: "sounds",         systemImage: "waveform",            title: "Sounds",     subtitle: "Focus audio"),
         HubToolDefinition(id: "quantifiedSelf", systemImage: "chart.xyaxis.line",   title: "Measures",   subtitle: "Quantified self"),
+        HubToolDefinition(id: "library",        systemImage: "rectangle.stack.fill.badge.plus", title: "Library", subtitle: "Bookmarks & block library"),
         HubToolDefinition(id: "planning",       systemImage: "calendar",            title: "Planning",   subtitle: "Week & month view"),
         HubToolDefinition(id: "routines",       systemImage: "arrow.triangle.2.circlepath", title: "Routines", subtitle: "Repeatable systems"),
         HubToolDefinition(id: "schedules",      systemImage: "doc.text.fill",       title: "Schedules",  subtitle: "Day & week templates"),
@@ -44,6 +45,8 @@ struct HubView: View {
     @State private var showSettings = false
     @State private var showDevNotebook = false
     @State private var showQuantifiedSelfSheet = false
+    @State private var showLibrarySheet = false
+    @State private var librarySheetInitialSegment: LibraryHomeSegment = .tasks
     @Bindable private var todayViewModel = TodayViewModel.shared
     @Bindable private var goalStore = GoalStrategyStore.shared
     @Bindable private var tasksStore = TasksStore.shared
@@ -54,9 +57,16 @@ struct HubView: View {
         NavigationStack(path: $path) {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    goalsHeroCard
-                        .padding(.top, CueInSpacing.base)
-                        .padding(.bottom, CueInSpacing.xxl)
+                    HubGoalsHeroBlock(
+                        goalStore: goalStore,
+                        tasksStore: tasksStore,
+                        onCreateGoal: { activeGoalSheet = .createGoal(templateID: nil) },
+                        onOpenGoalsHome: {
+                            path = [.home]
+                        }
+                    )
+                    .padding(.top, CueInSpacing.base)
+                    .padding(.bottom, CueInSpacing.xxl)
 
                     toolsSection
                         .padding(.bottom, CueInSpacing.xxl)
@@ -72,9 +82,9 @@ struct HubView: View {
             }
             .background(CueInColors.background)
             .navigationTitle("Hub")
-            .navigationBarTitleDisplayMode(.large)
+            .cueInNavigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: CueInToolbarPlacement.topBarTrailing) {
                     Button {
                         showDevNotebook = true
                     } label: {
@@ -127,6 +137,14 @@ struct HubView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
+        .sheet(isPresented: $showLibrarySheet) {
+            LibraryView(initialSegment: librarySheetInitialSegment) {
+                showLibrarySheet = false
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }
     }
 
@@ -205,133 +223,6 @@ struct HubView: View {
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
 
 
-        }
-    }
-
-    // MARK: - Header
-
-
-
-    // MARK: - Goals Hero Card
-
-    private var goalsHeroCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Accent rail at top
-            Rectangle()
-                .fill(CueInColors.accentFocus)
-                .frame(height: 2)
-
-            VStack(alignment: .leading, spacing: CueInSpacing.md) {
-                // Section label row
-                HStack {
-                    sectionLabel("Goals")
-                    Spacer()
-                    if !goalStore.activeGoals.isEmpty {
-                        NavigationLink(value: GoalStrategyRoute.home) {
-                            HStack(spacing: 4) {
-                                Text("\(goalStore.activeGoals.count) active")
-                                    .font(CueInTypography.micro)
-                                    .foregroundStyle(CueInColors.textTertiary)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(CueInColors.textTertiary)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-
-                // Content
-                if goalStore.activeGoals.isEmpty {
-                    goalsEmptyState
-                } else {
-                    VStack(spacing: CueInSpacing.sm) {
-                        ForEach(goalStore.activeGoals.prefix(3)) { goal in
-                            NavigationLink(value: GoalStrategyRoute.goal(goal.id)) {
-                                goalProgressRow(goal)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-            }
-            .padding(CueInSpacing.base)
-        }
-        .background(CueInColors.surfacePrimary)
-        .clipShape(RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous)
-                .strokeBorder(CueInColors.cardBorder, lineWidth: 0.5)
-        )
-        .padding(.horizontal, CueInSpacing.screenHorizontal)
-    }
-
-    private var goalsEmptyState: some View {
-        Button {
-            activeGoalSheet = .createGoal(templateID: nil)
-        } label: {
-            HStack(spacing: CueInSpacing.md) {
-                Image(systemName: "target")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(CueInColors.accentFocus)
-                    .frame(width: 38, height: 38)
-                    .background(CueInColors.accentFocus.opacity(0.12), in: RoundedRectangle(cornerRadius: CueInSpacing.chipRadius, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Set your first goal")
-                        .font(CueInTypography.bodyMedium)
-                        .foregroundStyle(CueInColors.textPrimary)
-                    Text("Direction & milestones come first.")
-                        .font(CueInTypography.caption)
-                        .foregroundStyle(CueInColors.textTertiary)
-                }
-
-                Spacer()
-
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(CueInColors.accentFocus.opacity(0.7))
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private func goalProgressRow(_ goal: Goal) -> some View {
-        let progress = goalStore.progress(goal: goal, tasksStore: tasksStore)
-
-        VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-            HStack(spacing: CueInSpacing.md) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(goal.title)
-                        .font(CueInTypography.bodyMedium)
-                        .foregroundStyle(CueInColors.textPrimary)
-                        .lineLimit(1)
-                    if !goal.description.isEmpty {
-                        Text(goal.description)
-                            .font(CueInTypography.micro)
-                            .foregroundStyle(CueInColors.textTertiary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer()
-
-                Text("\(Int(progress * 100))%")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(CueInColors.textSecondary)
-            }
-
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(CueInColors.surfaceTertiary)
-                    Capsule()
-                        .fill(CueInColors.accentFocus)
-                        .frame(width: max(0, geo.size.width * progress))
-                }
-            }
-            .frame(height: 3)
         }
     }
 
@@ -658,6 +549,17 @@ struct HubView: View {
                     subtitle: tool.subtitle,
                     onSelect: { showQuantifiedSelfSheet = true }
                 )
+            case "library":
+                return HubToolDefinition(
+                    id: tool.id,
+                    systemImage: tool.systemImage,
+                    title: tool.title,
+                    subtitle: libraryTileSubtitle,
+                    onSelect: {
+                        librarySheetInitialSegment = .tasks
+                        showLibrarySheet = true
+                    }
+                )
             case "pomodoro":
                 return HubToolDefinition(
                     id: tool.id,
@@ -684,6 +586,15 @@ struct HubView: View {
                 return tool
             }
         }
+    }
+
+    private var libraryTileSubtitle: String {
+        let t = tasksStore.tasks.filter(\.savesToArchive).count
+        let s = FormulaLibraryService.customSchedules().count
+        let b = FormulaLibraryService.customBlockPresets().count
+        let total = t + s + b
+        if total == 0 { return "Tasks tab & Blocks tab" }
+        return "\(t) bookmarked · \(s) day layouts · \(b) block presets"
     }
 
     private var planningTileSubtitle: String {

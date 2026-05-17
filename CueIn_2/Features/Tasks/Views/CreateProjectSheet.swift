@@ -72,9 +72,9 @@ struct CreateProjectSheet: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(CueInColors.background)
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                     Button("Cancel") { onDismiss() }
                         .foregroundStyle(CueInColors.textSecondary)
                 }
@@ -83,7 +83,7 @@ struct CreateProjectSheet: View {
                         .font(CueInTypography.bodyMedium)
                         .foregroundStyle(CueInColors.textPrimary)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                     Button("Done") { save() }
                         .fontWeight(.semibold)
                         .foregroundStyle(canSave ? CueInColors.accentFocus : CueInColors.textTertiary)

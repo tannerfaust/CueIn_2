@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(iOS)
 import UIKit
+#endif
 
 // MARK: - PomodoroView
 
@@ -22,10 +24,10 @@ struct PomodoroView: View {
                 .padding(.bottom, CueInLayout.scrollBottomInset)
             }
             .navigationTitle("Timer")
-            .navigationBarTitleDisplayMode(.large)
+            .cueInNavigationBarTitleDisplayMode(.large)
             .toolbar {
                 if let onRequestReturnToHub {
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                         Button(action: onRequestReturnToHub) {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 17, weight: .semibold))
@@ -34,7 +36,7 @@ struct PomodoroView: View {
                         .accessibilityLabel("Back to Hub")
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                     sessionPill
                 }
             }
@@ -221,6 +223,7 @@ struct PomodoroView: View {
                         .font(CueInTypography.bodyMedium)
                         .tint(phaseAccent)
 
+                    #if os(iOS)
                     Button {
                         if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
                             openURL(url)
@@ -233,6 +236,7 @@ struct PomodoroView: View {
                     .foregroundStyle(CueInColors.accentRoutine)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, CueInSpacing.xs)
+                    #endif
                 }
                 .padding(.top, CueInSpacing.md)
             } label: {

@@ -20,7 +20,13 @@ struct CueIn_2App: App {
 
     var body: some Scene {
         WindowGroup {
-            AppShellView()
+            Group {
+                #if os(macOS)
+                MacAppShellView()
+                #else
+                AppShellView()
+                #endif
+            }
                 .cueInPreferredColorScheme()
                 .modelContainer(modelContainer)
                 .task {
@@ -43,5 +49,17 @@ struct CueIn_2App: App {
                     }
                 }
         }
+        #if os(macOS)
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("Sync") {
+                    Task { @MainActor in
+                        await CueInSyncEngine.shared.syncNow()
+                    }
+                }
+                .keyboardShortcut("r", modifiers: .command)
+            }
+        }
+        #endif
     }
 }

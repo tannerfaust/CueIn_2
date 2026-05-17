@@ -1,5 +1,28 @@
 import AuthenticationServices
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
+
+#if os(iOS)
+private typealias CueInSettingsKeyboardType = UIKeyboardType
+#else
+private enum CueInSettingsKeyboardType {
+    case emailAddress
+    case URL
+}
+#endif
+
+private extension View {
+    @ViewBuilder
+    func cueInSettingsKeyboardType(_ keyboardType: CueInSettingsKeyboardType) -> some View {
+        #if os(iOS)
+        self.keyboardType(keyboardType)
+        #else
+        self
+        #endif
+    }
+}
 
 // MARK: - DataAndResetSettingsView
 
@@ -41,11 +64,10 @@ struct DataAndResetSettingsView: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .cueInNavigationBarTitleDisplayMode(.inline)
+        .cueInNavigationToolbarMaterial()
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                 Button {
                     dismiss()
                 } label: {
@@ -152,7 +174,7 @@ struct DataAndResetSettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This signs you out and marks your CueIn profile for deletion.")
+            Text("This permanently deletes your CueIn account and cloud data. Local cached data on this device may remain until the app clears or replaces it.")
         }
     }
 
@@ -161,7 +183,7 @@ struct DataAndResetSettingsView: View {
             settingsSummaryHeader
 
             CueInEditorSettingsCard(title: "Account") {
-                AccountSyncSettingsView(confirmDeleteAccount: $confirmDeleteAccount)
+                AccountExperienceSettingsView(confirmDeleteAccount: $confirmDeleteAccount)
             }
 
             CueInEditorSettingsCard(title: "Appearance") {
@@ -436,9 +458,9 @@ struct DataAndResetSettingsView: View {
     }
 }
 
-// MARK: - AccountSyncSettingsView
+// MARK: - AccountExperienceSettingsView
 
-private struct AccountSyncSettingsView: View {
+private struct AccountExperienceSettingsView: View {
     @Binding var confirmDeleteAccount: Bool
     @Bindable private var authStore = SupabaseAuthStore.shared
     @Bindable private var syncEngine = CueInSyncEngine.shared
@@ -460,62 +482,79 @@ private struct AccountSyncSettingsView: View {
 
         var title: String {
             switch self {
-            case .signIn: return "Sign in"
-            case .create: return "Create"
+            case .signIn: return "Log in"
+            case .create: return "Sign up"
             }
         }
+    }
+
+    private enum AccountButtonStyle {
+        case primary
+        case secondary
+        case destructive
     }
 
     var body: some View {
-        VStack(spacing: CueInSpacing.sm) {
-            statusInset
-
-            if showsBackendConfiguration || authStore.configurationState == .missing {
-                configurationFields
-            } else {
-                Button {
-                    showsBackendConfiguration = true
-                } label: {
-                    Label("Edit backend", systemImage: "server.rack")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
+        VStack(alignment: .leading, spacing: CueInSpacing.md) {
+            accountStatusPanel
 
             if authStore.isSignedIn {
-                signedInControls
-                syncStatusView
+                signedInPanel
             } else {
-                signedOutControls
+                signedOutPanel
             }
 
-            if let lastError = authStore.lastError {
-                errorMessage(lastError)
+            noticeAndErrorPanel
+            #if DEBUG
+            backendConfigurationPanel
+            #endif
+        }
+        .onAppear {
+            #if DEBUG
+            if authStore.configurationState == .missing {
+                showsBackendConfiguration = true
             }
-
-            if let notice = authStore.lastAuthNotice {
-                Text(notice)
-                    .font(CueInTypography.caption)
-                    .foregroundStyle(CueInColors.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            #endif
+        }
+        .task {
+            await authStore.validateStoredSession()
         }
     }
 
-    private var statusInset: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.xs) {
-            Text(authStore.isSignedIn ? "Signed in" : "Not signed in")
-                .font(CueInTypography.bodyMedium)
-                .foregroundStyle(CueInColors.textPrimary)
-            Text(statusSubtitle)
-                .font(CueInTypography.caption)
-                .foregroundStyle(CueInColors.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+    private var accountStatusPanel: some View {
+        HStack(alignment: .center, spacing: CueInSpacing.md) {
+            Image(systemName: authStore.isSignedIn ? "person.crop.circle.badge.checkmark" : "person.crop.circle")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(authStore.isSignedIn ? CueInColors.success : CueInColors.textSecondary)
+                .frame(width: 42, height: 42)
+                .background(CueInColors.surfaceSecondary.opacity(0.8))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(authStore.isSignedIn ? "CueIn Cloud" : "Account")
+                    .font(CueInTypography.bodyMedium)
+                    .foregroundStyle(CueInColors.textPrimary)
+                Text(statusSubtitle)
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(CueInColors.textSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+
+            if authStore.isSignedIn {
+                Image(systemName: syncStatusIcon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(syncStatusColor)
+                    .frame(width: 28, height: 28)
+                    .background(syncStatusColor.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(CueInSpacing.md)
-        .background(CueInColors.surfaceSecondary.opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(CueInColors.surfaceSecondary.opacity(0.62))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var statusSubtitle: String {
@@ -524,7 +563,7 @@ private struct AccountSyncSettingsView: View {
         }
         switch syncEngine.state {
         case .idle:
-            return "Connect Supabase to enable account sync."
+            return "Create an account to sync across devices."
         case .syncing:
             return "Syncing..."
         case let .blocked(message), let .failed(message):
@@ -534,32 +573,37 @@ private struct AccountSyncSettingsView: View {
         }
     }
 
-    private var configurationFields: some View {
-        VStack(spacing: CueInSpacing.sm) {
-            TextField("Supabase project URL", text: $projectURL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.URL)
-            SecureField("Anon key", text: $anonKey)
-            TextField("Redirect URL", text: $redirectURL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.URL)
-            Button {
-                authStore.configure(projectURL: projectURL, anonKey: anonKey, redirectURL: redirectURL)
-                showsBackendConfiguration = false
-            } label: {
-                Label("Save backend", systemImage: "server.rack")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(CueInColors.accentFocus)
-        }
-        .textFieldStyle(.roundedBorder)
-    }
+    private var signedOutPanel: some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.md) {
+            Text("Sign in or create an account")
+                .font(CueInTypography.bodyMedium)
+                .foregroundStyle(CueInColors.textPrimary)
 
-    private var signedOutControls: some View {
-        VStack(spacing: CueInSpacing.sm) {
+            VStack(spacing: CueInSpacing.sm) {
+                SignInWithAppleButton(.continue) { request in
+                    authStore.makeAppleRequest(request)
+                } onCompletion: { result in
+                    if case let .success(authorization) = result,
+                       let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
+                        Task { await authStore.signInWithApple(credential: credential) }
+                    }
+                }
+                .signInWithAppleButtonStyle(.white)
+                .frame(height: 48)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                accountButton(
+                    title: "Continue with Google",
+                    icon: "globe",
+                    style: .secondary,
+                    disabled: authStore.isWorking
+                ) {
+                    Task { await authStore.signInWithGoogle() }
+                }
+            }
+
+            accountDivider("or use email")
+
             Picker("Account mode", selection: $authMode) {
                 ForEach(AccountAuthMode.allCases) { mode in
                     Text(mode.title).tag(mode)
@@ -567,60 +611,44 @@ private struct AccountSyncSettingsView: View {
             }
             .pickerStyle(.segmented)
 
-            SignInWithAppleButton(.signIn) { request in
-                authStore.makeAppleRequest(request)
-            } onCompletion: { result in
-                if case let .success(authorization) = result,
-                   let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
-                    Task { await authStore.signInWithApple(credential: credential) }
-                }
-            }
-            .signInWithAppleButtonStyle(.white)
-            .frame(height: 44)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-            Button {
-                Task { await authStore.signInWithGoogle() }
-            } label: {
-                Label("Continue with Google", systemImage: "globe")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-
-            TextField("Email", text: $email)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.emailAddress)
-                .textFieldStyle(.roundedBorder)
-
-            SecureField("Password", text: $password)
-                .textFieldStyle(.roundedBorder)
+            accountTextField("Email", text: $email, icon: "envelope", keyboardType: .emailAddress)
+            accountSecureField("Password", text: $password, icon: "lock")
 
             if authMode == .create {
-                SecureField("Confirm password", text: $confirmPassword)
-                    .textFieldStyle(.roundedBorder)
+                accountSecureField("Confirm password", text: $confirmPassword, icon: "lock.rotation")
+                if !confirmPassword.isEmpty && password != confirmPassword {
+                    Text("Passwords do not match.")
+                        .font(CueInTypography.caption)
+                        .foregroundStyle(CueInColors.danger)
+                }
             }
 
-            HStack(spacing: CueInSpacing.sm) {
-                Button("Magic link") {
-                    Task { await authStore.sendMagicLink(email: email) }
-                }
-                .buttonStyle(.bordered)
-                .disabled(email.isEmpty)
-
-                Button(authMode == .create ? "Create account" : "Sign in") {
-                    Task {
-                        if authMode == .create {
-                            await authStore.signUpWithPassword(email: email, password: password)
-                        } else {
-                            await authStore.signInWithPassword(email: email, password: password)
-                        }
+            accountButton(
+                title: authMode == .create ? "Create account" : "Log in",
+                icon: authMode == .create ? "person.badge.plus" : "arrow.right",
+                style: .primary,
+                disabled: primaryAuthDisabled || authStore.isWorking
+            ) {
+                Task {
+                    if authMode == .create {
+                        await authStore.signUpWithPassword(email: email, password: password)
+                    } else {
+                        await authStore.signInWithPassword(email: email, password: password)
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(CueInColors.accentFocus)
-                .disabled(primaryAuthDisabled)
             }
+
+            Button {
+                Task { await authStore.sendMagicLink(email: email) }
+            } label: {
+                Label("Send magic link instead", systemImage: "wand.and.stars")
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(email.isEmpty ? CueInColors.textTertiary : CueInColors.accentFocus)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, CueInSpacing.xs)
+            }
+            .buttonStyle(.plain)
+            .disabled(email.isEmpty || authStore.isWorking)
 
             if let lastMagicLinkEmail = authStore.lastMagicLinkEmail {
                 Text("Magic link sent to \(lastMagicLinkEmail).")
@@ -632,41 +660,152 @@ private struct AccountSyncSettingsView: View {
         .disabled(authStore.isWorking)
     }
 
+    private var signedInPanel: some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.md) {
+            accountButton(
+                title: "Sync now",
+                icon: "arrow.triangle.2.circlepath",
+                style: .primary,
+                disabled: authStore.isWorking || syncEngine.state == .syncing
+            ) {
+                Task { await CueInSyncRuntimeBridge.shared.migrateAndSyncCurrentWorkspace() }
+            }
+
+            syncStatusView
+
+            accountButton(
+                title: "Sign out",
+                icon: "rectangle.portrait.and.arrow.right",
+                style: .secondary,
+                disabled: authStore.isWorking
+            ) {
+                Task { await authStore.signOut() }
+            }
+
+            accountDangerPanel
+        }
+        .disabled(authStore.isWorking)
+    }
+
     private var primaryAuthDisabled: Bool {
         if email.isEmpty || password.count < 6 { return true }
         if authMode == .create && password != confirmPassword { return true }
         return false
     }
 
-    private var signedInControls: some View {
+    private var backendConfigurationPanel: some View {
+        DisclosureGroup(isExpanded: $showsBackendConfiguration) {
+            configurationFields
+                .padding(.top, CueInSpacing.sm)
+        } label: {
+            HStack(spacing: CueInSpacing.sm) {
+                Image(systemName: "server.rack")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(CueInColors.textSecondary)
+                Text("Developer backend")
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(CueInColors.textSecondary)
+                Spacer(minLength: 0)
+                if case .ready = authStore.configurationState {
+                    Text("Connected")
+                        .font(CueInTypography.caption)
+                        .foregroundStyle(CueInColors.success)
+                }
+            }
+        }
+        .padding(CueInSpacing.sm)
+        .background(CueInColors.surfaceSecondary.opacity(0.45))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var configurationFields: some View {
         VStack(spacing: CueInSpacing.sm) {
+            accountTextField("Project URL", text: $projectURL, icon: "link", keyboardType: .URL)
+            accountSecureField("Publishable key", text: $anonKey, icon: "key")
+            accountTextField("Redirect URL", text: $redirectURL, icon: "arrow.turn.down.right", keyboardType: .URL)
+
             Button {
-                Task { await CueInSyncRuntimeBridge.shared.migrateAndSyncCurrentWorkspace() }
+                authStore.configure(projectURL: projectURL, anonKey: anonKey, redirectURL: redirectURL)
+                showsBackendConfiguration = false
             } label: {
-                Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
+                Label("Save backend", systemImage: "checkmark")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .tint(CueInColors.accentFocus)
+        }
+    }
 
-            HStack(spacing: CueInSpacing.sm) {
-                Button("Sign out") {
-                    Task { await authStore.signOut() }
-                }
-                .buttonStyle(.bordered)
+    private var noticeAndErrorPanel: some View {
+        VStack(spacing: CueInSpacing.xs) {
+            if let lastError = authStore.lastError {
+                messageRow(
+                    lastError,
+                    icon: "exclamationmark.triangle.fill",
+                    color: CueInColors.danger,
+                    copyAccessibilityLabel: "Copy account error"
+                )
+            }
 
-                Button("Delete account", role: .destructive) {
-                    confirmDeleteAccount = true
-                }
-                .buttonStyle(.bordered)
-                .tint(.red)
+            if let notice = authStore.lastAuthNotice {
+                messageRow(
+                    notice,
+                    icon: "checkmark.circle.fill",
+                    color: CueInColors.success,
+                    copyAccessibilityLabel: nil
+                )
             }
         }
-        .disabled(authStore.isWorking)
+    }
+
+    private var accountDangerPanel: some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.sm) {
+            HStack(alignment: .top, spacing: CueInSpacing.sm) {
+                Image(systemName: "person.crop.circle.badge.xmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(CueInColors.danger)
+                    .frame(width: 28, height: 28)
+                    .background(CueInColors.danger.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Delete account")
+                        .font(CueInTypography.bodyMedium)
+                        .foregroundStyle(CueInColors.textPrimary)
+                    Text("Removes your account and cloud data for this user.")
+                        .font(CueInTypography.caption)
+                        .foregroundStyle(CueInColors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            accountButton(
+                title: "Delete account",
+                icon: "trash",
+                style: .destructive,
+                disabled: authStore.isWorking
+            ) {
+                confirmDeleteAccount = true
+            }
+        }
+        .padding(CueInSpacing.md)
+        .background(CueInColors.danger.opacity(0.08))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(CueInColors.danger.opacity(0.28), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var syncStatusView: some View {
-        HStack(alignment: .firstTextBaseline, spacing: CueInSpacing.sm) {
+        HStack(alignment: .top, spacing: CueInSpacing.sm) {
+            Image(systemName: syncStatusIcon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(syncStatusColor)
+                .frame(width: 28, height: 28)
+                .background(syncStatusColor.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
             Text(syncStatusText)
                 .font(CueInTypography.caption)
                 .foregroundStyle(syncStatusColor)
@@ -675,27 +814,34 @@ private struct AccountSyncSettingsView: View {
             Spacer(minLength: 0)
 
             if case let .failed(message) = syncEngine.state {
-                Button {
-                    UIPasteboard.general.string = message
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(CueInColors.textSecondary)
-                        .frame(width: 32, height: 32)
-                        .background(CueInColors.surfaceSecondary.opacity(0.72))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Copy sync error")
+                copyButton(message: message, accessibilityLabel: "Copy sync error")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(CueInSpacing.sm)
+        .background(syncStatusColor.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var syncStatusIcon: String {
+        switch syncEngine.state {
+        case .idle:
+            return "clock"
+        case .syncing:
+            return "arrow.triangle.2.circlepath"
+        case .blocked:
+            return "lock.fill"
+        case .failed:
+            return "exclamationmark.triangle.fill"
+        case .synced:
+            return "checkmark.circle.fill"
+        }
     }
 
     private var syncStatusText: String {
         switch syncEngine.state {
         case .idle:
-            return "Sync not run yet."
+            return "Sync has not run yet."
         case .syncing:
             return "Syncing..."
         case let .blocked(message):
@@ -709,40 +855,190 @@ private struct AccountSyncSettingsView: View {
 
     private var syncStatusColor: Color {
         switch syncEngine.state {
-        case .failed:
-            return Color.red.opacity(0.9)
+        case .failed, .blocked:
+            return CueInColors.danger
         case .synced:
             return CueInColors.success
+        case .syncing:
+            return CueInColors.accentFocus
         default:
             return CueInColors.textSecondary
         }
     }
 
-    private func errorMessage(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.xs) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(message)
-                    .font(CueInTypography.caption)
-                    .foregroundStyle(Color.red.opacity(0.9))
-                    .fixedSize(horizontal: false, vertical: true)
+    private func accountButton(
+        title: String,
+        icon: String,
+        style: AccountButtonStyle,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: CueInSpacing.sm) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(title)
+                    .font(CueInTypography.bodyMedium)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .foregroundStyle(buttonForeground(for: style, disabled: disabled))
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .background(buttonBackground(for: style, disabled: disabled))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(buttonBorder(for: style, disabled: disabled), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
 
-                Spacer(minLength: CueInSpacing.sm)
+    private func accountTextField(
+        _ placeholder: String,
+        text: Binding<String>,
+        icon: String,
+        keyboardType: CueInSettingsKeyboardType
+    ) -> some View {
+        HStack(spacing: CueInSpacing.sm) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(CueInColors.textSecondary)
+                .frame(width: 20)
+            TextField(placeholder, text: text)
+                .font(CueInTypography.body)
+                .foregroundStyle(CueInColors.textPrimary)
+                .cueInNoAutocapitalization()
+                .autocorrectionDisabled()
+                .cueInSettingsKeyboardType(keyboardType)
+        }
+        .frame(height: 46)
+        .padding(.horizontal, CueInSpacing.sm)
+        .background(CueInColors.surfaceSecondary.opacity(0.68))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(CueInColors.cardBorder, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
 
-                Button {
-                    UIPasteboard.general.string = message
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(CueInColors.textSecondary)
-                        .frame(width: 32, height: 32)
-                        .background(CueInColors.surfaceSecondary.opacity(0.72))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Copy error")
+    private func accountSecureField(_ placeholder: String, text: Binding<String>, icon: String) -> some View {
+        HStack(spacing: CueInSpacing.sm) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(CueInColors.textSecondary)
+                .frame(width: 20)
+            SecureField(placeholder, text: text)
+                .font(CueInTypography.body)
+                .foregroundStyle(CueInColors.textPrimary)
+                .cueInNoAutocapitalization()
+                .autocorrectionDisabled()
+        }
+        .frame(height: 46)
+        .padding(.horizontal, CueInSpacing.sm)
+        .background(CueInColors.surfaceSecondary.opacity(0.68))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(CueInColors.cardBorder, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func accountDivider(_ title: String) -> some View {
+        HStack(spacing: CueInSpacing.sm) {
+            Rectangle()
+                .fill(CueInColors.divider)
+                .frame(height: 1)
+            Text(title)
+                .font(CueInTypography.caption)
+                .foregroundStyle(CueInColors.textTertiary)
+                .lineLimit(1)
+            Rectangle()
+                .fill(CueInColors.divider)
+                .frame(height: 1)
+        }
+    }
+
+    private func messageRow(
+        _ message: String,
+        icon: String,
+        color: Color,
+        copyAccessibilityLabel: String?
+    ) -> some View {
+        HStack(alignment: .top, spacing: CueInSpacing.sm) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(color)
+                .padding(.top, 2)
+
+            Text(message)
+                .font(CueInTypography.caption)
+                .foregroundStyle(copyAccessibilityLabel == nil ? CueInColors.textSecondary : color)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+
+            if let copyAccessibilityLabel {
+                copyButton(message: message, accessibilityLabel: copyAccessibilityLabel)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(CueInSpacing.sm)
+        .background(color.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func copyButton(message: String, accessibilityLabel: String) -> some View {
+        Button {
+            CueInPasteboard.copy(message)
+        } label: {
+            Image(systemName: "doc.on.doc")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(CueInColors.textSecondary)
+                .frame(width: 32, height: 32)
+                .background(CueInColors.surfaceSecondary.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private func buttonBackground(for style: AccountButtonStyle, disabled: Bool) -> Color {
+        if disabled { return CueInColors.surfaceSecondary.opacity(0.42) }
+        switch style {
+        case .primary:
+            return CueInColors.accentFocus
+        case .secondary:
+            return CueInColors.surfaceSecondary.opacity(0.72)
+        case .destructive:
+            return CueInColors.danger.opacity(0.14)
+        }
+    }
+
+    private func buttonForeground(for style: AccountButtonStyle, disabled: Bool) -> Color {
+        if disabled { return CueInColors.textTertiary }
+        switch style {
+        case .primary:
+            return Color.black.opacity(0.88)
+        case .secondary:
+            return CueInColors.textPrimary
+        case .destructive:
+            return CueInColors.danger
+        }
+    }
+
+    private func buttonBorder(for style: AccountButtonStyle, disabled: Bool) -> Color {
+        if disabled { return CueInColors.cardBorder }
+        switch style {
+        case .primary:
+            return CueInColors.accentFocus.opacity(0.35)
+        case .secondary:
+            return CueInColors.cardBorder
+        case .destructive:
+            return CueInColors.danger.opacity(0.28)
+        }
     }
 }
 
@@ -753,7 +1049,9 @@ private struct AppNavigationLayoutSettingsView: View {
     @AppStorage(TodayDisplayPreferences.taskLedViewMode) private var taskLedViewModeRaw
         = TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue
     @Environment(\.dismiss) private var dismiss
+    #if os(iOS)
     @State private var editMode: EditMode = .active
+    #endif
 
     private var taskLedPresentation: TodayDisplayPreferences.TaskLedViewMode {
         TodayDisplayPreferences.TaskLedViewMode(rawValue: taskLedViewModeRaw) ?? .timeline
@@ -832,12 +1130,13 @@ private struct AppNavigationLayoutSettingsView: View {
                 }
             }
             .scrollContentBackground(.hidden)
+            #if os(iOS)
             .environment(\.editMode, $editMode)
+            #endif
         }
         .navigationTitle("Navbar")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .cueInNavigationBarTitleDisplayMode(.inline)
+        .cueInNavigationToolbarMaterial()
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }
@@ -847,6 +1146,12 @@ private struct AppNavigationLayoutSettingsView: View {
         }
         .onAppear {
             storedTabsRaw = AppTab.storageValue(for: selectedTabs)
+        }
+        .onChange(of: storedTabsRaw) { _, _ in
+            CueInSyncRuntimeBridge.shared.recordAppLayoutSnapshot()
+        }
+        .onChange(of: taskLedViewModeRaw) { _, _ in
+            CueInSyncRuntimeBridge.shared.recordAppLayoutSnapshot()
         }
     }
 

@@ -25,7 +25,7 @@ struct ProjectDetailView: View {
             .padding(.bottom, CueInSpacing.huge)
         }
         .background(CueInColors.background)
-        .navigationBarTitleDisplayMode(.inline)
+        .cueInNavigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 if let project {
@@ -39,7 +39,7 @@ struct ProjectDetailView: View {
                     }
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
                 Menu {
                     Button { creatingTask = true } label: {
                         Label("Add task", systemImage: "plus.circle")

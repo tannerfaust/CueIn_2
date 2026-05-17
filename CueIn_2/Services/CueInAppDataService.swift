@@ -18,6 +18,7 @@ enum CueInAppDataService {
 
     @MainActor
     static func removeGimmickDemoData() {
+        CueInSyncRuntimeBridge.shared.recordWorkspaceDeletion()
         UserDefaults.standard.set(true, forKey: CueInAppDataKeys.gimmickDemoRemoved)
         TasksStore.shared.clearAllTasksData()
         GoalStrategyStore.shared.clearAllGoalsData()

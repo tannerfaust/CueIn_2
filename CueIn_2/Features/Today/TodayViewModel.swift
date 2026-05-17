@@ -1,6 +1,10 @@
 import SwiftUI
 import Observation
+#if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 // MARK: - ExecutionTimerHolder
 /// Holds the clock `Timer` off the `@Observable` graph so `deinit` can invalidate safely
@@ -93,6 +97,9 @@ final class TodayViewModel {
     private var taskLeadBlocks: [DayBlock]
     private var formulaBlocks: [DayBlock] = []
     private var futurePinnedFormulaBlocks: [DayBlock] = []
+    /// Bumps only on user-driven preview structure edits (blocks / tasks / pins). Reset when a template is (re)materialized or saved.
+    private var formulaPreviewStructureEditGeneration: UInt = 0
+    private var formulaPreviewStructureCleanGeneration: UInt = 0
 
     private let dayRunPlanner: DayRunPlanning
     private let executionReflow: ExecutionReflow
@@ -242,6 +249,7 @@ final class TodayViewModel {
         guard lifecycleObservers.isEmpty else { return }
         let center = NotificationCenter.default
 
+        #if os(iOS)
         let foreground = center.addObserver(
             forName: UIApplication.willEnterForegroundNotification,
             object: nil,
@@ -283,6 +291,49 @@ final class TodayViewModel {
                 self.deriveBlockStates()
             }
         }
+        #elseif os(macOS)
+        let foreground = center.addObserver(
+            forName: NSApplication.willBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshClockFromSystem()
+            }
+        }
+
+        let active = center.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshClockFromSystem()
+            }
+        }
+
+        let significantTime = center.addObserver(
+            forName: NSNotification.Name("NSSystemClockDidChangeNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshClockFromSystem()
+            }
+        }
+
+        let background = center.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.currentTime = Date()
+                self.deriveBlockStates()
+            }
+        }
+        #endif
 
         lifecycleObservers = [foreground, active, significantTime, background]
     }
@@ -505,6 +556,43 @@ final class TodayViewModel {
         dayEngineMode == .formulaBased && formulaRunStartedAt == nil && !isFormulaRunStopped
     }
 
+    /// Short label for the navigation bar in Schedule mode: saved template name, or a neutral draft label when there are blocks but no library selection.
+    var formulaScheduleNavigationTitle: String {
+        guard isFormulaMode else { return "" }
+        if let name = selectedFormula?.name.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return name
+        }
+        if !todayScheduleBlocks.isEmpty {
+            return "Draft schedule"
+        }
+        return "Blocks"
+    }
+
+    /// `true` when the selected template is one of the user's saved library schedules (not a bundled sample).
+    var isSelectedFormulaUserSavedSchedule: Bool {
+        guard let id = selectedFormulaID else { return false }
+        return FormulaLibraryService.customSchedules().contains(where: { $0.id == id })
+    }
+
+    /// Seed values for ``FormulaScheduleSaveSheet`` when there is no selected template (e.g. after Clear schedule, then building from blocks).
+    var formulaScheduleSaveSheetSeed: (name: String, symbol: String, summary: String) {
+        if let formula = selectedFormula {
+            return (formula.name, formula.symbol, formula.summary)
+        }
+        let name = FormulaLibraryService.uniquedScheduleDisplayName(
+            startingWith: "My schedule",
+            excludingScheduleID: nil
+        )
+        return (name, "calendar", "")
+    }
+
+    /// `true` only after the user changes preview blocks (add / remove / reorder / edit / unpin, etc.). Resets when the template is loaded or successfully saved.
+    var isFormulaPreviewScheduleDirty: Bool {
+        guard isFormulaPreviewing else { return false }
+        guard !scheduleBlocksForLibraryTemplateRoundTrip().isEmpty else { return false }
+        return formulaPreviewStructureEditGeneration != formulaPreviewStructureCleanGeneration
+    }
+
     var isFormulaSchedulePaused: Bool { formulaSchedulePausedAt != nil }
 
     /// Extends the planned day end with elapsed pause time so running-line progress stays continuous across resume.
@@ -670,14 +758,7 @@ final class TodayViewModel {
         }
 
         if isFormulaPreviewing {
-            guard let formula = selectedFormula else { return "" }
-            let filledCount = formula.executionFilledBlockCount
-            let todayCount = todayScheduleBlocks.count
-            let blockLabel = "\(todayCount) \(todayCount == 1 ? "block" : "blocks")"
-            if filledCount > 0 {
-                return "\(blockLabel) · \(filledCount) fill from execution"
-            }
-            return "\(blockLabel) · \(formula.totalTaskCount) tasks"
+            return ""
         }
 
         if isFormulaSchedulePaused {
@@ -1271,10 +1352,12 @@ final class TodayViewModel {
     }
 
     @MainActor
-    func saveCreatedFormula(_ formula: DayFormulaTemplate) {
-        FormulaLibraryService.saveCustomSchedule(formula)
+    @discardableResult
+    func saveCreatedFormula(_ formula: DayFormulaTemplate) -> Bool {
+        guard FormulaLibraryService.saveCustomSchedule(formula) else { return false }
         availableFormulas = FormulaLibraryService.allSchedules
         selectFormula(formula.id)
+        return true
     }
 
     /// Rebuilds the preview timeline from accordion drafts (before the schedule starts).
@@ -1303,6 +1386,7 @@ final class TodayViewModel {
         formulaBlocks = blocks
         deriveBlockStates()
         persistCurrentBlocks()
+        markFormulaPreviewScheduleStructureChangedIfPreviewing()
     }
 
     /// Creates a new user-saved algorithm from a starter block and selects it for inline editing.
@@ -1311,54 +1395,184 @@ final class TodayViewModel {
         let draft = ScheduleBlockDraft.routineTemplate()
         let blockTemplate = draft.toFormulaBlockTemplate().copyWithNewID()
         let totalM = max(1, blockTemplate.durationMinutes)
+        let uniqueName = FormulaLibraryService.uniquedScheduleDisplayName(startingWith: "Untitled blocks", excludingScheduleID: nil)
         let formula = DayFormulaTemplate(
             id: UUID(),
-            name: "Untitled Algorithm",
+            name: uniqueName,
             symbol: "calendar",
             summary: "1 block · \(ScheduleBlockFormat.durationLabel(minutes: totalM))",
             targetDurationMinutes: max(5, totalM),
             rules: [],
             blocks: [blockTemplate]
         )
-        FormulaLibraryService.saveCustomSchedule(formula)
+        guard FormulaLibraryService.saveCustomSchedule(formula) else { return }
         availableFormulas = FormulaLibraryService.allSchedules
         selectFormula(formula.id)
     }
 
-    /// Persists the current preview blocks to the formula library (new entry when editing a bundled template).
+    /// Persists the current preview blocks to the formula library.
     @MainActor
-    func saveCurrentPreviewAlgorithmToLibrary(name: String, symbol: String) {
-        guard isFormulaPreviewing else { return }
+    @discardableResult
+    func saveCurrentPreviewSchedule(
+        name: String,
+        symbol: String,
+        summary userSummary: String,
+        intent: FormulaScheduleSaveIntent
+    ) -> Bool {
+        guard isFormulaPreviewing else { return false }
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else { return }
+        guard !trimmedName.isEmpty else { return false }
 
-        let sorted = todayScheduleBlocks.sorted { $0.startTime < $1.startTime }
-        let blockTemplates: [DayFormulaBlockTemplate] = sorted.compactMap { block in
+        let blockTemplates = blockTemplatesForLibrarySaveFromPreview()
+        guard !blockTemplates.isEmpty else { return false }
+
+        let customIDs = Set(FormulaLibraryService.customSchedules().map(\.id))
+        let isUserCustom = selectedFormulaID.map { customIDs.contains($0) } ?? false
+
+        let formulaID: UUID
+        switch intent {
+        case .updateExisting:
+            guard isUserCustom, let sid = selectedFormulaID else { return false }
+            formulaID = sid
+        case .saveAsNew:
+            formulaID = UUID()
+        }
+
+        let nameExclusionForUniqueness: UUID? = (intent == .updateExisting) ? formulaID : nil
+        if FormulaLibraryService.existingScheduleConflictingWithName(trimmedName, excludingScheduleID: nameExclusionForUniqueness) != nil {
+            return false
+        }
+
+        let totalM = blockTemplates.reduce(0) { $0 + max($1.durationMinutes, 1) }
+        let rules = selectedFormula?.rules ?? []
+
+        let summaryTrimmed = userSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let autoSummary = "\(blockTemplates.count) \(blockTemplates.count == 1 ? "block" : "blocks") · \(ScheduleBlockFormat.durationLabel(minutes: totalM))"
+        let summary = summaryTrimmed.isEmpty ? autoSummary : summaryTrimmed
+
+        let formula = DayFormulaTemplate(
+            id: formulaID,
+            name: trimmedName,
+            symbol: symbol,
+            summary: summary,
+            targetDurationMinutes: max(totalM, 5),
+            rules: rules,
+            blocks: blockTemplates
+        )
+        guard FormulaLibraryService.saveCustomSchedule(formula) else { return false }
+        availableFormulas = FormulaLibraryService.allSchedules
+        selectFormula(formula.id)
+        return true
+    }
+
+    // MARK: - Formula preview save visibility (explicit user edits)
+
+    private struct FormulaScheduleTaskSemanticSnapshot: Codable, Equatable {
+        var title: String
+        var isPrimary: Bool
+        var isRepeating: Bool
+        var plannerTaskItemID: UUID?
+        var field: String?
+        var project: String?
+        var folder: String?
+
+        init(task: DayTask) {
+            title = task.title
+            isPrimary = task.isPrimary
+            isRepeating = task.isRepeating
+            plannerTaskItemID = task.plannerTaskItemID
+            field = task.field
+            project = task.project
+            folder = task.folder
+        }
+    }
+
+    private struct FormulaScheduleBlockSemanticSnapshot: Codable, Equatable {
+        var title: String
+        var type: BlockType
+        var durationMinutes: Int
+        var flowMode: BlockFlowMode
+        var taskSource: ScheduleBlockTaskSource
+        var fillMatchesType: BlockType?
+        var fillRule: ScheduleFillRule?
+        var tasks: [FormulaScheduleTaskSemanticSnapshot]
+        var isRepeatable: Bool
+        var pinsToClock: Bool
+        var fixedClockMinutesFromDayStart: Int?
+        var schedulingPriority: Int?
+        var compactPresentation: Bool
+        var locksPlannedDuration: Bool
+        var timelineGlyph: String?
+        var timelineAccentHex: UInt32?
+
+        init(template: DayFormulaBlockTemplate) {
+            title = template.title
+            type = template.type
+            durationMinutes = template.durationMinutes
+            flowMode = template.flowMode
+            taskSource = template.taskSource
+            fillMatchesType = template.fillMatchesType
+            fillRule = template.fillRule
+            tasks = template.tasks.map { FormulaScheduleTaskSemanticSnapshot(task: $0) }
+            isRepeatable = template.isRepeatable
+            pinsToClock = template.pinsToClock
+            fixedClockMinutesFromDayStart = template.fixedClockMinutesFromDayStart
+            schedulingPriority = template.schedulingPriority
+            compactPresentation = template.compactPresentation
+            locksPlannedDuration = template.locksPlannedDuration
+            timelineGlyph = template.timelineGlyph
+            timelineAccentHex = template.timelineAccentHex
+        }
+    }
+
+    /// Blocks that define the saved schedule shape (library / dirty checks). Uses full in-memory preview
+    /// strips so eligibility for the Today timeline (e.g. calendar-day filtering) cannot flip “dirty”
+    /// or hide Save when the user has not actually edited the schedule.
+    @MainActor
+    private func scheduleBlocksForLibraryTemplateRoundTrip() -> [DayBlock] {
+        blocks.filter { !$0.isAnchorBlock }.sorted { $0.startTime < $1.startTime }
+    }
+
+    @MainActor
+    private func blockTemplatesForLibrarySaveFromPreview() -> [DayFormulaBlockTemplate] {
+        scheduleBlocksForLibraryTemplateRoundTrip().compactMap { block in
             let draft = ScheduleBlockDraft(from: block)
             let t = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !t.isEmpty else { return nil }
             return draft.toFormulaBlockTemplate()
         }
-        guard !blockTemplates.isEmpty else { return }
+    }
 
-        let customIDs = Set(FormulaLibraryService.customSchedules().map(\.id))
-        let isUserCustom = selectedFormulaID.map { customIDs.contains($0) } ?? false
-        let formulaID = isUserCustom ? (selectedFormulaID ?? UUID()) : UUID()
+    private func libraryTemplateFingerprint(_ templates: [DayFormulaBlockTemplate]) -> String {
+        let snapshots = templates.map { FormulaScheduleBlockSemanticSnapshot(template: $0) }
+        let data = (try? JSONEncoder().encode(snapshots)) ?? Data()
+        return data.base64EncodedString()
+    }
 
-        let totalM = blockTemplates.reduce(0) { $0 + max($1.durationMinutes, 1) }
-        let rules = selectedFormula?.rules ?? []
-        let formula = DayFormulaTemplate(
-            id: formulaID,
-            name: trimmedName,
-            symbol: symbol,
-            summary: "\(blockTemplates.count) \(blockTemplates.count == 1 ? "block" : "blocks") · \(ScheduleBlockFormat.durationLabel(minutes: totalM))",
-            targetDurationMinutes: max(totalM, 5),
-            rules: rules,
-            blocks: blockTemplates
-        )
-        FormulaLibraryService.saveCustomSchedule(formula)
-        availableFormulas = FormulaLibraryService.allSchedules
-        selectFormula(formula.id)
+    @MainActor
+    private func previewBlockTemplatesMatchSelectedLibraryDefinition() -> Bool {
+        guard let def = selectedFormula?.blocks else { return false }
+        return libraryTemplateFingerprint(def) == libraryTemplateFingerprint(blockTemplatesForLibrarySaveFromPreview())
+    }
+
+    @MainActor
+    private func markFormulaPreviewScheduleStructureChangedIfPreviewing() {
+        guard isFormulaPreviewing else { return }
+        formulaPreviewStructureEditGeneration += 1
+    }
+
+    @MainActor
+    private func resetFormulaPreviewStructureChangeTrackingToClean() {
+        formulaPreviewStructureCleanGeneration = formulaPreviewStructureEditGeneration
+    }
+
+    /// After undo restores blocks, clear “dirty” if the preview again matches the selected library template.
+    @MainActor
+    private func reconcileFormulaPreviewDirtyGenerationAfterUndoIfNeeded() {
+        guard isFormulaPreviewing else { return }
+        if previewBlockTemplatesMatchSelectedLibraryDefinition() {
+            resetFormulaPreviewStructureChangeTrackingToClean()
+        }
     }
 
     @MainActor
@@ -1660,6 +1874,9 @@ final class TodayViewModel {
 
             deriveBlockStates()
         }
+        if isFormulaPreviewing, blocks.map(\.id) != idsBefore {
+            markFormulaPreviewScheduleStructureChangedIfPreviewing()
+        }
         return true
     }
 
@@ -1941,6 +2158,9 @@ final class TodayViewModel {
             }
         }
         persistCurrentBlocks()
+        if isFormulaPreviewing {
+            markFormulaPreviewScheduleStructureChangedIfPreviewing()
+        }
     }
 
     private func formulaSegmentStart(in orderedBlocks: [DayBlock], sourceIndex: Int, runStart: Date) -> Date {
@@ -1988,6 +2208,10 @@ final class TodayViewModel {
         }
         persistCurrentBlocks()
 
+        if isFormulaPreviewing {
+            markFormulaPreviewScheduleStructureChangedIfPreviewing()
+        }
+
         CueInToastCenter.shared.show(
             icon: "pin.slash.fill",
             title: "Pin removed",
@@ -2003,6 +2227,7 @@ final class TodayViewModel {
                 injectScheduleBlocksIntoTimeline()
             }
             persistCurrentBlocks()
+            self.reconcileFormulaPreviewDirtyGenerationAfterUndoIfNeeded()
         }
     }
 
@@ -2050,6 +2275,9 @@ final class TodayViewModel {
         ) { [self] in
             self.restoreFormulaBlockAfterDeletion(removed, insertionIndex: index, savedNominal: savedNominal, wasActiveWhenDeleted: wasActive)
         }
+        if isFormulaPreviewing {
+            markFormulaPreviewScheduleStructureChangedIfPreviewing()
+        }
     }
 
     @MainActor
@@ -2085,6 +2313,7 @@ final class TodayViewModel {
             }
         }
         persistCurrentBlocks()
+        reconcileFormulaPreviewDirtyGenerationAfterUndoIfNeeded()
     }
 
     @MainActor
@@ -2259,6 +2488,9 @@ final class TodayViewModel {
         }
 
         persistCurrentBlocks()
+        if isFormulaPreviewing {
+            markFormulaPreviewScheduleStructureChangedIfPreviewing()
+        }
     }
 
     @MainActor
@@ -2272,6 +2504,9 @@ final class TodayViewModel {
             injectScheduleBlocksIntoTimeline()
         }
         persistCurrentBlocks()
+        if isFormulaPreviewing {
+            markFormulaPreviewScheduleStructureChangedIfPreviewing()
+        }
     }
 
     @MainActor
@@ -2318,6 +2553,9 @@ final class TodayViewModel {
             }
         }
         persistCurrentBlocks()
+        if isFormulaPreviewing {
+            markFormulaPreviewScheduleStructureChangedIfPreviewing()
+        }
 
         CueInToastCenter.shared.show(
             icon: type.icon,
@@ -2411,6 +2649,9 @@ final class TodayViewModel {
            TodayDisplayPreferences.pullsTasksFromExecutionPoolPreference() {
             refillSchedulesFromPool()
         }
+        if isFormulaPreviewing {
+            markFormulaPreviewScheduleStructureChangedIfPreviewing()
+        }
 
         CueInToastCenter.shared.show(
             icon: fresh.type.icon,
@@ -2468,6 +2709,9 @@ final class TodayViewModel {
             injectScheduleBlocksIntoTimeline()
         }
         persistCurrentBlocks()
+        if isFormulaPreviewing {
+            markFormulaPreviewScheduleStructureChangedIfPreviewing()
+        }
     }
 
     @MainActor
@@ -3865,6 +4109,7 @@ final class TodayViewModel {
             formulaTargetDayEnd = nil
             formulaNominalMinutesByBlockID.removeAll(keepingCapacity: true)
             deriveBlockStates()
+            resetFormulaPreviewStructureChangeTrackingToClean()
             return
         }
 
@@ -3874,6 +4119,7 @@ final class TodayViewModel {
         formulaStoppedAt = nil
         formulaTargetDayEnd = nil
         deriveBlockStates()
+        resetFormulaPreviewStructureChangeTrackingToClean()
     }
 
     @MainActor
@@ -3998,6 +4244,9 @@ final class TodayViewModel {
         }
         Self.persistFormulaSelection(selectedFormulaID)
         persistCurrentBlocks()
+        if formulaRunStartedAt == nil, formulaStoppedAt == nil {
+            resetFormulaPreviewStructureChangeTrackingToClean()
+        }
     }
 
     private func persistFormulaRuntimeState() {

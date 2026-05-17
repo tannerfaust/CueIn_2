@@ -116,7 +116,7 @@ struct BlockTemplateLibrarySheet: View {
             .scrollContentBackground(.hidden)
             .searchable(text: $query, prompt: "Search blocks")
             .navigationTitle("Block library")
-            .navigationBarTitleDisplayMode(.inline)
+            .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close", action: onDismiss)

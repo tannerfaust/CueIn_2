@@ -10,20 +10,18 @@ struct TasksView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            TasksHomeView(
-                store: store,
-                onCreateTask: presentCreateTask,
-                onOpenTask: presentTask,
-                onOpenSearch: presentSearch,
-                onCreateField: presentCreateField,
-                onCreateProject: presentCreateProject,
-                onPoolMove: showPoolActionToast,
-                onDeleteTask: deleteTaskWithUndo
-            )
-            .navigationDestination(for: TasksRoute.self, destination: destination)
-            .background(CueInColors.background.ignoresSafeArea())
-        }
+        TasksHomeView(
+            store: store,
+            onCreateTask: presentCreateTask,
+            onOpenTask: presentTask,
+            onOpenSearch: presentSearch,
+            onCreateField: presentCreateField,
+            onCreateProject: presentCreateProject,
+            onPoolMove: showPoolActionToast,
+            onDeleteTask: deleteTaskWithUndo,
+            routeDestination: destination
+        )
+        .background(CueInColors.background.ignoresSafeArea())
         .cueInPreferredColorScheme()
         .onAppear {
             knownTodayTaskIDs = Set(store.todayTasks.map(\.id))

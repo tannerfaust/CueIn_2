@@ -26,7 +26,7 @@ struct ScheduleBlockContextMenu: View {
 
     @ViewBuilder
     private var menuSurface: some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             GlassEffectContainer(spacing: 7) {
                 menuContent
                     .menuGlassBackground(interactive: true)
@@ -109,7 +109,7 @@ private struct MenuGlassBackground: ViewModifier {
     let interactive: Bool
 
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             content
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .glassEffect(
@@ -148,7 +148,7 @@ struct AddTaskToBlockSheet: View {
             VStack(alignment: .leading, spacing: CueInSpacing.md) {
                 TextField("Task name", text: $text)
                     .font(CueInTypography.bodyMedium)
-                    .textInputAutocapitalization(.sentences)
+                    .cueInSentencesAutocapitalization()
                     .padding(CueInSpacing.md)
                     .background(CueInColors.surfaceSecondary)
                     .clipShape(RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous))

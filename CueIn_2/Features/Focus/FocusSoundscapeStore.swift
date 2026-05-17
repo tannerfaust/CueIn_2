@@ -127,7 +127,9 @@ final class FocusSoundscapeStore {
     func stopPlayback() {
         engine.stop()
         isPlaying = false
+        #if os(iOS)
         try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        #endif
     }
 
     func resetForFreshInstall() {
@@ -146,8 +148,10 @@ final class FocusSoundscapeStore {
     }
 
     private func configureSessionIfNeeded() throws {
+        #if os(iOS)
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
         try session.setActive(true, options: [])
+        #endif
     }
 }
