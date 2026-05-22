@@ -78,14 +78,18 @@ private struct FloatingCircularGlassIconButton: View {
             if let longPress = onLongPress {
                 coreButton
                     .simultaneousGesture(
-                        LongPressGesture(minimumDuration: 0.48)
-                            .onEnded { _ in
-                                suppressNextTapAfterLongPress = true
-                                sensoryTrigger.toggle()
-                                longPress()
-                            }
-                    )
-            } else {
+                LongPressGesture(minimumDuration: 0.48)
+                    .onEnded { _ in
+                        suppressNextTapAfterLongPress = true
+                        sensoryTrigger.toggle()
+                        longPress()
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(350))
+                            suppressNextTapAfterLongPress = false
+                        }
+                    }
+            )
+        } else {
                 coreButton
             }
         }

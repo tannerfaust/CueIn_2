@@ -97,8 +97,23 @@ struct TaskRowView: View {
             toggleFallback()
             return
         }
+        let willBeCompleted = status == .completed
+        let shouldToggleBlockTask = willBeCompleted != task.isCompleted
+
         TasksStore.shared.setTodayTodoTaskStatus(id: id, status: status)
-        TodayViewModel.shared.syncExecutionTimelineAfterExternalTaskEdit()
+
+        if shouldToggleBlockTask {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) {
+                animateCheck = willBeCompleted
+                onToggle()
+            }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(350))
+                animateCheck = false
+            }
+        } else {
+            TodayViewModel.shared.syncExecutionTimelineAfterExternalTaskEdit()
+        }
     }
 
     private func toggleFallback() {

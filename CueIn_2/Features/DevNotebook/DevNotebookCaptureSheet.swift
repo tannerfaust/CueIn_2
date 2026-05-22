@@ -5,10 +5,12 @@ import SwiftUI
 struct DevNotebookCaptureSheet: View {
     @Binding var isPresented: Bool
     var defaultKind: DevNotebookEntryKind = .moduleIdea
-    var onSave: (DevNotebookEntryKind, String) -> Void
+    var onSave: (DevNotebookEntryKind, DevNotebookAIModel, String) -> Void
 
     @AppStorage("cuein.devNotebook.lastEntryKind") private var lastKindRaw = DevNotebookEntryKind.moduleIdea.rawValue
+    @AppStorage("cuein.devNotebook.lastAIModel") private var lastAIModelRaw = DevNotebookAIModel.cursor.rawValue
     @State private var selectedKind: DevNotebookEntryKind = .moduleIdea
+    @State private var selectedAIModel: DevNotebookAIModel = .cursor
     @State private var bodyText = ""
     @FocusState private var editorFocused: Bool
 
@@ -30,6 +32,7 @@ struct DevNotebookCaptureSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: CueInSpacing.lg) {
                         kindPicker
+                        aiModelPicker
 
                         VStack(alignment: .leading, spacing: CueInSpacing.sm) {
                             Text("Will save with")
@@ -81,8 +84,8 @@ struct DevNotebookCaptureSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        persistKind()
-                        onSave(selectedKind, trimmedBody)
+                        persistSelections()
+                        onSave(selectedKind, selectedAIModel, trimmedBody)
                         isPresented = false
                     }
                     .disabled(!canSave)
@@ -95,6 +98,9 @@ struct DevNotebookCaptureSheet: View {
                 selectedKind = parsed
             } else {
                 selectedKind = defaultKind
+            }
+            if let parsedModel = DevNotebookAIModel(rawValue: lastAIModelRaw) {
+                selectedAIModel = parsedModel
             }
             editorFocused = true
         }
@@ -116,11 +122,54 @@ struct DevNotebookCaptureSheet: View {
         }
     }
 
+    private var aiModelPicker: some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.sm) {
+            Text("Delegate to")
+                .font(CueInTypography.captionMedium)
+                .foregroundStyle(CueInColors.textTertiary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: CueInSpacing.sm) {
+                    ForEach(DevNotebookAIModel.allCases) { model in
+                        aiModelChip(model)
+                    }
+                }
+            }
+        }
+    }
+
+    private func aiModelChip(_ model: DevNotebookAIModel) -> some View {
+        let selected = selectedAIModel == model
+        return Button {
+            selectedAIModel = model
+            persistSelections()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: model.systemImage)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(model.title)
+                    .font(CueInTypography.captionMedium)
+            }
+            .padding(.horizontal, CueInSpacing.md)
+            .padding(.vertical, CueInSpacing.sm)
+            .background(
+                selected ? model.accent.opacity(0.28) : CueInColors.surfaceSecondary,
+                in: RoundedRectangle(cornerRadius: CueInSpacing.chipRadius + 4, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CueInSpacing.chipRadius + 4, style: .continuous)
+                    .stroke(selected ? model.accent.opacity(0.55) : Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .foregroundStyle(selected ? Color.white : CueInColors.textSecondary)
+        }
+        .buttonStyle(.plain)
+    }
+
     private func kindChip(_ kind: DevNotebookEntryKind) -> some View {
         let selected = selectedKind == kind
         return Button {
             selectedKind = kind
-            persistKind()
+            persistSelections()
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: kind.systemImage)
@@ -145,12 +194,13 @@ struct DevNotebookCaptureSheet: View {
         .buttonStyle(.plain)
     }
 
-    private func persistKind() {
+    private func persistSelections() {
         lastKindRaw = selectedKind.rawValue
+        lastAIModelRaw = selectedAIModel.rawValue
     }
 }
 
 #Preview {
-    DevNotebookCaptureSheet(isPresented: .constant(true)) { _, _ in }
+    DevNotebookCaptureSheet(isPresented: .constant(true)) { _, _, _ in }
         .cueInPreferredColorScheme()
 }

@@ -48,8 +48,12 @@ enum CueInSpacing {
 /// correct insets automatically.
 
 enum CueInLayout {
+    /// Shared horizontal margin for the bottom nav cluster and trailing action.
+    static let bottomChromeHorizontalMargin: CGFloat = 16
     /// Height of the floating tab bar itself (no action cluster).
     static let floatingBarHeight: CGFloat = 60
+    /// Visual gap between the tab capsule and the trailing action column.
+    static let bottomChromeSidecarSpacing: CGFloat = 12
 
     // MARK: Floating FAB column (execution + add)
 
@@ -83,6 +87,11 @@ enum CueInLayout {
     static func barBottomPadding(safeAreaBottom: CGFloat) -> CGFloat {
         // Slightly tighter on home-button phones so the bar sits a touch lower; notched devices use `offset` instead.
         safeAreaBottom == 0 ? 6 : 0
+    }
+
+    /// Lowers the custom bottom chrome into the same visual band as the iOS 26 native floating tab bar.
+    static func bottomChromeYOffset(safeAreaBottom: CGFloat) -> CGFloat {
+        safeAreaBottom > 0 ? 12 : 7
     }
 
     // MARK: - Top safe-area chrome (Today + paged Execution day nav)

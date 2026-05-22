@@ -20,6 +20,7 @@ struct AppShellView: View {
     @AppStorage(TodayDisplayPreferences.taskLedViewMode) private var taskLedViewModeRaw
         = TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue
     @AppStorage(AppTab.storageKey) private var storedTabsRaw = AppTab.storageValue(for: AppTab.defaultTabs)
+    @AppStorage(AppTab.selectedStorageKey) private var storedSelectedTabRaw = AppTab.taskLed.rawValue
     @State private var selectedTab: AppTab = .taskLed
     @State private var showShellQuickCapture = false
     @State private var showAntiTodoCapture = false
@@ -30,6 +31,8 @@ struct AppShellView: View {
     @State private var auxiliaryTaskSheet: AuxiliaryTaskSheet?
     @State private var quickCaptureEditorDraft: TaskItem?
     @State private var quickCaptureExpanded = false
+    @State private var quickCaptureFields: [Field] = []
+    @State private var quickCaptureProjects: [Project] = []
     @State private var showExecutionSheet = false
     @State private var showTimelineCapture = false
     @State private var showScheduleBlockTaskSheet = false
@@ -39,8 +42,8 @@ struct AppShellView: View {
     @State private var auxiliaryTabOpenedFromHub: AppTab? = nil
     @AppStorage("cuein.devNotebook.showCaptureButton") private var showDevNotebookCaptureButton = false
     @Bindable private var toastCenter = CueInToastCenter.shared
-    @Bindable private var tasksStore = TasksStore.shared
-    @Bindable private var todayViewModel = TodayViewModel.shared
+    @State private var tasksStore = TasksStore.shared
+    @State private var todayViewModel = TodayViewModel.shared
     @Bindable private var devNotebookContext = DevNotebookContext.shared
     @Environment(\.scenePhase) private var scenePhase
 
@@ -77,7 +80,7 @@ struct AppShellView: View {
             quickCaptureComposerOverlay
         }
         .onAppear {
-            selectedTab = resolvedSelectedTab
+            selectedTab = launchSelectedTab
             applyNavigationSideEffects(for: selectedTab)
             DevNotebookContext.shared.selectedTab = selectedTab
         }
@@ -85,6 +88,7 @@ struct AppShellView: View {
             await SupabaseAuthStore.shared.validateStoredSession()
         }
         .onChange(of: selectedTab) { _, newValue in
+            storedSelectedTabRaw = newValue.rawValue
             if fabOverflowPresented { fabOverflowPresented = false }
             if newValue != .tasks {
                 tasksStore.clearCompleteUndo()
@@ -189,10 +193,11 @@ struct AppShellView: View {
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }
         .sheet(isPresented: $showDevCaptureSheet) {
-            DevNotebookCaptureSheet(isPresented: $showDevCaptureSheet, defaultKind: .moduleIdea) { kind, body in
+            DevNotebookCaptureSheet(isPresented: $showDevCaptureSheet, defaultKind: .moduleIdea) { kind, aiModel, body in
                 let snap = DevNotebookContext.shared.makeSnapshot()
                 DevNotebookStore.shared.add(DevNotebookEntry(
                     kind: kind,
+                    aiModel: aiModel,
                     body: body,
                     moduleLabel: snap.moduleLabel,
                     contextLine: snap.contextLine
@@ -202,7 +207,6 @@ struct AppShellView: View {
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }
-        .animation(.easeInOut(duration: 0.18), value: selectedTab)
         .onReceive(NotificationCenter.default.publisher(for: .cueInOpenFocus)) { _ in
             auxiliaryTabOpenedFromHub = .pomodoro
             selectedTab = .pomodoro
@@ -241,7 +245,7 @@ struct AppShellView: View {
     private var quickCaptureComposerOverlay: some View {
         if quickCaptureComposerIsPresented {
             ZStack(alignment: .bottom) {
-                Color.black.opacity(quickCaptureExpanded ? 0.10 : 0.001)
+                (quickCaptureExpanded ? Color.black.opacity(0.10) : Color.clear)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -251,6 +255,9 @@ struct AppShellView: View {
                 VStack(spacing: 0) {
                     quickCaptureComposerHandle
                     QuickCaptureSheet(
+                        store: .shared,
+                        fields: quickCaptureFields,
+                        projects: quickCaptureProjects,
                         onDismiss: dismissQuickCaptureComposer,
                         onExpand: openQuickCaptureEditor,
                         showsDragHandle: false,
@@ -267,7 +274,6 @@ struct AppShellView: View {
                         style: .continuous
                     )
                 )
-                .shadow(color: .black.opacity(0.08), radius: 16, x: 0, y: -4)
                 .frame(maxWidth: .infinity, alignment: .bottom)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .gesture(quickCaptureComposerDrag)
@@ -313,7 +319,7 @@ struct AppShellView: View {
     }
 
     private var quickCaptureComposerAnimation: Animation {
-        .interactiveSpring(response: 0.28, dampingFraction: 0.9, blendDuration: 0.08)
+        .snappy(duration: 0.18, extraBounce: 0)
     }
 
     private var quickCaptureComposerIsPresented: Bool {
@@ -323,10 +329,14 @@ struct AppShellView: View {
     private func presentQuickCaptureComposer(timeline: Bool = false) {
         dismissFabOverflow()
         quickCaptureExpanded = false
-        if timeline {
-            showTimelineCapture = true
-        } else {
-            showShellQuickCapture = true
+        quickCaptureFields = tasksStore.fields
+        quickCaptureProjects = tasksStore.projects
+        withAnimation(quickCaptureComposerAnimation) {
+            if timeline {
+                showTimelineCapture = true
+            } else {
+                showShellQuickCapture = true
+            }
         }
     }
 
@@ -385,12 +395,12 @@ struct AppShellView: View {
                 barContents
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, CueInLayout.bottomChromeHorizontalMargin)
         // Home-button iPhones (SE 2020/2022) have safeAreaInsets.bottom == 0,
         // so add breathing room above the bezel. Notched / Dynamic-Island phones
         // already have the home-indicator zone; let the glass float into it.
         .padding(.bottom, CueInLayout.barBottomPadding(safeAreaBottom: screenSafeAreaBottom))
-        .offset(y: screenSafeAreaBottom > 0 ? 9 : 3)
+        .offset(y: CueInLayout.bottomChromeYOffset(safeAreaBottom: screenSafeAreaBottom))
         .ignoresSafeArea(edges: .bottom)
     }
 
@@ -431,8 +441,7 @@ struct AppShellView: View {
             || showScheduleBlockTaskSheet
     }
 
-    /// Clears the floating tab bar + FAB column using the **same** heights as on-screen chrome
-    /// (not the full bolt stack height from ``CueInLayout`` when the bolt is hidden).
+    /// Clears the floating tab bar + FAB column using the same heights as on-screen chrome.
     private var shellToastBottomInset: CGFloat {
         let showExecution = isTodayDestination(selectedTab) && shouldShowFloatingExecutionButton
         let fabColumnHeight: CGFloat = showExecution
@@ -441,7 +450,7 @@ struct AppShellView: View {
         let chromeHeight = max(CueInLayout.floatingBarHeight, fabColumnHeight)
         return chromeHeight
             + CueInLayout.barBottomPadding(safeAreaBottom: screenSafeAreaBottom)
-            + (screenSafeAreaBottom > 0 ? 9 : 3)
+            + CueInLayout.bottomChromeYOffset(safeAreaBottom: screenSafeAreaBottom)
             + 8
     }
 
@@ -473,7 +482,7 @@ struct AppShellView: View {
     }
 
     private var barContents: some View {
-        HStack(alignment: .bottom, spacing: 12) {
+        HStack(alignment: .bottom, spacing: CueInLayout.bottomChromeSidecarSpacing) {
             FloatingTabBar(selectedTab: $selectedTab, tabs: visibleTabs)
             floatingFabColumn
         }
@@ -485,6 +494,19 @@ struct AppShellView: View {
 
     private var resolvedSelectedTab: AppTab {
         visibleTabs.contains(selectedTab) ? selectedTab : (visibleTabs.first ?? .hub)
+    }
+
+    private var launchSelectedTab: AppTab {
+        if todayViewModel.hasFormulaRunStarted, visibleTabs.contains(.schedule) {
+            return .schedule
+        }
+
+        let migratedRaw = AppTab.migrateLegacyTabToken(storedSelectedTabRaw)
+        if let storedTab = AppTab(rawValue: migratedRaw), visibleTabs.contains(storedTab) {
+            return storedTab
+        }
+
+        return resolvedSelectedTab
     }
 
     private var floatingPlusAccessibilityLabel: String {

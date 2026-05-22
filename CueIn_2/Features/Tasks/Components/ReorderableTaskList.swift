@@ -25,6 +25,7 @@ struct ReorderableTaskList: View {
 
     var body: some View {
         let ordered = store.orderedTasks(tasks, listKey: listKey)
+        let queuedTodayIDs = store.todayTaskIDSet
 
         VStack(alignment: .leading, spacing: 0) {
             if let title = sectionTitle {
@@ -34,6 +35,7 @@ struct ReorderableTaskList: View {
 
             LazyVStack(spacing: 0) {
                 ForEach(Array(ordered.enumerated()), id: \.element.id) { index, t in
+                    let isQueuedForToday = queuedTodayIDs.contains(t.id)
                     TaskItemRow(
                         task: t,
                         store: store,
@@ -48,9 +50,9 @@ struct ReorderableTaskList: View {
                         onSchedule: { store.scheduleTask(t.id, on: $0) },
                         onMoreActions: { onMoreActions(t) },
                         compactStyle: true,
-                        isQueuedForToday: dayPlanner.isPlannerTaskQueuedForToday(t.id),
+                        isQueuedForToday: isQueuedForToday,
                         onQueueToday: {
-                            let wasQueued = dayPlanner.isPlannerTaskQueuedForToday(t.id)
+                            let wasQueued = queuedTodayIDs.contains(t.id)
                             let moved = store.tasks.first(where: { $0.id == t.id }) ?? t
                             onPoolMove(moved, !wasQueued)
                             withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
@@ -63,7 +65,7 @@ struct ReorderableTaskList: View {
                             }
                         }
                     )
-                    .transition(poolTransition(isQueued: dayPlanner.isPlannerTaskQueuedForToday(t.id)))
+                    .transition(poolTransition(isQueued: isQueuedForToday))
 
                     if index < ordered.count - 1 {
                         Rectangle()

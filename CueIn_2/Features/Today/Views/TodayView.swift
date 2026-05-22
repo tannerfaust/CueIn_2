@@ -11,6 +11,8 @@ struct TodayView: View {
     @State private var showFormulaScheduleSaveSheet = false
     @State private var showSettingsSheet = false
     @State private var showScheduleStartSheet = false
+    /// Frozen “now” for the start sheet preflight; without this, every parent tick re-runs preflight with a later `Date()` and the run window shrinks (issues can appear seconds after open).
+    @State private var scheduleStartRunAnchor: Date?
     @State private var draftScheduleEnd = Date().addingTimeInterval(8 * 3600)
     @State private var timelineEditorRoute: TaskTimelineEditorRoute?
     @State private var draggedScheduleBlockID: UUID?
@@ -328,7 +330,8 @@ struct TodayView: View {
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }
         .sheet(isPresented: $showScheduleStartSheet) {
-            let startPreview = viewModel.scheduleStartPreview(targetEnd: draftScheduleEnd)
+            let runAnchor = scheduleStartRunAnchor ?? Date()
+            let startPreview = viewModel.scheduleStartPreview(targetEnd: draftScheduleEnd, runStart: runAnchor)
             ScheduleStartSetupSheet(
                 preview: startPreview,
                 draftScheduleEnd: $draftScheduleEnd,
@@ -348,9 +351,12 @@ struct TodayView: View {
                 },
                 onCancel: { showScheduleStartSheet = false }
             )
-            .presentationDetents(startPreview.preflightIssues.isEmpty ? [.medium] : [.large])
+            .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
+        .onChange(of: showScheduleStartSheet) { _, isOpen in
+            if !isOpen { scheduleStartRunAnchor = nil }
         }
         .sheet(item: $timelineEditorRoute, onDismiss: {
             viewModel.syncExecutionTimelineAfterExternalTaskEdit()
@@ -612,6 +618,8 @@ struct TodayView: View {
         if viewModel.isFormulaRunStopped {
             viewModel.startFormulaDay()
         } else {
+            let anchor = Date()
+            scheduleStartRunAnchor = anchor
             draftScheduleEnd = viewModel.defaultScheduleTargetEnd
             showScheduleStartSheet = true
         }

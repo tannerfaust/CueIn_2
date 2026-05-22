@@ -3,7 +3,7 @@ import Foundation
 // MARK: - CueInAppDataKeys
 
 enum CueInAppDataKeys {
-    /// When `true`, bundled demo content is removed: empty Tasks store and empty task-led Today blocks.
+    /// When `true`, bundled demo content is removed: empty Tasks store, empty Today blocks, and hidden bundled TimeMaps.
     static let gimmickDemoRemoved = "cuein.data.gimmickDemoRemoved.v1"
     /// When `true`, the bundled “Test day (empty blocks)” starter scheme is omitted from TimeMap lists and libraries.
     static let hideBundledDummyTestDayTimeMap = "cuein.data.hideBundledDummyTestDayTimeMap.v1"
@@ -22,17 +22,25 @@ enum CueInAppDataService {
     static func removeGimmickDemoData() {
         CueInSyncRuntimeBridge.shared.recordWorkspaceDeletion()
         UserDefaults.standard.set(true, forKey: CueInAppDataKeys.gimmickDemoRemoved)
+        UserDefaults.standard.set(true, forKey: CueInAppDataKeys.hideBundledDummyTestDayTimeMap)
         TasksStore.shared.clearAllTasksData()
         GoalStrategyStore.shared.clearAllGoalsData()
-        TodayViewModel.shared.resetSchedulePersistenceAndBlocks(useGimmickTaskLedSample: false)
+        TodayViewModel.shared.resetSchedulePersistenceAndBlocks(
+            useGimmickTaskLedSample: false,
+            formulaSelectionPolicy: .clear
+        )
     }
 
     @MainActor
     static func restoreGimmickDemoData() {
         UserDefaults.standard.set(false, forKey: CueInAppDataKeys.gimmickDemoRemoved)
+        UserDefaults.standard.set(false, forKey: CueInAppDataKeys.hideBundledDummyTestDayTimeMap)
         TasksStore.shared.replaceWithGimmickSeed()
         GoalStrategyStore.shared.replaceWithGimmickSeed()
-        TodayViewModel.shared.resetSchedulePersistenceAndBlocks(useGimmickTaskLedSample: true)
+        TodayViewModel.shared.resetSchedulePersistenceAndBlocks(
+            useGimmickTaskLedSample: true,
+            formulaSelectionPolicy: .restoreDefault
+        )
     }
 
     @MainActor
@@ -43,8 +51,11 @@ enum CueInAppDataService {
 
     @MainActor
     static func clearTodayScheduleState() {
-        let useSample = !UserDefaults.standard.bool(forKey: CueInAppDataKeys.gimmickDemoRemoved)
-        TodayViewModel.shared.resetSchedulePersistenceAndBlocks(useGimmickTaskLedSample: useSample)
+        let useSample = !isGimmickDemoRemoved
+        TodayViewModel.shared.resetSchedulePersistenceAndBlocks(
+            useGimmickTaskLedSample: useSample,
+            formulaSelectionPolicy: .clear
+        )
     }
 
     @MainActor
@@ -65,6 +76,7 @@ enum CueInAppDataService {
         TodayDisplayPreferences.removeAllStoredPreferenceKeys(from: defaults)
         defaults.removeObject(forKey: DayEngineMode.storageKey)
         defaults.removeObject(forKey: AppTab.storageKey)
+        defaults.removeObject(forKey: AppTab.selectedStorageKey)
         defaults.removeObject(forKey: CueInAppDataKeys.gimmickDemoRemoved)
         defaults.removeObject(forKey: CueInAppDataKeys.hideBundledDummyTestDayTimeMap)
         FormulaLibraryService.clearUserSavedTemplates()

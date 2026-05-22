@@ -1,5 +1,14 @@
 import SwiftUI
 
+// MARK: - CueInBottomSheet dismiss style
+
+enum CueInBottomSheetDismissStyle: Equatable {
+    /// Trailing “Done” (default for settings-style sheets).
+    case doneTrailing
+    /// Leading circular close control (modal-style).
+    case closeLeading
+}
+
 // MARK: - CueInBottomSheet
 /// Settings-style sheet shell: matches task / block editors — `NavigationStack`, blurred bar, scroll on app background.
 
@@ -21,6 +30,8 @@ struct CueInBottomSheet<Content: View>: View {
     var editorSaveForeground: Color = CueInColors.accentFocus
     var floatingAccessory: AnyView? = nil
     var floatingAccessoryThreshold: CGFloat = 170
+    /// Trailing “Done” vs leading close control.
+    var toolbarDismissStyle: CueInBottomSheetDismissStyle = .doneTrailing
     @ViewBuilder var content: () -> Content
 
     @State private var scrollOffset: CGFloat = 0
@@ -94,10 +105,31 @@ struct CueInBottomSheet<Content: View>: View {
                         }
                     }
                 } else {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done", action: onDismiss)
-                            .font(CueInTypography.bodyMedium)
-                            .foregroundStyle(CueInColors.accentFocus)
+                    switch toolbarDismissStyle {
+                    case .doneTrailing:
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done", action: onDismiss)
+                                .font(CueInTypography.bodyMedium)
+                                .foregroundStyle(CueInColors.accentFocus)
+                        }
+                    case .closeLeading:
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(action: onDismiss) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(CueInColors.textPrimary.opacity(0.55))
+                                    .frame(width: 30, height: 30)
+                                    .background(
+                                        Circle().fill(CueInColors.surfaceTertiary.opacity(0.95))
+                                    )
+                                    .overlay(
+                                        Circle()
+                                            .strokeBorder(CueInColors.cardBorder.opacity(0.45), lineWidth: 0.5)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Close")
+                        }
                     }
                 }
             }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - ScheduleStartSetupSheet
-/// Preflight before a Schedule becomes a live run.
+/// Preflight before a Schedule becomes a live run — kept minimal: one glance summary, end time, issues (if any), start.
 
 struct ScheduleStartSetupSheet: View {
     let preview: ScheduleStartPreview
@@ -11,193 +11,149 @@ struct ScheduleStartSetupSheet: View {
     let onCancel: () -> Void
 
     private var sheetNavigationTitle: String {
-        preview.hasBlockingIssues ? "Resolve before start" : "Start schedule"
+        if preview.blockCount == 0 { return "No blocks" }
+        if preview.hasBlockingIssues { return "Needs attention" }
+        return "Start day"
     }
 
     var body: some View {
-        CueInBottomSheet(title: sheetNavigationTitle, onDismiss: onCancel) {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: CueInSpacing.lg) {
-                    header
-                    runSnapshot
-                    endControl
-                    preflightPanel
-                    planningNote
-                    startButton
-                    cancelButton
-                }
-                .padding(.bottom, CueInSpacing.sm)
+        CueInBottomSheet(title: sheetNavigationTitle, onDismiss: onCancel, toolbarDismissStyle: .closeLeading) {
+            VStack(alignment: .leading, spacing: CueInSpacing.lg) {
+                compactSummary
+                endTimeCard
+                statusOrIssues
+                startButton
             }
+            .padding(.bottom, CueInSpacing.md)
         }
     }
 
-    private var header: some View {
-        HStack(alignment: .top, spacing: CueInSpacing.md) {
-            Image(systemName: preview.hasBlockingIssues ? "exclamationmark.triangle.fill" : "play.fill")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(headerTint)
-                .frame(width: 42, height: 42)
-                .background(headerTint.opacity(0.16), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    // MARK: - Summary
 
-            VStack(alignment: .leading, spacing: CueInSpacing.xs) {
-                HStack {
-                    Spacer(minLength: 0)
-                    Text(preview.hasBlockingIssues ? "Blocked" : "Ready")
-                        .font(CueInTypography.micro)
-                        .foregroundStyle(headerTint)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(headerTint.opacity(0.13), in: Capsule(style: .continuous))
-                }
-
-                Text(preview.hasBlockingIssues
-                     ? "Pinned-time conflicts need a decision before the run can lock."
-                     : "Review the window, then start the live run.")
-                    .font(CueInTypography.caption)
-                    .foregroundStyle(CueInColors.textSecondary)
+    private var compactSummary: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if preview.blockCount == 0 {
+                Text("Add blocks to your TimeMap before starting.")
+                    .font(CueInTypography.body)
+                    .foregroundStyle(CueInColors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
+            } else {
+                Text("\(preview.blockCount) blocks")
+                    .font(CueInTypography.body)
+                    .foregroundStyle(CueInColors.textPrimary)
 
-    private var runSnapshot: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.md) {
-            Text("Run snapshot")
-                .font(CueInTypography.captionMedium)
-                .foregroundStyle(CueInColors.textTertiary)
-
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: CueInSpacing.sm),
-                    GridItem(.flexible(), spacing: CueInSpacing.sm)
-                ],
-                spacing: CueInSpacing.sm
-            ) {
-                metricTile(value: "\(preview.blockCount)", label: "Time blocks", icon: "rectangle.stack.fill")
-                metricTile(value: Self.durationLabel(minutes: preview.nominalMinutes), label: "Planned", icon: "clock.fill")
-                metricTile(value: "\(preview.openExecutionTaskCount)", label: "Open tasks", icon: "tray.full.fill")
-                metricTile(value: "\(preview.pinnedBlockCount)", label: "Pinned", icon: "pin.fill", tint: preview.pinnedBlockCount > 0 ? CueInColors.warning : CueInColors.textTertiary)
-            }
-        }
-        .padding(CueInSpacing.md)
-        .background(CueInColors.surfacePrimary, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(CueInColors.cardBorder, lineWidth: 1)
-        }
-    }
-
-    private var endControl: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-            HStack {
-                Text("End schedule")
-                    .font(CueInTypography.captionMedium)
+                Text("Planned in blocks: \(Self.durationLabel(minutes: preview.nominalMinutes))")
+                    .font(CueInTypography.caption)
                     .foregroundStyle(CueInColors.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                Spacer()
+                if preview.pinnedBlockCount > 0 {
+                    Text("\(preview.pinnedBlockCount) block\(preview.pinnedBlockCount == 1 ? "" : "s") use fixed clock times")
+                        .font(CueInTypography.micro)
+                        .foregroundStyle(CueInColors.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-                Text(windowLabel)
-                    .font(CueInTypography.micro)
+    // MARK: - End time
+
+    private var endTimeCard: some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.sm) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("TimeMap ends")
+                    .font(CueInTypography.captionMedium)
                     .foregroundStyle(CueInColors.textSecondary)
+                Spacer(minLength: 0)
+                Text(runWindowSummary)
+                    .font(CueInTypography.micro)
+                    .foregroundStyle(CueInColors.textTertiary)
+                    .multilineTextAlignment(.trailing)
                     .monospacedDigit()
             }
 
             DatePicker(
-                "TimeMap end",
+                "End",
                 selection: $draftScheduleEnd,
                 displayedComponents: [.date, .hourAndMinute]
             )
             .labelsHidden()
-            .tint(CueInColors.textPrimary)
+            .tint(CueInColors.accentFocus)
         }
         .padding(CueInSpacing.md)
-        .background(CueInColors.surfaceSecondary.opacity(0.74), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(CueInColors.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(CueInColors.cardBorder.opacity(0.6), lineWidth: 0.5)
+        }
     }
 
-    @ViewBuilder
-    private var preflightPanel: some View {
-        if preview.preflightIssues.isEmpty {
-            VStack(alignment: .leading, spacing: CueInSpacing.md) {
-                Label(preview.blockCount == 0 ? "No blocks for today" : "No blockers found", systemImage: preview.blockCount == 0 ? "calendar.badge.exclamationmark" : "checkmark.seal.fill")
-                    .font(CueInTypography.captionMedium)
-                    .foregroundStyle(preview.blockCount == 0 ? CueInColors.warning : CueInColors.success)
+    // MARK: - Status / preflight
 
-                Text(preview.blockCount == 0 ? "Future pinned blocks are kept in Hub Planning and will not start in today’s run." : "The schedule can start with the selected end time.")
+    @ViewBuilder
+    private var statusOrIssues: some View {
+        if preview.blockCount == 0 {
+            EmptyView()
+        } else if preview.preflightIssues.isEmpty {
+            HStack(spacing: CueInSpacing.sm) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(CueInColors.success)
+                Text("Nothing blocking this end time.")
                     .font(CueInTypography.caption)
                     .foregroundStyle(CueInColors.textSecondary)
             }
-            .padding(CueInSpacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background((preview.blockCount == 0 ? CueInColors.warning : CueInColors.success).opacity(0.10), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         } else {
             VStack(alignment: .leading, spacing: CueInSpacing.md) {
-                HStack(alignment: .top, spacing: CueInSpacing.sm) {
-                    Image(systemName: preview.hasBlockingIssues ? "exclamationmark.octagon.fill" : "clock.badge.exclamationmark")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(headerTint)
-                        .padding(.top, 1)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(preview.hasBlockingIssues ? "Action required" : "Heads up")
-                            .font(CueInTypography.captionMedium)
-                            .foregroundStyle(CueInColors.textPrimary)
-                        Text(preview.hasBlockingIssues
-                             ? "Choose how to handle each blocking conflict."
-                             : "These changes are optional, but they affect how the run feels.")
-                            .font(CueInTypography.micro)
-                            .foregroundStyle(CueInColors.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                ForEach(Array(preview.preflightIssues.enumerated()), id: \.element.id) { index, issue in
+                    if index > 0 {
+                        Divider()
+                            .background(CueInColors.cardBorder.opacity(0.45))
                     }
-                }
-
-                VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-                    ForEach(preview.preflightIssues) { issue in
-                        preflightIssueRow(issue)
-                    }
+                    preflightIssueBlock(issue)
                 }
 
                 if let recommendedEnd = preview.recommendedMinimumEnd,
                    recommendedEnd > draftScheduleEnd {
                     Button {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
-                            draftScheduleEnd = recommendedEnd
-                        }
+                        handle(.useSafeEnd)
                     } label: {
-                        HStack(spacing: CueInSpacing.sm) {
-                            Image(systemName: "wand.and.stars")
-                            Text("Use safe end")
-                            Spacer()
+                        HStack {
+                            Text("Use minimum end")
+                                .font(CueInTypography.captionMedium)
+                            Spacer(minLength: 0)
                             Text(Self.timeLabel(recommendedEnd))
+                                .font(CueInTypography.captionMedium)
                                 .monospacedDigit()
                         }
-                        .font(CueInTypography.captionMedium)
-                        .foregroundStyle(CueInColors.background)
-                        .padding(.horizontal, CueInSpacing.md)
-                        .padding(.vertical, 10)
-                        .background(CueInColors.textPrimary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .foregroundStyle(CueInColors.accentFocus)
+                        .padding(.vertical, 4)
                     }
                     .buttonStyle(.plain)
                 }
             }
             .padding(CueInSpacing.md)
-            .background(headerTint.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(CueInColors.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(headerTint.opacity(0.30), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(issueOutlineTint.opacity(0.35), lineWidth: 0.5)
             }
         }
     }
 
-    private func preflightIssueRow(_ issue: ScheduleStartPreflightIssue) -> some View {
+    private func preflightIssueBlock(_ issue: ScheduleStartPreflightIssue) -> some View {
         VStack(alignment: .leading, spacing: CueInSpacing.sm) {
             HStack(alignment: .top, spacing: CueInSpacing.sm) {
                 Image(systemName: issue.severity.icon)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(issue.severity.tint)
-                    .frame(width: 20)
-                    .padding(.top, 2)
+                    .frame(width: 20, alignment: .topLeading)
+                    .padding(.top, 1)
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(issue.title)
                         .font(CueInTypography.captionMedium)
                         .foregroundStyle(CueInColors.textPrimary)
@@ -216,104 +172,62 @@ struct ScheduleStartSetupSheet: View {
             }
 
             if !issue.actions.isEmpty {
-                actionRow(for: issue)
-            }
-        }
-        .padding(CueInSpacing.md)
-        .background(CueInColors.background.opacity(0.38), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private func actionRow(for issue: ScheduleStartPreflightIssue) -> some View {
-        HStack(spacing: CueInSpacing.sm) {
-            ForEach(issue.actions) { action in
-                Button {
-                    handle(action)
-                } label: {
-                    Label(action.title, systemImage: action.icon)
-                        .font(CueInTypography.micro)
-                        .foregroundStyle(action.isDestructive ? CueInColors.danger : CueInColors.textPrimary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(action.background, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(spacing: CueInSpacing.xs) {
+                    ForEach(issue.actions) { action in
+                        Button {
+                            handle(action)
+                        } label: {
+                            HStack {
+                                Label(action.title, systemImage: action.icon)
+                                    .font(CueInTypography.captionMedium)
+                                Spacer(minLength: 0)
+                            }
+                            .foregroundStyle(action.isDestructive ? CueInColors.danger : CueInColors.textPrimary)
+                            .padding(.horizontal, CueInSpacing.md)
+                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                action.isDestructive
+                                    ? CueInColors.danger.opacity(0.10)
+                                    : CueInColors.surfaceSecondary.opacity(0.55),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private func metricTile(value: String, label: String, icon: String, tint: Color = CueInColors.textSecondary) -> some View {
-        HStack(spacing: CueInSpacing.sm) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 18)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(value)
-                    .font(CueInTypography.captionMedium)
-                    .foregroundStyle(CueInColors.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Text(label)
-                    .font(CueInTypography.micro)
-                    .foregroundStyle(CueInColors.textTertiary)
-            }
-        }
-        .padding(CueInSpacing.sm)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(CueInColors.surfaceSecondary.opacity(0.54), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private var planningNote: some View {
-        HStack(alignment: .top, spacing: CueInSpacing.sm) {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(CueInColors.textTertiary)
                 .padding(.top, 2)
-
-            Text("Your TimeMap keeps time block order, fills from Execution on start, then recalculates durations to land on your chosen end time.")
-                .font(CueInTypography.caption)
-                .foregroundStyle(CueInColors.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
+
+    // MARK: - Start
 
     private var startButton: some View {
         Button {
             onStart(max(draftScheduleEnd, minimumEnd))
         } label: {
             HStack {
-                Label("Start run", systemImage: "play.fill")
-                Spacer()
+                Text("Start")
+                    .fontWeight(.semibold)
+                Spacer(minLength: 0)
                 Text(Self.timeLabel(max(draftScheduleEnd, minimumEnd)))
+                    .fontWeight(.medium)
                     .monospacedDigit()
-                    .foregroundStyle(CueInColors.background.opacity(0.58))
+                    .opacity(0.85)
             }
             .font(CueInTypography.bodyMedium)
             .foregroundStyle(CueInColors.background)
             .padding(.horizontal, CueInSpacing.lg)
-            .padding(.vertical, CueInSpacing.md)
-            .background(CueInColors.textPrimary, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .padding(.vertical, CueInSpacing.md + 2)
+            .frame(maxWidth: .infinity)
+            .background(
+                cannotStart ? CueInColors.textTertiary : CueInColors.textPrimary,
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
         }
         .buttonStyle(.plain)
         .disabled(cannotStart)
-        .opacity(cannotStart ? 0.45 : 1)
-    }
-
-    private var cancelButton: some View {
-        Button("Cancel", role: .cancel, action: onCancel)
-            .font(CueInTypography.body)
-            .foregroundStyle(CueInColors.textSecondary)
-            .frame(maxWidth: .infinity)
-    }
-
-    private func statChip(_ text: String) -> some View {
-        Text(text)
-            .font(CueInTypography.micro)
-            .foregroundStyle(CueInColors.textSecondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(CueInColors.surfaceTertiary.opacity(0.78), in: Capsule(style: .continuous))
     }
 
     private func handle(_ action: ScheduleStartPreflightAction) {
@@ -323,14 +237,13 @@ struct ScheduleStartSetupSheet: View {
             }
             return
         }
-
         onIssueAction(action)
     }
 
-    private var headerTint: Color {
+    private var issueOutlineTint: Color {
         if preview.hasBlockingIssues { return CueInColors.danger }
         if !preview.preflightIssues.isEmpty { return CueInColors.warning }
-        return CueInColors.success
+        return CueInColors.cardBorder
     }
 
     private var minimumEnd: Date {
@@ -341,9 +254,13 @@ struct ScheduleStartSetupSheet: View {
         draftScheduleEnd <= minimumEnd || preview.hasBlockingIssues || preview.blockCount == 0
     }
 
-    private var windowLabel: String {
-        let minutes = max(Int(draftScheduleEnd.timeIntervalSince(Date()) / 60), 0)
-        return Self.durationLabel(minutes: minutes)
+    /// Calendar span from now until the chosen end (distinct from “planned in blocks” sum above).
+    private var runWindowMinutes: Int {
+        max(Int(draftScheduleEnd.timeIntervalSince(Date()) / 60), 0)
+    }
+
+    private var runWindowSummary: String {
+        "Run window: \(Self.durationLabel(minutes: runWindowMinutes))"
     }
 
     private static func timeLabel(_ date: Date) -> String {

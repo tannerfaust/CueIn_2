@@ -61,7 +61,7 @@ struct TaskItemRow: View {
             swipeBackground
             foreground
                 .offset(x: dragOffset)
-                .gesture(swipeGesture)
+                .simultaneousGesture(swipeGesture)
                 .contextMenu { contextMenuContent }
         }
         .sensoryFeedback(.success, trigger: completeHaptic)
@@ -198,12 +198,14 @@ struct TaskItemRow: View {
                 workflowStatus: task.isCompleted ? nil : task.status,
                 diameter: checkboxSize
             )
-            .frame(width: 28, height: 32, alignment: .top)
+            .frame(width: 40, height: 40, alignment: .center)
             .contentShape(Rectangle())
             .animation(.easeInOut(duration: 0.15), value: task.isCompleted)
             .animation(.easeInOut(duration: 0.18), value: task.status)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(task.isCompleted ? "Completed task status" : "Task status")
+        .accessibilityHint("Opens task status options")
         .popover(isPresented: $isStatusPopoverPresented) {
             CueInTaskStatusPopoverContent(selection: task.status) { status in
                 let snap = task

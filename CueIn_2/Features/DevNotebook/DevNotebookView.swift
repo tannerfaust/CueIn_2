@@ -118,10 +118,11 @@ struct DevNotebookView: View {
             }
         }
         .sheet(isPresented: $showCompose) {
-            DevNotebookCaptureSheet(isPresented: $showCompose, defaultKind: .moduleIdea) { kind, body in
+            DevNotebookCaptureSheet(isPresented: $showCompose, defaultKind: .moduleIdea) { kind, aiModel, body in
                 let snap = DevNotebookContext.shared.makeSnapshot()
                 store.add(DevNotebookEntry(
                     kind: kind,
+                    aiModel: aiModel,
                     body: body,
                     moduleLabel: snap.moduleLabel,
                     contextLine: snap.contextLine
@@ -261,6 +262,19 @@ private struct DevNotebookRow: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(CueInColors.surfaceTertiary, in: Capsule(style: .continuous))
+
+                    if let aiModel = entry.aiModel {
+                        HStack(spacing: 4) {
+                            Image(systemName: aiModel.systemImage)
+                                .font(.system(size: 10, weight: .semibold))
+                            Text(aiModel.title)
+                                .font(CueInTypography.caption)
+                        }
+                        .foregroundStyle(aiModel.accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(aiModel.accent.opacity(0.15), in: Capsule(style: .continuous))
+                    }
 
                     Spacer(minLength: 0)
                 }

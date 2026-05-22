@@ -89,23 +89,60 @@ struct ScheduleBlockCardView: View {
         design == .reminders ? 6 : CueInSpacing.sm
     }
 
-    private var sourceCue: (icon: String, text: String)? {
-        switch block.taskSource {
-        case .executionFill:
-            let ruleLabel = block.fillRule?.displayLabel ?? "Any task"
-            if isLiveRun {
-                if block.tasks.isEmpty {
-                    return ("sparkles", "No \(ruleLabel.lowercased()) tasks assigned")
-                }
-                return ("sparkles", "Filled from \(ruleLabel)")
-            }
-            return ("sparkles", "Will pull \(ruleLabel) tasks")
+    /// How this block relates to tasks: icon-only cue at the bottom of the card (not long prose in the header).
+    private enum TaskLinkageVisual {
+        case none
+        case autoFromTodo
+        case manualInBlock
+    }
 
-        case .templateTasks:
-            return nil
+    private var taskLinkageVisual: TaskLinkageVisual {
+        switch block.taskSource {
         case .noTasks:
-            return ("circle.dashed", "No checklist")
+            return .none
+        case .executionFill:
+            return .autoFromTodo
+        case .templateTasks:
+            return .manualInBlock
         }
+    }
+
+    private var taskLinkageIconName: String {
+        switch taskLinkageVisual {
+        case .none: return "tray"
+        case .autoFromTodo: return "sparkles"
+        case .manualInBlock: return "checklist"
+        }
+    }
+
+    private var taskLinkageAccessibilityLabel: String {
+        switch taskLinkageVisual {
+        case .none: return "No tasks in this block"
+        case .autoFromTodo: return "Tasks link automatically from To-do"
+        case .manualInBlock: return "Tasks assigned in this block"
+        }
+    }
+
+    private var taskLinkageIconRow: some View {
+        HStack(spacing: 0) {
+            Image(systemName: taskLinkageIconName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(CueInColors.textTertiary)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(CueInColors.surfaceTertiary.opacity(0.5))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(CueInColors.cardBorder.opacity(0.35), lineWidth: 0.5)
+                )
+                .accessibilityHidden(true)
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(taskLinkageAccessibilityLabel)
     }
 
     /// Title + body + tasks (no state rail); paired with `trailingColumn` when a timeline gesture is injected.
@@ -396,9 +433,6 @@ struct ScheduleBlockCardView: View {
     private var longPressableMainContent: some View {
         VStack(alignment: .leading, spacing: remindersListBodySpacing) {
             blockHeader
-            if let sourceCue {
-                sourceCueRow(sourceCue)
-            }
             if isCurrentBlock, design != .glass {
                 liveRunIndicator
                     .transition(
@@ -421,6 +455,7 @@ struct ScheduleBlockCardView: View {
                         )
                     )
             }
+            taskLinkageIconRow
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(.spring(response: 0.34, dampingFraction: 0.86, blendDuration: 0.04), value: isCurrentBlock)
@@ -617,6 +652,7 @@ struct ScheduleBlockCardView: View {
                 }
             }
             .frame(width: ring, height: ring)
+            .animation(nil, value: progress)
         }
         .accessibilityLabel("Flexible duration \(block.durationMinutes) minutes")
     }
@@ -864,20 +900,6 @@ struct ScheduleBlockCardView: View {
         }
     }
 
-    private func sourceCueRow(_ cue: (icon: String, text: String)) -> some View {
-        let isReminders = design == .reminders
-        return HStack(spacing: isReminders ? 5 : 6) {
-            Image(systemName: cue.icon)
-                .font(.system(size: isReminders ? 9 : 10, weight: .medium))
-                .foregroundStyle(CueInColors.textTertiary.opacity(isReminders ? 0.75 : 1))
-
-            Text(cue.text)
-                .font(CueInTypography.micro)
-                .foregroundStyle(CueInColors.textTertiary.opacity(isReminders ? 0.72 : 1))
-                .lineLimit(1)
-        }
-    }
-
     private var liveRunIndicator: some View {
         withLiveTimerClock { now in
             let total = max(block.endTime.timeIntervalSince(block.startTime), 1)
@@ -934,6 +956,7 @@ struct ScheduleBlockCardView: View {
                     }
                 }
                 .frame(width: 38, height: 38)
+                .animation(nil, value: progress)
 
                 Spacer(minLength: 0)
             }
@@ -947,16 +970,14 @@ struct ScheduleBlockCardView: View {
         showsTimerSeconds ? 1 : 30
     }
 
+    /// Single `TimelineView` so pause/resume does not swap view roots (which re-triggered ring `.trim` animations from zero).
     @ViewBuilder
     private func withLiveTimerClock<Content: View>(
         @ViewBuilder content: @escaping (Date) -> Content
     ) -> some View {
-        if let frozen = frozenLiveProgressDate {
-            content(frozen)
-        } else {
-            TimelineView(.periodic(from: .now, by: timerTickInterval)) { context in
-                content(context.date)
-            }
+        TimelineView(.periodic(from: .now, by: timerTickInterval)) { context in
+            let referenceNow = frozenLiveProgressDate ?? context.date
+            content(referenceNow)
         }
     }
 

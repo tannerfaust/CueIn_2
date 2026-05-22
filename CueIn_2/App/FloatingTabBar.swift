@@ -9,6 +9,7 @@ struct FloatingTabBar: View {
     @Binding var selectedTab: AppTab
     let tabs: [AppTab]
     @Namespace private var indicatorNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @AppStorage(TodayDisplayPreferences.taskLedViewMode) private var taskLedViewModeRaw
         = TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue
@@ -20,6 +21,11 @@ struct FloatingTabBar: View {
     private var barHeight: CGFloat { CueInLayout.floatingBarHeight }
     /// Selection pill stays slightly shorter than the bar for glass margins.
     private var pillHeight: CGFloat { barHeight - 14 }
+    private var selectionAnimation: Animation {
+        reduceMotion
+            ? .easeOut(duration: 0.16)
+            : .spring(response: 0.32, dampingFraction: 0.78, blendDuration: 0.08)
+    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -33,6 +39,7 @@ struct FloatingTabBar: View {
         .modifier(TabBarGlassModifier())
         // Keep the bar compact regardless of the system Dynamic Type size.
         .dynamicTypeSize(.xSmall ... .large)
+        .animation(selectionAnimation, value: selectedTab)
     }
 
     @ViewBuilder
@@ -42,7 +49,7 @@ struct FloatingTabBar: View {
         let title = tabBarTitleString(for: tab)
 
         Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+            withAnimation(selectionAnimation) {
                 selectedTab = tab
             }
         } label: {
@@ -51,6 +58,7 @@ struct FloatingTabBar: View {
                     selectedPill
                         .frame(height: pillHeight)
                         .matchedGeometryEffect(id: "pill", in: indicatorNamespace)
+                        .transition(.scale(scale: 0.88).combined(with: .opacity))
                 }
 
                 VStack(spacing: 3) {
@@ -58,6 +66,8 @@ struct FloatingTabBar: View {
                     tabBarTitle(title: title)
                 }
                 .foregroundStyle(isSelected ? CueInColors.textPrimary : CueInColors.textTertiary)
+                .scaleEffect(isSelected && !reduceMotion ? 1.04 : 1)
+                .offset(y: isSelected && !reduceMotion ? -1 : 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Capsule())

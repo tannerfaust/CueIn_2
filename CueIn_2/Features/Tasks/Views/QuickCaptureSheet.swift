@@ -12,7 +12,9 @@ struct QuickCaptureSheet: View {
         case compactComposer
     }
 
-    var store: TasksStore
+    let store: TasksStore
+    let fields: [Field]
+    let projects: [Project]
     var onDismiss: () -> Void
     var onExpand: (TaskItem) -> Void
     /// Fired after **Add task** commits the new row to ``TasksStore`` (before dismiss).
@@ -20,9 +22,14 @@ struct QuickCaptureSheet: View {
     /// When `false`, hides the sheet drag handle (e.g. when embedded in another nav stack).
     var showsDragHandle: Bool
     var presentationMode: PresentationMode
+    private let fieldsByID: [UUID: Field]
+    private let projectsByID: [UUID: Project]
+    private let projectsByFieldID: [UUID: [Project]]
 
     @MainActor init(
         store: TasksStore,
+        fields: [Field]? = nil,
+        projects: [Project]? = nil,
         captureDefaultsToToday: Bool = true,
         onSaved: ((TaskItem) -> Void)? = nil,
         onDismiss: @escaping () -> Void,
@@ -31,11 +38,19 @@ struct QuickCaptureSheet: View {
         presentationMode: PresentationMode = .full
     ) {
         self.store = store
+        let resolvedFields = fields ?? store.fields
+        let resolvedProjects = projects ?? store.projects
+        self.fields = resolvedFields
+        self.projects = resolvedProjects
+        self.fieldsByID = Dictionary(uniqueKeysWithValues: resolvedFields.map { ($0.id, $0) })
+        self.projectsByID = Dictionary(uniqueKeysWithValues: resolvedProjects.map { ($0.id, $0) })
+        self.projectsByFieldID = Dictionary(grouping: resolvedProjects, by: \.fieldID)
         self.onSaved = onSaved
         self.onDismiss = onDismiss
         self.onExpand = onExpand
         self.showsDragHandle = showsDragHandle
         self.presentationMode = presentationMode
+        _fieldID = State(initialValue: resolvedFields.first?.id)
         _dueOption = State(initialValue: captureDefaultsToToday ? .today : .noDate)
     }
 
@@ -71,6 +86,7 @@ struct QuickCaptureSheet: View {
     @State private var newSubtaskTitle = ""
     @State private var saveHaptic = false
     @State private var selectHaptic = false
+    @State private var didRequestInitialFocus = false
 
     @FocusState private var titleFocused: Bool
     @FocusState private var notesFocused: Bool
@@ -109,14 +125,7 @@ struct QuickCaptureSheet: View {
         .background(CueInColors.surfacePrimary)
         .sensoryFeedback(.success, trigger: saveHaptic)
         .sensoryFeedback(.selection, trigger: selectHaptic)
-        .onAppear {
-            // Default to first field if none chosen
-            if fieldID == nil { fieldID = store.fields.first?.id }
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(80))
-                titleFocused = true
-            }
-        }
+        .onAppear(perform: focusTitleOnce)
     }
 
     private var content: some View {
@@ -200,7 +209,7 @@ struct QuickCaptureSheet: View {
 
                 // Initiative
                 Menu {
-                    ForEach(store.fields) { f in
+                    ForEach(fields) { f in
                         Button {
                             if fieldID != f.id { projectID = nil }
                             fieldID = f.id
@@ -209,14 +218,13 @@ struct QuickCaptureSheet: View {
                     }
                 } label: {
                     chipLabel(
-                        icon: store.field(fieldID)?.resolvedIconSystemName ?? "square.grid.2x2",
-                        text: store.field(fieldID)?.name ?? "Initiative",
-                        accent: store.field(fieldID)?.color
+                        icon: selectedField?.resolvedIconSystemName ?? "square.grid.2x2",
+                        text: selectedField?.name ?? "Initiative",
+                        accent: selectedField?.color
                     )
                 }
 
                 // Project
-                let projectOptions = fieldID.map(store.projects) ?? store.projects
                 Menu {
                     Button { projectID = nil; selectHaptic.toggle() } label: {
                         Label("No project", systemImage: "xmark")
@@ -230,9 +238,9 @@ struct QuickCaptureSheet: View {
                     }
                 } label: {
                     chipLabel(
-                        icon: store.project(projectID)?.resolvedIconSystemName ?? "folder",
-                        text: store.project(projectID)?.name ?? "Project",
-                        accent: store.project(projectID).map { store.color(for: $0) }
+                        icon: selectedProject?.resolvedIconSystemName ?? "folder",
+                        text: selectedProject?.name ?? "Project",
+                        accent: selectedProject.map(projectColor)
                     )
                 }
 
@@ -296,6 +304,28 @@ struct QuickCaptureSheet: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("More task options")
+    }
+
+    private var selectedField: Field? {
+        guard let fieldID else { return nil }
+        return fieldsByID[fieldID]
+    }
+
+    private var selectedProject: Project? {
+        guard let projectID else { return nil }
+        return projectsByID[projectID]
+    }
+
+    private var projectOptions: [Project] {
+        guard let fieldID else { return projects }
+        return projectsByFieldID[fieldID] ?? []
+    }
+
+    private func projectColor(_ project: Project) -> Color {
+        if let hex = project.colorHexOverride {
+            return Color(hex: hex)
+        }
+        return fieldsByID[project.fieldID]?.color ?? CueInColors.textTertiary
     }
 
     private var executionSegmented: some View {
@@ -581,6 +611,15 @@ struct QuickCaptureSheet: View {
             if status == .inbox || status == .archived {
                 status = .scheduled
             }
+        }
+    }
+
+    private func focusTitleOnce() {
+        guard !didRequestInitialFocus else { return }
+        didRequestInitialFocus = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(16))
+            titleFocused = true
         }
     }
 }

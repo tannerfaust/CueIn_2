@@ -25,8 +25,10 @@ private enum LibraryTimeMapNav: Hashable {
     case timeBlocksHub
     /// Blocks taken from one bundled / included TimeMap.
     case timeMapBlocksDetail(UUID)
-    /// Build a new saved TimeMap using the same timeline as Today (preview only, no Start).
-    case newTimeMapEditor
+    /// New saved TimeMap (preview editor, no Start).
+    case timeMapEditorNew
+    /// Edit an existing TimeMap layout in the library editor.
+    case timeMapEditorExisting(UUID)
 }
 
 // MARK: - Sample block from a bundled day (not a whole saved schedule)
@@ -54,6 +56,8 @@ struct LibraryView: View {
     @State private var taskEditID: UUID?
     @State private var libraryEpoch = 0
     @State private var timeMapLibraryPath = NavigationPath()
+    @AppStorage(CueInAppDataKeys.gimmickDemoRemoved) private var gimmickDemoRemoved = false
+    @AppStorage(CueInAppDataKeys.hideBundledDummyTestDayTimeMap) private var hideBundledDummyTestDayTimeMap = false
 
     init(initialSegment: LibraryHomeSegment = .tasks, onRequestDismiss: @escaping () -> Void) {
         self.initialSegment = initialSegment
@@ -112,6 +116,9 @@ struct LibraryView: View {
                 case .timeMapsList:
                     LibraryTimeMapsListPage(
                         libraryEpoch: $libraryEpoch,
+                        onOpenTimeMapEditor: { id in
+                            timeMapLibraryPath.append(LibraryTimeMapNav.timeMapEditorExisting(id))
+                        },
                         onUseTimeMap: { id in
                             Self.applySavedSchedule(id: id)
                             onRequestDismiss()
@@ -131,8 +138,24 @@ struct LibraryView: View {
                         libraryEpoch: libraryEpoch,
                         onInsertBlock: { useBlockTemplate($0) }
                     )
-                case .newTimeMapEditor:
-                    LibraryNewTimeMapEditorView(libraryEpoch: $libraryEpoch)
+                case .timeMapEditorNew:
+                    LibraryTimeMapEditorView(
+                        editingFormulaID: nil,
+                        libraryEpoch: $libraryEpoch,
+                        onDismissLibrary: {
+                            onRequestDismiss()
+                            dismiss()
+                        }
+                    )
+                case .timeMapEditorExisting(let id):
+                    LibraryTimeMapEditorView(
+                        editingFormulaID: id,
+                        libraryEpoch: $libraryEpoch,
+                        onDismissLibrary: {
+                            onRequestDismiss()
+                            dismiss()
+                        }
+                    )
                 }
             }
         }
@@ -186,48 +209,49 @@ struct LibraryView: View {
     // MARK: TimeMaps hub (two pages)
 
     private var timeMapsLibraryHubRoot: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: CueInSpacing.md) {
-                Text("Browse day layouts and reusable blocks on their own screens.")
-                    .font(CueInTypography.caption)
-                    .foregroundStyle(CueInColors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: CueInSpacing.md) {
+            Text("Browse day layouts and reusable blocks on their own screens.")
+                .font(CueInTypography.caption)
+                .foregroundStyle(CueInColors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-                VStack(spacing: CueInSpacing.sm) {
-                    NavigationLink(value: LibraryTimeMapNav.timeMapsList) {
-                        libraryHubRow(
-                            icon: "rectangle.split.3x1",
-                            title: "TimeMaps",
-                            subtitle: timeMapsHubSubtitle
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    NavigationLink(value: LibraryTimeMapNav.timeBlocksHub) {
-                        libraryHubRow(
-                            icon: "square.split.2x1",
-                            title: "Time blocks",
-                            subtitle: timeBlocksHubSubtitle
-                        )
-                    }
-                    .buttonStyle(.plain)
+            VStack(spacing: CueInSpacing.sm) {
+                NavigationLink(value: LibraryTimeMapNav.timeMapsList) {
+                    libraryHubRow(
+                        icon: "rectangle.split.3x1",
+                        title: "TimeMaps",
+                        subtitle: timeMapsHubSubtitle
+                    )
                 }
+                .buttonStyle(.plain)
+
+                NavigationLink(value: LibraryTimeMapNav.timeBlocksHub) {
+                    libraryHubRow(
+                        icon: "square.split.2x1",
+                        title: "Time blocks",
+                        subtitle: timeBlocksHubSubtitle
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, CueInSpacing.screenHorizontal)
-            .padding(.top, CueInSpacing.md)
-            .padding(.bottom, CueInLayout.scrollBottomInset)
         }
-        .scrollIndicators(.hidden)
+        .padding(.horizontal, CueInSpacing.screenHorizontal)
+        .padding(.top, CueInSpacing.md)
+        .padding(.bottom, CueInLayout.scrollBottomInset)
     }
 
     private var timeMapsHubSubtitle: String {
         _ = libraryEpoch
+        _ = gimmickDemoRemoved
+        _ = hideBundledDummyTestDayTimeMap
         let n = FormulaLibraryService.customSchedules().count + FormulaLibraryService.bundledLibraryTemplates.count
         return n == 0 ? "No layouts yet" : "\(n) layout\(n == 1 ? "" : "s")"
     }
 
     private var timeBlocksHubSubtitle: String {
         _ = libraryEpoch
+        _ = gimmickDemoRemoved
+        _ = hideBundledDummyTestDayTimeMap
         let saved = FormulaLibraryService.customBlockPresets().count
         let fromMaps = FormulaLibraryService.bundledLibraryTemplates.reduce(0) { $0 + $1.blocks.count }
         if saved == 0, fromMaps == 0 { return "Nothing to show" }
@@ -449,11 +473,14 @@ private struct IdentifiedTimeMapRow: Identifiable {
 
 private struct LibraryTimeMapsListPage: View {
     @Binding var libraryEpoch: Int
+    let onOpenTimeMapEditor: (UUID) -> Void
     let onUseTimeMap: (UUID) -> Void
     let onDeleteRequest: (DayFormulaTemplate) -> Void
 
+    @AppStorage(CueInAppDataKeys.gimmickDemoRemoved) private var gimmickDemoRemoved = false
     @AppStorage(CueInAppDataKeys.hideBundledDummyTestDayTimeMap) private var hideBundledDummyTestDayTimeMap = false
     @State private var query = ""
+    @State private var formulaConfirmApplyToRunPage: DayFormulaTemplate?
 
     private var queryTrimmed: String {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -461,6 +488,7 @@ private struct LibraryTimeMapsListPage: View {
 
     private var userLayouts: [DayFormulaTemplate] {
         _ = libraryEpoch
+        _ = gimmickDemoRemoved
         _ = hideBundledDummyTestDayTimeMap
         let base = FormulaLibraryService.customSchedules()
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -469,6 +497,7 @@ private struct LibraryTimeMapsListPage: View {
 
     private var includedLayouts: [DayFormulaTemplate] {
         _ = libraryEpoch
+        _ = gimmickDemoRemoved
         _ = hideBundledDummyTestDayTimeMap
         let base = FormulaLibraryService.bundledLibraryTemplates
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -503,7 +532,16 @@ private struct LibraryTimeMapsListPage: View {
             } else {
                 Section {
                     ForEach(combinedLayoutRows) { row in
-                        timeMapListRow(row.formula, isYours: row.isYours)
+                        timeMapListRow(row)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                if row.isYours {
+                                    Button(role: .destructive) {
+                                        onDeleteRequest(row.formula)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                            }
                     }
                 }
             }
@@ -516,54 +554,76 @@ private struct LibraryTimeMapsListPage: View {
         .searchable(text: $query, prompt: "Search TimeMaps")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                NavigationLink(value: LibraryTimeMapNav.newTimeMapEditor) {
+                NavigationLink(value: LibraryTimeMapNav.timeMapEditorNew) {
                     Image(systemName: "plus")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(CueInColors.textPrimary)
                 }
             }
         }
+        .alert(
+            "Put on run page?",
+            isPresented: Binding(
+                get: { formulaConfirmApplyToRunPage != nil },
+                set: { if !$0 { formulaConfirmApplyToRunPage = nil } }
+            )
+        ) {
+            Button("Cancel", role: .cancel) {
+                formulaConfirmApplyToRunPage = nil
+            }
+            Button("Put on run page") {
+                if let f = formulaConfirmApplyToRunPage {
+                    onUseTimeMap(f.id)
+                }
+                formulaConfirmApplyToRunPage = nil
+            }
+        } message: {
+            if let f = formulaConfirmApplyToRunPage {
+                Text("Put «\(f.name)» on the run page?")
+            }
+        }
     }
 
-    private func timeMapListRow(_ formula: DayFormulaTemplate, isYours: Bool) -> some View {
-        HStack(spacing: CueInSpacing.md) {
-            Image(systemName: formula.symbol)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(CueInColors.textPrimary)
-                .frame(width: 40, height: 40)
-                .background(CueInColors.surfaceSecondary.opacity(0.88), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    private func timeMapListRow(_ row: IdentifiedTimeMapRow) -> some View {
+        let formula = row.formula
+        let isYours = row.isYours
+        return HStack(spacing: CueInSpacing.md) {
+            Button {
+                onOpenTimeMapEditor(formula.id)
+            } label: {
+                HStack(spacing: CueInSpacing.md) {
+                    Image(systemName: formula.symbol)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(CueInColors.textPrimary)
+                        .frame(width: 40, height: 40)
+                        .background(CueInColors.surfaceSecondary.opacity(0.88), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(formula.name)
-                    .font(CueInTypography.bodyMedium)
-                    .foregroundStyle(CueInColors.textPrimary)
-                    .lineLimit(2)
-                Text("\(formula.blockCount) blocks · \(formula.targetDurationLabel) · \(isYours ? "Yours" : "Included")")
-                    .font(CueInTypography.micro)
-                    .foregroundStyle(CueInColors.textTertiary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(formula.name)
+                            .font(CueInTypography.bodyMedium)
+                            .foregroundStyle(CueInColors.textPrimary)
+                            .lineLimit(2)
+                        Text("\(formula.blockCount) blocks · \(formula.targetDurationLabel) · \(isYours ? "Yours" : "Included")")
+                            .font(CueInTypography.micro)
+                            .foregroundStyle(CueInColors.textTertiary)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-
-            Spacer(minLength: 0)
+            .buttonStyle(.plain)
 
             Button {
-                onUseTimeMap(formula.id)
+                formulaConfirmApplyToRunPage = formula
             } label: {
                 Image(systemName: "arrow.right.circle.fill")
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(CueInColors.accentFocus)
             }
             .buttonStyle(.borderless)
-
-            if isYours {
-                Button {
-                    onDeleteRequest(formula)
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(CueInColors.textTertiary)
-                }
-                .buttonStyle(.borderless)
-            }
+            .accessibilityLabel("Put on TimeMap run page")
         }
         .padding(.vertical, 4)
     }
@@ -576,6 +636,7 @@ private struct LibraryTimeBlocksHubPage: View {
     let onInsertBlock: (DayFormulaBlockTemplate) -> Void
     let onDeleteBlockRequest: (DayFormulaBlockTemplate) -> Void
 
+    @AppStorage(CueInAppDataKeys.gimmickDemoRemoved) private var gimmickDemoRemoved = false
     @AppStorage(CueInAppDataKeys.hideBundledDummyTestDayTimeMap) private var hideBundledDummyTestDayTimeMap = false
     @State private var query = ""
 
@@ -585,6 +646,7 @@ private struct LibraryTimeBlocksHubPage: View {
 
     private var savedBlocks: [DayFormulaBlockTemplate] {
         _ = libraryEpoch
+        _ = gimmickDemoRemoved
         _ = hideBundledDummyTestDayTimeMap
         let base = FormulaLibraryService.customBlockPresets()
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
@@ -593,6 +655,7 @@ private struct LibraryTimeBlocksHubPage: View {
 
     private var parentMaps: [DayFormulaTemplate] {
         _ = libraryEpoch
+        _ = gimmickDemoRemoved
         _ = hideBundledDummyTestDayTimeMap
         return FormulaLibraryService.bundledLibraryTemplates
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -736,6 +799,7 @@ private struct LibraryTimeMapBlocksDetailPage: View {
     let libraryEpoch: Int
     let onInsertBlock: (DayFormulaBlockTemplate) -> Void
 
+    @AppStorage(CueInAppDataKeys.gimmickDemoRemoved) private var gimmickDemoRemoved = false
     @AppStorage(CueInAppDataKeys.hideBundledDummyTestDayTimeMap) private var hideBundledDummyTestDayTimeMap = false
     @State private var query = ""
 
@@ -745,6 +809,7 @@ private struct LibraryTimeMapBlocksDetailPage: View {
 
     private var formula: DayFormulaTemplate? {
         _ = libraryEpoch
+        _ = gimmickDemoRemoved
         _ = hideBundledDummyTestDayTimeMap
         return FormulaLibraryService.bundledLibraryTemplates.first(where: { $0.id == formulaID })
     }
@@ -829,7 +894,7 @@ private struct LibraryTimeMapBlocksDetailPage: View {
     }
 }
 
-// MARK: - New TimeMap editor (library)
+// MARK: - TimeMap editor (library)
 
 private struct LibraryIdentifiedBlockID: Identifiable, Hashable {
     let id: UUID
@@ -848,9 +913,13 @@ private struct LibraryBlockEditSheetItem: Identifiable {
     }
 }
 
-private struct LibraryNewTimeMapEditorView: View {
-    @Bindable private var viewModel = TodayViewModel.shared
+private struct LibraryTimeMapEditorView: View {
+    /// When `nil`, seeds a new user TimeMap. When set, opens that layout for editing.
+    let editingFormulaID: UUID?
     @Binding var libraryEpoch: Int
+    let onDismissLibrary: () -> Void
+
+    @Bindable private var viewModel = TodayViewModel.shared
 
     @State private var didSeedSession = false
     @State private var dayModeBeforeEditor: DayEngineMode?
@@ -862,6 +931,7 @@ private struct LibraryNewTimeMapEditorView: View {
     @State private var showFormulaScheduleSaveSheet = false
     @State private var showBlockLibrary = false
     @State private var showMoreAddOptions = false
+    @State private var showPutOnRunPageConfirm = false
 
     @AppStorage(TodayDisplayPreferences.showScheduleStartTime) private var showScheduleStartTime = true
     @AppStorage(TodayDisplayPreferences.showScheduleDuration) private var showScheduleDuration = false
@@ -881,7 +951,7 @@ private struct LibraryNewTimeMapEditorView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack {
             Group {
                 if canvasDotsBackground {
                     CanvasDotsBackgroundView()
@@ -969,17 +1039,38 @@ private struct LibraryNewTimeMapEditorView: View {
                         )
                     }
                 }
-                .padding(.bottom, CueInLayout.scrollBottomInset + CueInLayout.fabPlusDiameter + 28)
+                .padding(.bottom, CueInLayout.scrollBottomInset)
             }
             .scrollDisabled(draggedScheduleBlockID != nil)
-
-            bottomPlusControl
-                .padding(.trailing, CueInSpacing.screenHorizontal)
-                .padding(.bottom, CueInLayout.scrollBottomInset + 8)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack {
+                Spacer(minLength: 0)
+                bottomPlusControl
+                    .padding(.trailing, CueInSpacing.screenHorizontal)
+                    .padding(.bottom, 6)
+            }
+            .padding(.top, 4)
+            .background(
+                LinearGradient(
+                    colors: [CueInColors.background.opacity(0), CueInColors.background.opacity(0.92)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea(edges: .bottom)
+            )
         }
         .navigationTitle(viewModel.formulaScheduleNavigationTitle)
         .cueInNavigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Select") {
+                    showPutOnRunPageConfirm = true
+                }
+                .fontWeight(.semibold)
+                .foregroundStyle(CueInColors.textPrimary)
+                .disabled(viewModel.selectedFormulaID == nil)
+            }
             ToolbarItemGroup(placement: CueInToolbarPlacement.topBarTrailing) {
                 if isJiggleRearrangeMode {
                     Button("Done") { isJiggleRearrangeMode = false }
@@ -992,13 +1083,33 @@ private struct LibraryNewTimeMapEditorView: View {
                 }
             }
         }
+        .alert(
+            "Put on run page?",
+            isPresented: $showPutOnRunPageConfirm
+        ) {
+            Button("Cancel", role: .cancel) {}
+            Button("Put on run page") {
+                if let id = viewModel.selectedFormulaID {
+                    LibraryView.applySavedSchedule(id: id)
+                    onDismissLibrary()
+                }
+            }
+        } message: {
+            let name = viewModel.selectedFormula?.name ?? "this TimeMap"
+            Text("Put «\(name)» on the run page?")
+        }
         .onAppear {
             guard !didSeedSession else { return }
             dayModeBeforeEditor = viewModel.dayEngineMode
             if viewModel.dayEngineMode != .formulaBased {
                 viewModel.setDayEngineMode(.formulaBased)
             }
-            viewModel.createNewUserAlgorithmFromRoutineTemplate()
+            if let fid = editingFormulaID {
+                viewModel.reloadAvailableFormulasFromLibrary()
+                viewModel.selectFormula(fid)
+            } else {
+                viewModel.createNewUserAlgorithmFromRoutineTemplate()
+            }
             didSeedSession = true
         }
         .onDisappear {

@@ -198,6 +198,22 @@ final class SupabaseClient {
         )
     }
 
+    func invokeFunction<Response: Decodable, Body: Encodable>(
+        _ name: String,
+        body: Body,
+        session: SupabaseAuthSession
+    ) async throws -> Response {
+        let config = try configuration()
+        return try await request(
+            baseURL: config.functionsBaseURL,
+            path: name,
+            method: "POST",
+            body: body,
+            config: config,
+            session: session
+        )
+    }
+
     private func configuration() throws -> SupabaseConfiguration {
         guard let config = SupabaseConfiguration.current else {
             throw SupabaseClientError.missingConfiguration

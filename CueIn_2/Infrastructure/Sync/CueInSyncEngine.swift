@@ -55,6 +55,16 @@ final class CueInSyncEngine {
         }
     }
 
+    func enqueue<Record: SupabaseSyncRecord>(_ records: [Record], table: SupabaseTable) {
+        guard let repository, !records.isEmpty else { return }
+        do {
+            try repository.upsert(records, table: table, enqueueMutation: true)
+            scheduleSync()
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+    }
+
     func syncNow() async {
         if isSyncInFlight {
             needsSyncAfterCurrent = true
@@ -135,18 +145,10 @@ final class CueInSyncEngine {
     }
 
     private func enqueueWorkspaceSnapshot(tasksStore: TasksStore, goalStore: GoalStrategyStore, userID: UUID) {
-        for field in tasksStore.fields {
-            enqueue(FieldDTO(field: field, userID: userID, syncVersion: 1), table: .fields)
-        }
-        for project in tasksStore.projects {
-            enqueue(ProjectDTO(project: project, userID: userID, syncVersion: 1), table: .projects)
-        }
-        for task in tasksStore.tasks {
-            enqueue(TaskDTO(task: task, userID: userID, syncVersion: 1), table: .tasks)
-        }
-        for goal in goalStore.goals {
-            enqueue(GoalDTO(goal: goal, userID: userID, syncVersion: 1), table: .goals)
-        }
+        enqueue(tasksStore.fields.map { FieldDTO(field: $0, userID: userID, syncVersion: 1) }, table: .fields)
+        enqueue(tasksStore.projects.map { ProjectDTO(project: $0, userID: userID, syncVersion: 1) }, table: .projects)
+        enqueue(tasksStore.tasks.map { TaskDTO(task: $0, userID: userID, syncVersion: 1) }, table: .tasks)
+        enqueue(goalStore.goals.map { GoalDTO(goal: $0, userID: userID, syncVersion: 1) }, table: .goals)
         enqueueFormulaLibrarySnapshot(userID: userID)
         enqueueAppLayoutSnapshot(userID: userID)
     }

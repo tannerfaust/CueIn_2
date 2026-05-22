@@ -117,6 +117,15 @@ final class TasksStore {
             .sorted(by: prioritySort)
     }
 
+    var todayTaskIDSet: Set<UUID> {
+        Set(tasks.lazy
+            .filter {
+                $0.status != .archived &&
+                ($0.isScheduledToday || $0.status == .active || $0.status == .paused)
+            }
+            .map(\.id))
+    }
+
     /// Future-scheduled tasks (grouped display handled by caller).
     var upcomingTasks: [TaskItem] {
         let startOfToday = Calendar.current.startOfDay(for: Date())

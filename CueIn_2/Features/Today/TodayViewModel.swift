@@ -37,6 +37,11 @@ private struct PersistedScheduleNominalMinutes: Codable {
 @MainActor
 @Observable
 final class TodayViewModel {
+    enum FormulaResetSelectionPolicy {
+        case clear
+        case restoreDefault
+    }
+
 
     /// Shared instance so the Tasks tab can append to the same Today execution queue.
     @MainActor
@@ -70,6 +75,20 @@ final class TodayViewModel {
         }
     }
 
+    private static func persistedFormulaRuntimeState() -> PersistedScheduleRunState? {
+        guard let data = UserDefaults.standard.data(forKey: persistedScheduleRunKey) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(PersistedScheduleRunState.self, from: data)
+    }
+
+    private static func hasRestorableFormulaRun() -> Bool {
+        guard let state = persistedFormulaRuntimeState() else { return false }
+        return state.formulaRunStartedAt != nil
+            || state.formulaStoppedAt != nil
+            || state.formulaSchedulePausedAt != nil
+    }
+
     // MARK: State
 
     var blocks: [DayBlock]
@@ -100,6 +119,8 @@ final class TodayViewModel {
     /// Bumps only on user-driven preview structure edits (blocks / tasks / pins). Reset when a template is (re)materialized or saved.
     private var formulaPreviewStructureEditGeneration: UInt = 0
     private var formulaPreviewStructureCleanGeneration: UInt = 0
+    /// Semantic fingerprint of the preview TimeMap at the last load / save / clear baseline.
+    private var formulaPreviewStructureCleanFingerprint: String = ""
 
     private let dayRunPlanner: DayRunPlanning
     private let executionReflow: ExecutionReflow
@@ -110,8 +131,6 @@ final class TodayViewModel {
     @ObservationIgnored private var lifecycleObservers: [NSObjectProtocol] = []
     /// Skips redundant `UserDefaults` writes when the encoded schedule snapshot is unchanged (e.g. clock ticks).
     @ObservationIgnored private var lastPersistedScheduleData: Data?
-    /// Throttles heavy ``deriveBlockStates`` while the formula clock ticks every second.
-    @ObservationIgnored private var lastFormulaBlockDeriveAt: Date = .distantPast
     @ObservationIgnored private var executionTimerInterval: TimeInterval = 30
 
     // MARK: Init
@@ -210,11 +229,13 @@ final class TodayViewModel {
         executionTimerInterval = interval
         executionTimer.timer?.invalidate()
         executionTimer.timer = nil
-        executionTimer.timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.tickClock()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        executionTimer.timer = timer
     }
 
     @MainActor
@@ -225,13 +246,6 @@ final class TodayViewModel {
             return
         }
 
-        if dayEngineMode == .formulaBased && isFormulaRunLive {
-            if currentTime.timeIntervalSince(lastFormulaBlockDeriveAt) < 30 {
-                return
-            }
-            lastFormulaBlockDeriveAt = currentTime
-        }
-
         deriveBlockStates()
     }
 
@@ -239,9 +253,6 @@ final class TodayViewModel {
     private func refreshClockFromSystem() {
         currentTime = Date()
         deriveBlockStates()
-        if dayEngineMode == .formulaBased && isFormulaRunLive && !isFormulaSchedulePaused {
-            lastFormulaBlockDeriveAt = currentTime
-        }
         restartExecutionTimerIfNeeded()
     }
 
@@ -589,8 +600,9 @@ final class TodayViewModel {
     /// `true` only after the user changes preview blocks (add / remove / reorder / edit / unpin, etc.). Resets when the template is loaded or successfully saved.
     var isFormulaPreviewScheduleDirty: Bool {
         guard isFormulaPreviewing else { return false }
-        guard !scheduleBlocksForLibraryTemplateRoundTrip().isEmpty else { return false }
-        return formulaPreviewStructureEditGeneration != formulaPreviewStructureCleanGeneration
+        let templates = blockTemplatesForLibrarySaveFromPreview()
+        guard !templates.isEmpty else { return false }
+        return libraryTemplateFingerprint(templates) != formulaPreviewStructureCleanFingerprint
     }
 
     var isFormulaSchedulePaused: Bool { formulaSchedulePausedAt != nil }
@@ -820,8 +832,9 @@ final class TodayViewModel {
         makeScheduleStartPreview(targetEnd: nil, runStart: Date())
     }
 
-    func scheduleStartPreview(targetEnd: Date) -> ScheduleStartPreview {
-        makeScheduleStartPreview(targetEnd: targetEnd, runStart: Date())
+    /// - Parameter runStart: Wall time treated as “now” for this preflight snapshot. Pass a **frozen** value while the start sheet is open so the preview does not drift as the real clock advances.
+    func scheduleStartPreview(targetEnd: Date, runStart: Date = Date()) -> ScheduleStartPreview {
+        makeScheduleStartPreview(targetEnd: targetEnd, runStart: runStart)
     }
 
     private func makeScheduleStartPreview(targetEnd requestedTargetEnd: Date?, runStart: Date) -> ScheduleStartPreview {
@@ -1548,6 +1561,41 @@ final class TodayViewModel {
     }
 
     @MainActor
+    private func shouldPreserveFormulaPreviewDraftAcrossLibraryReload() -> Bool {
+        guard isFormulaPreviewing else { return false }
+        guard !blockTemplatesForLibrarySaveFromPreview().isEmpty else { return false }
+        if selectedFormulaID == nil { return true }
+        return formulaPreviewStructureEditGeneration != formulaPreviewStructureCleanGeneration
+            || !previewBlockTemplatesMatchSelectedLibraryDefinition()
+    }
+
+    @MainActor
+    private func formulaTemplateForCurrentPreview(
+        id: UUID?,
+        fallbackName: String?,
+        fallbackSymbol: String?,
+        fallbackSummary: String?
+    ) -> DayFormulaTemplate? {
+        let blockTemplates = blockTemplatesForLibrarySaveFromPreview()
+        guard !blockTemplates.isEmpty else { return nil }
+
+        let totalMinutes = blockTemplates.reduce(0) { $0 + max($1.durationMinutes, 1) }
+        let autoSummary = "\(blockTemplates.count) \(blockTemplates.count == 1 ? "time block" : "time blocks") · \(ScheduleBlockFormat.durationLabel(minutes: totalMinutes))"
+        let trimmedName = fallbackName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let trimmedSummary = fallbackSummary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        return DayFormulaTemplate(
+            id: id ?? UUID(),
+            name: trimmedName.isEmpty ? "Recovered TimeMap" : trimmedName,
+            symbol: fallbackSymbol ?? "calendar",
+            summary: trimmedSummary.isEmpty ? autoSummary : trimmedSummary,
+            targetDurationMinutes: max(totalMinutes, 5),
+            rules: selectedFormula?.rules ?? [],
+            blocks: blockTemplates
+        )
+    }
+
+    @MainActor
     private func markFormulaPreviewScheduleStructureChangedIfPreviewing() {
         guard isFormulaPreviewing else { return }
         formulaPreviewStructureEditGeneration += 1
@@ -1556,6 +1604,7 @@ final class TodayViewModel {
     @MainActor
     private func resetFormulaPreviewStructureChangeTrackingToClean() {
         formulaPreviewStructureCleanGeneration = formulaPreviewStructureEditGeneration
+        formulaPreviewStructureCleanFingerprint = libraryTemplateFingerprint(blockTemplatesForLibrarySaveFromPreview())
     }
 
     /// After undo restores blocks, clear “dirty” if the preview again matches the selected library template.
@@ -1641,7 +1690,6 @@ final class TodayViewModel {
         injectScheduleBlocksIntoTimeline()
 
         deriveBlockStates()
-        lastFormulaBlockDeriveAt = currentTime
     }
 
     @MainActor
@@ -1696,7 +1744,6 @@ final class TodayViewModel {
             clearExecutionFillAssignmentsFromSchedule()
         }
         deriveBlockStates()
-        lastFormulaBlockDeriveAt = currentTime
     }
 
     /// Shifts incomplete formula blocks forward after time spent stopped or paused (same rules as Settings “pause behavior”).
@@ -1750,7 +1797,6 @@ final class TodayViewModel {
             clearExecutionFillAssignmentsFromSchedule()
         }
         deriveBlockStates()
-        lastFormulaBlockDeriveAt = currentTime
     }
 
     private func resumeFormulaDayPreservingDurations(from pausedAt: Date, at resumeDate: Date, pauseDuration: TimeInterval) {
@@ -1856,11 +1902,14 @@ final class TodayViewModel {
                 blocks.append(movingBlock)
             }
 
-            if blocks.map(\.id) != idsBefore {
+            let orderChanged = blocks.map(\.id) != idsBefore
+            if orderChanged {
                 if isFormulaRunLive {
                     restartLiveFormulaFlowFromCurrentOrder()
                 } else if isFormulaRunStopped {
                     rescheduleStoppedFormulaAfterReorder()
+                } else {
+                    rechainFormulaTimesAfterStructuralEdit()
                 }
             }
 
@@ -4026,15 +4075,61 @@ final class TodayViewModel {
     /// Reloads bundled + UserDefaults-backed formulas after library edits.
     @MainActor
     func reloadAvailableFormulasFromLibrary() {
+        let shouldPreservePreviewDraft = shouldPreserveFormulaPreviewDraftAcrossLibraryReload()
+        let selectedFormulaIDBeforeReload = selectedFormulaID
+        let selectedFormulaBeforeReload = selectedFormula
+        let selectedFormulaWasBundled = selectedFormulaIDBeforeReload.map { id in
+            FormulaLibraryService.library.contains(where: { $0.id == id })
+        } ?? false
+        let selectedFormulaWasCustom = selectedFormulaIDBeforeReload != nil
+            && selectedFormulaBeforeReload != nil
+            && !selectedFormulaWasBundled
+        let recoverableCustomDraft = shouldPreservePreviewDraft && selectedFormulaWasCustom
+            ? formulaTemplateForCurrentPreview(
+                id: selectedFormulaIDBeforeReload,
+                fallbackName: selectedFormulaBeforeReload?.name,
+                fallbackSymbol: selectedFormulaBeforeReload?.symbol,
+                fallbackSummary: selectedFormulaBeforeReload?.summary
+            )
+            : nil
+
         availableFormulas = FormulaLibraryService.allSchedules
+
+        if let recoverableCustomDraft,
+           !availableFormulas.contains(where: { $0.id == recoverableCustomDraft.id }) {
+            _ = FormulaLibraryService.saveCustomSchedule(recoverableCustomDraft)
+            availableFormulas = FormulaLibraryService.allSchedules
+        }
+
         if let sid = selectedFormulaID,
            availableFormulas.contains(where: { $0.id == sid }) {
             Self.persistFormulaSelection(selectedFormulaID)
+        } else if selectedFormulaID == nil {
+            Self.persistFormulaSelection(nil)
         } else {
-            UserDefaults.standard.removeObject(forKey: Self.persistedFormulaSelectionKey)
-            selectedFormulaID = Self.loadPersistedFormulaSelection(availableFormulas: availableFormulas)
-            Self.persistFormulaSelection(selectedFormulaID)
+            selectedFormulaID = nil
+            Self.persistFormulaSelection(nil)
         }
+        if dayEngineMode == .formulaBased, hasFormulaRunStarted {
+            formulaBlocks = blocks
+            persistFormulaRuntimeState()
+            deriveBlockStates()
+            return
+        }
+        if shouldPreservePreviewDraft {
+            if let sid = selectedFormulaID,
+               availableFormulas.contains(where: { $0.id == sid }) {
+                Self.persistFormulaSelection(sid)
+            } else {
+                selectedFormulaID = nil
+                Self.persistFormulaSelection(nil)
+            }
+            formulaBlocks = blocks
+            persistFormulaRuntimeState()
+            deriveBlockStates()
+            return
+        }
+
         if dayEngineMode == .formulaBased {
             prepareFormulaPreview()
         }
@@ -4043,7 +4138,10 @@ final class TodayViewModel {
 
     /// Clears persisted schedule snapshot, formula run timers, and resets visible blocks (preserves ``dayEngineMode``).
     @MainActor
-    func resetSchedulePersistenceAndBlocks(useGimmickTaskLedSample: Bool) {
+    func resetSchedulePersistenceAndBlocks(
+        useGimmickTaskLedSample: Bool,
+        formulaSelectionPolicy: FormulaResetSelectionPolicy = .clear
+    ) {
         removeScheduleInjectionsFromTimeline()
         anchorClaimedCardIDs.removeAll(keepingCapacity: true)
         clearPersistedFormulaRuntimeState()
@@ -4058,9 +4156,14 @@ final class TodayViewModel {
         lastDayRunPlanMetadata = nil
         executionDays = Self.makeEmptyExecutionDays(relativeTo: currentTime)
 
-        UserDefaults.standard.removeObject(forKey: Self.persistedFormulaSelectionKey)
         availableFormulas = FormulaLibraryService.allSchedules
-        selectedFormulaID = Self.loadPersistedFormulaSelection(availableFormulas: availableFormulas)
+        switch formulaSelectionPolicy {
+        case .clear:
+            selectedFormulaID = nil
+        case .restoreDefault:
+            UserDefaults.standard.removeObject(forKey: Self.persistedFormulaSelectionKey)
+            selectedFormulaID = Self.loadPersistedFormulaSelection(availableFormulas: availableFormulas)
+        }
         Self.persistFormulaSelection(selectedFormulaID)
 
         clearTimelessRuntime()
@@ -4070,7 +4173,12 @@ final class TodayViewModel {
             blocks = taskLeadBlocks
         } else {
             formulaBlocks = []
-            prepareFormulaPreview()
+            if selectedFormulaID == nil {
+                blocks = []
+                deriveBlockStates()
+            } else {
+                prepareFormulaPreview()
+            }
         }
         syncExecutionPoolFromTasksStore()
         deriveBlockStates()
@@ -4087,7 +4195,10 @@ final class TodayViewModel {
         UserDefaults.standard.set(DayEngineMode.taskLed.rawValue, forKey: DayEngineMode.storageKey)
         selectedFormulaID = Self.loadPersistedFormulaSelection(availableFormulas: availableFormulas)
         Self.persistFormulaSelection(selectedFormulaID)
-        resetSchedulePersistenceAndBlocks(useGimmickTaskLedSample: true)
+        resetSchedulePersistenceAndBlocks(
+            useGimmickTaskLedSample: true,
+            formulaSelectionPolicy: .restoreDefault
+        )
     }
 
     @MainActor
@@ -4211,9 +4322,12 @@ final class TodayViewModel {
             return
         }
 
-        if let formulaID = state.selectedFormulaID,
-           availableFormulas.contains(where: { $0.id == formulaID }) {
-            selectedFormulaID = formulaID
+        if let formulaID = state.selectedFormulaID {
+            selectedFormulaID = availableFormulas.contains(where: { $0.id == formulaID })
+                ? formulaID
+                : nil
+        } else {
+            selectedFormulaID = nil
         }
 
         formulaBlocks = state.blocks
@@ -4338,6 +4452,10 @@ final class TodayViewModel {
     }
 
     private static func restoredDayEngineMode() -> DayEngineMode {
+        if hasRestorableFormulaRun() {
+            return .formulaBased
+        }
+
         guard
             let rawValue = UserDefaults.standard.string(forKey: DayEngineMode.storageKey),
             let mode = DayEngineMode(rawValue: rawValue)

@@ -105,19 +105,20 @@ struct FormulaPickerSheet: View {
             .background(CueInColors.background)
             .navigationTitle("Choose TimeMap")
             .cueInNavigationBarTitleDisplayMode(.inline)
+            // One trailing toolbar group avoids UIKit zero-width `ItemWrapperView` constraint
+            // conflicts seen when mixing `.cancellationAction` + `.confirmationAction` with `Label`.
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done", action: onDismiss)
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
                     if let onNewTimeMap {
-                        Button {
-                            onNewTimeMap()
-                        } label: {
-                            Label("New", systemImage: "plus")
+                        Button(action: onNewTimeMap) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 17, weight: .semibold))
                         }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("New TimeMap")
                     }
+                    Button("Done", action: onDismiss)
+                        .fontWeight(.semibold)
                 }
             }
         }

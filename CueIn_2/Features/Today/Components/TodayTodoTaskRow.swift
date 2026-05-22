@@ -54,6 +54,8 @@ struct TodayTodoTaskRow: View {
     private let deleteActionWidth: CGFloat = 96
     private let maxSwipe: CGFloat = 184
     private let checkboxSize: CGFloat = 20
+    private let checkboxTapTargetSize: CGFloat = 44
+    private let reorderCheckboxExclusionWidth: CGFloat = 56
 
     private var blockStyle: TodayDisplayPreferences.TodoTaskBlockStyle {
         TodayDisplayPreferences.migratedTodoTaskBlockStyle(from: blockStyleRaw)
@@ -265,7 +267,8 @@ struct TodayTodoTaskRow: View {
 
         return HStack(spacing: 0) {
             Color.clear
-                .frame(width: rowShowCheckbox ? 38 : 0)
+                .frame(width: rowShowCheckbox ? reorderCheckboxExclusionWidth : 0)
+                .allowsHitTesting(false)
 
             LongPressDragView(
                 onBegan: actions.onBegan,
@@ -277,11 +280,12 @@ struct TodayTodoTaskRow: View {
                 allowableMovement: stationaryHoldTolerance
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
 
             Color.clear
                 .frame(width: rowShowCheckbox ? 0 : 40)
+                .allowsHitTesting(false)
         }
-        .contentShape(Rectangle())
     }
 
     private var horizontalPaddingForStyle: CGFloat {
@@ -339,6 +343,8 @@ struct TodayTodoTaskRow: View {
             checkboxGlyph
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(task.isCompleted ? "Completed task status" : "Task status")
+        .accessibilityHint("Opens task status options")
         .popover(isPresented: $isStatusPopoverPresented) {
             CueInTaskStatusPopoverContent(selection: task.status) { applyStatusAndClose($0) }
         }
@@ -366,7 +372,7 @@ struct TodayTodoTaskRow: View {
             diameter: checkboxSize
         )
         // Top-align in the tap target so the ring lines up with the first title line (default centers in 32pt).
-        .frame(width: 28, height: 32, alignment: .top)
+        .frame(width: checkboxTapTargetSize, height: checkboxTapTargetSize, alignment: .top)
         .contentShape(Rectangle())
         .animation(.easeInOut(duration: 0.15), value: task.isCompleted)
         .animation(.easeInOut(duration: 0.18), value: task.status)

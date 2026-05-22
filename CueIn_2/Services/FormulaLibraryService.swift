@@ -34,8 +34,11 @@ enum FormulaLibraryService {
         defaults.removeObject(forKey: legacyCustomBlockPresetsKey)
     }
 
-    /// Built-in day layouts (starter schemes), respecting Settings for hiding dummy templates.
+    /// Built-in day layouts (starter schemes), respecting Settings for removed demo data and hidden dummy templates.
     static var bundledLibraryTemplates: [DayFormulaTemplate] {
+        if CueInAppDataService.isGimmickDemoRemoved {
+            return []
+        }
         if UserDefaults.standard.bool(forKey: CueInAppDataKeys.hideBundledDummyTestDayTimeMap) {
             return library.filter { $0.id != bundledDummyTestDaySchemeID }
         }
@@ -86,10 +89,70 @@ enum FormulaLibraryService {
 
     static func customSchedules() -> [DayFormulaTemplate] {
         guard let data = storedTimeMapsData(), !data.isEmpty else { return [] }
-        return (try? JSONDecoder().decode([DayFormulaTemplate].self, from: data)) ?? []
+        guard let decoded = try? JSONDecoder().decode([DayFormulaTemplate].self, from: data) else { return [] }
+        let normalized = Self.uniqueCustomDisplayNamesAgainstBundledAndPeers(decoded)
+        if !Self.customTimeMapListsAreEquivalentByIdAndName(before: decoded, after: normalized) {
+            Self.persistCustomSchedulesToStorage(normalized)
+        }
+        return normalized
     }
 
-    /// Bundled + user schedules. Names are unique in the library (case-insensitive, trimmed).
+    /// Writes the full custom TimeMap list (used after collision repair and when saving one row).
+    @discardableResult
+    private static func persistCustomSchedulesToStorage(_ schedules: [DayFormulaTemplate]) -> Bool {
+        guard let data = try? JSONEncoder().encode(schedules) else { return false }
+        let defaults = UserDefaults.standard
+        defaults.set(data, forKey: customTimeMapsKey)
+        clearLegacyScheduleKeysIfNeeded()
+        recordSyncSnapshot()
+        return true
+    }
+
+    /// True when both lists are the same length, pair by index with matching `id`, and every name matches.
+    private static func customTimeMapListsAreEquivalentByIdAndName(
+        before: [DayFormulaTemplate],
+        after: [DayFormulaTemplate]
+    ) -> Bool {
+        guard before.count == after.count else { return false }
+        return !zip(before, after).contains { $0.id != $1.id || $0.name != $1.name }
+    }
+
+    /// Ensures each user TimeMap has a display name that does not collide with any **bundled** layout
+    /// or another **custom** row (case-insensitive, trimmed). Rows are processed in storage order; the first
+    /// row to claim a name keeps it; later collisions get suffixes such as `Name 2`, `Name 3`.
+    private static func uniqueCustomDisplayNamesAgainstBundledAndPeers(_ schedules: [DayFormulaTemplate]) -> [DayFormulaTemplate] {
+        let bundledKeys = Set(
+            bundledLibraryTemplates.map {
+                $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            }
+        )
+        var taken = bundledKeys
+        return schedules.map { sch in
+            var next = sch
+            let trimmed = sch.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = trimmed.lowercased()
+            if !key.isEmpty, !taken.contains(key) {
+                taken.insert(key)
+                return next
+            }
+            let rootForSuffix = key.isEmpty ? "Untitled TimeMap" : trimmed
+            var candidate = rootForSuffix
+            var index = 2
+            while taken.contains(candidate.lowercased()) {
+                candidate = "\(rootForSuffix) \(index)"
+                index += 1
+                if index > 10_000 {
+                    candidate = "\(rootForSuffix) \(String(UUID().uuidString.prefix(8)))"
+                    break
+                }
+            }
+            taken.insert(candidate.lowercased())
+            next.name = candidate
+            return next
+        }
+    }
+
+    /// Bundled + user schedules. New saves must not reuse a name already taken by any row (see ``customSchedules()`` repair for stored duplicates).
     static func existingScheduleConflictingWithName(
         _ rawName: String,
         excludingScheduleID: UUID?
@@ -132,23 +195,14 @@ enum FormulaLibraryService {
             schedules.append(schedule)
         }
 
-        guard let data = try? JSONEncoder().encode(schedules) else { return false }
-        let defaults = UserDefaults.standard
-        defaults.set(data, forKey: customTimeMapsKey)
-        clearLegacyScheduleKeysIfNeeded()
-        recordSyncSnapshot()
-        return true
+        return persistCustomSchedulesToStorage(schedules)
     }
 
     /// Removes one user-saved day formula from the library (bundled templates are not stored here).
     static func removeCustomSchedule(id: UUID) {
         var schedules = customSchedules()
         schedules.removeAll { $0.id == id }
-        guard let data = try? JSONEncoder().encode(schedules) else { return }
-        let defaults = UserDefaults.standard
-        defaults.set(data, forKey: customTimeMapsKey)
-        clearLegacyScheduleKeysIfNeeded()
-        recordSyncSnapshot()
+        _ = persistCustomSchedulesToStorage(schedules)
         Task { @MainActor in
             TodayViewModel.shared.reloadAvailableFormulasFromLibrary()
         }

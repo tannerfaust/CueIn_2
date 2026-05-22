@@ -24,6 +24,7 @@ struct TaskDetailSheet: View {
     @State private var newSubtaskTitle = ""
     @State private var accessoryPanel: TaskEditorAccessoryPanel? = nil
     @State private var isStatusPopoverPresented = false
+    @State private var didRequestInitialFocus = false
     @FocusState private var titleFocused: Bool
     @FocusState private var descriptionFocused: Bool
 
@@ -44,7 +45,9 @@ struct TaskDetailSheet: View {
             let existing = store.tasks.first { $0.id == id }
             _draft = State(initialValue: existing ?? TaskItem(title: ""))
         case .create:
-            _draft = State(initialValue: TaskItem(title: ""))
+            var initialDraft = TaskItem(title: "")
+            configureCreateDraft?(&initialDraft)
+            _draft = State(initialValue: initialDraft)
         }
     }
 
@@ -75,8 +78,7 @@ struct TaskDetailSheet: View {
                 CueInEditorToolbar(
                     saveEnabled: canSave,
                     onClose: onDismiss,
-                    onSave: save,
-                    showsCloseButton: false
+                    onSave: save
                 ) {
                     projectHeaderChip
                 }
@@ -92,15 +94,7 @@ struct TaskDetailSheet: View {
             }
         }
         .cueInPreferredColorScheme()
-        .onAppear {
-            if case .create = mode, let cfg = configureCreateDraft {
-                cfg(&draft)
-            }
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(90))
-                titleFocused = true
-            }
-        }
+        .onAppear(perform: focusTitleOnce)
     }
 }
 
@@ -1153,6 +1147,15 @@ private extension TaskDetailSheet {
             draft.completedAt = nil
         case .archived:
             break
+        }
+    }
+
+    func focusTitleOnce() {
+        guard !didRequestInitialFocus else { return }
+        didRequestInitialFocus = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(16))
+            titleFocused = true
         }
     }
 }

@@ -24,9 +24,9 @@ struct TasksView: View {
         .background(CueInColors.background.ignoresSafeArea())
         .cueInPreferredColorScheme()
         .onAppear {
-            knownTodayTaskIDs = Set(store.todayTasks.map(\.id))
+            knownTodayTaskIDs = store.todayTaskIDSet
         }
-        .onChange(of: store.todayTasks.map(\.id)) { _, newIDs in
+        .onChange(of: store.todayTaskIDSet) { _, newIDs in
             handleTodayPoolIDsChanged(newIDs)
         }
         .sheet(item: $activeSheet, content: sheetContent)
@@ -217,11 +217,10 @@ private extension TasksView {
         }
     }
 
-    func handleTodayPoolIDsChanged(_ newIDs: [UUID]) {
-        let newSet = Set(newIDs)
-        let addedIDs = newSet.subtracting(knownTodayTaskIDs)
-        let removedIDs = knownTodayTaskIDs.subtracting(newSet)
-        knownTodayTaskIDs = newSet
+    func handleTodayPoolIDsChanged(_ newIDs: Set<UUID>) {
+        let addedIDs = newIDs.subtracting(knownTodayTaskIDs)
+        let removedIDs = knownTodayTaskIDs.subtracting(newIDs)
+        knownTodayTaskIDs = newIDs
 
         if let id = addedIDs.first,
            let task = store.tasks.first(where: { $0.id == id && !$0.isCompleted }) {

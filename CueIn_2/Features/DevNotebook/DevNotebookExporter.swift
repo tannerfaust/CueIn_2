@@ -72,6 +72,9 @@ enum DevNotebookExporter {
             lines.append("")
             lines.append("- **Created:** \(created)")
             lines.append("- **Module:** \(entry.moduleLabel)")
+            if let aiModel = entry.aiModel {
+                lines.append("- **Delegate to:** \(aiModel.title)")
+            }
             lines.append("- **Context:** \(entry.contextLine)")
             lines.append("")
             lines.append("### Body")
@@ -87,7 +90,7 @@ enum DevNotebookExporter {
 
     static func csv(entries: [DevNotebookEntry]) -> String {
         var rows: [String] = [
-            [csvField("id"), csvField("createdAt"), csvField("kind"), csvField("module"), csvField("context"), csvField("body")]
+            [csvField("id"), csvField("createdAt"), csvField("kind"), csvField("aiModel"), csvField("module"), csvField("context"), csvField("body")]
                 .joined(separator: ",")
         ]
         let iso = ISO8601DateFormatter()
@@ -99,6 +102,7 @@ enum DevNotebookExporter {
                 csvField(entry.id.uuidString),
                 csvField(created),
                 csvField(entry.kind.title),
+                csvField(entry.aiModel?.title ?? ""),
                 csvField(entry.moduleLabel),
                 csvField(entry.contextLine),
                 csvField(entry.body),

@@ -125,12 +125,12 @@ enum TaskStatus: String, Codable, CaseIterable, Identifiable, Hashable {
 
     var id: String { rawValue }
 
-    /// Linear-inspired workflow names (distinct from Linear’s exact copy).
+    /// User-facing workflow names. Archive is a collection/action, not a workflow status.
     var label: String {
         switch self {
         case .inbox:      return "Waiting"
-        case .scheduled:  return "On execution"
-        case .active:     return "In progress"
+        case .scheduled:  return "To-do"
+        case .active:     return "In Progress"
         case .paused:     return "Paused"
         case .completed:  return "Done"
         case .archived:   return "Archived"
@@ -164,17 +164,17 @@ enum TaskStatus: String, Codable, CaseIterable, Identifiable, Hashable {
         [.inbox, .scheduled, .active, .paused]
     }
 
-    /// Full picker order (shared popover everywhere).
+    /// Status picker order (shared popover everywhere). Archive stays as a separate action.
     static var statusPickerOrdering: [TaskStatus] {
-        [.inbox, .scheduled, .active, .paused, .completed, .archived]
+        [.inbox, .scheduled, .active, .completed, .paused]
     }
 
     /// Title when moving out of Done back into an open state.
     func reopenFromDoneMenuTitle() -> String {
         switch self {
         case .inbox:      return "Re-open as Waiting"
-        case .scheduled:  return "Re-open on execution"
-        case .active:     return "Re-open in progress"
+        case .scheduled:  return "Re-open as To-do"
+        case .active:     return "Re-open in Progress"
         case .paused:     return "Re-open paused"
         case .completed:  return "Done"
         case .archived:   return "Archived"

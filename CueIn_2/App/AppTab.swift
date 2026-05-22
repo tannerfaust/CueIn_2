@@ -26,6 +26,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     static let storageKey = "cuein.app.nav.tabs.v1"
+    static let selectedStorageKey = "cuein.app.nav.selectedTab.v1"
     static let maximumVisibleTabs = 5
     /// Shows both day-engine tabs plus Tasks, Stats, and Hub (five slots).
     static let defaultTabs: [AppTab] = [.schedule, .taskLed, .tasks, .stats, .hub]

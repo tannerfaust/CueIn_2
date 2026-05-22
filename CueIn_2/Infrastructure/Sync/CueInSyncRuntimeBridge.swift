@@ -31,66 +31,48 @@ final class CueInSyncRuntimeBridge {
 
     func recordTasksSnapshot() {
         guard let userID = authStore.session?.user.id else { return }
-        for field in TasksStore.shared.fields {
-            syncEngine.enqueue(FieldDTO(field: field, userID: userID), table: .fields)
-        }
-        for project in TasksStore.shared.projects {
-            syncEngine.enqueue(ProjectDTO(project: project, userID: userID), table: .projects)
-        }
-        for task in TasksStore.shared.tasks {
-            syncEngine.enqueue(TaskDTO(task: task, userID: userID), table: .tasks)
-        }
-        requestAutoSync()
+        let store = TasksStore.shared
+        syncEngine.enqueue(store.fields.map { FieldDTO(field: $0, userID: userID) }, table: .fields)
+        syncEngine.enqueue(store.projects.map { ProjectDTO(project: $0, userID: userID) }, table: .projects)
+        syncEngine.enqueue(store.tasks.map { TaskDTO(task: $0, userID: userID) }, table: .tasks)
     }
 
     func recordDeletedField(_ field: Field) {
         guard let userID = authStore.session?.user.id else { return }
         syncEngine.enqueue(FieldDTO(field: field, userID: userID, deletedAt: Date()), table: .fields)
-        requestAutoSync()
     }
 
     func recordDeletedProject(_ project: Project) {
         guard let userID = authStore.session?.user.id else { return }
         syncEngine.enqueue(ProjectDTO(project: project, userID: userID, deletedAt: Date()), table: .projects)
-        requestAutoSync()
     }
 
     func recordDeletedTask(_ task: TaskItem) {
         guard let userID = authStore.session?.user.id else { return }
         syncEngine.enqueue(TaskDTO(task: task, userID: userID, deletedAt: Date()), table: .tasks)
-        requestAutoSync()
     }
 
     func recordGoalsSnapshot() {
         guard let userID = authStore.session?.user.id else { return }
-        for goal in GoalStrategyStore.shared.goals {
-            syncEngine.enqueue(GoalDTO(goal: goal, userID: userID), table: .goals)
-        }
-        requestAutoSync()
+        syncEngine.enqueue(GoalStrategyStore.shared.goals.map { GoalDTO(goal: $0, userID: userID) }, table: .goals)
     }
 
     func recordGoalsSnapshot(_ goals: [Goal]) {
         guard let userID = authStore.session?.user.id else { return }
-        for goal in goals {
-            syncEngine.enqueue(GoalDTO(goal: goal, userID: userID), table: .goals)
-        }
-        requestAutoSync()
+        syncEngine.enqueue(goals.map { GoalDTO(goal: $0, userID: userID) }, table: .goals)
     }
 
     func recordFormulaLibrarySnapshot() {
         syncEngine.enqueueFormulaLibrarySnapshot()
-        requestAutoSync()
     }
 
     func recordAppLayoutSnapshot() {
         syncEngine.enqueueAppLayoutSnapshot()
-        requestAutoSync()
     }
 
     func recordDeletedGoal(_ goal: Goal) {
         guard let userID = authStore.session?.user.id else { return }
         syncEngine.enqueue(GoalDTO(goal: goal, userID: userID, deletedAt: Date()), table: .goals)
-        requestAutoSync()
     }
 
     func recordWorkspaceDeletion() {
@@ -98,13 +80,5 @@ final class CueInSyncRuntimeBridge {
             tasksStore: TasksStore.shared,
             goalStore: GoalStrategyStore.shared
         )
-        requestAutoSync()
-    }
-
-    private func requestAutoSync() {
-        guard authStore.session != nil else { return }
-        Task { @MainActor in
-            await syncEngine.syncNow()
-        }
     }
 }

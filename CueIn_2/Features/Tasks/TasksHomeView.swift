@@ -112,15 +112,17 @@ struct TasksHomeView<RouteDestination: View>: View {
                         worklist
                             .accessibilityHidden(sidebarPresented)
 
-                        Color.black.opacity(compactSidebarScrimOpacity)
-                            .ignoresSafeArea()
-                            .onTapGesture { closeSidebar() }
-                            .allowsHitTesting(sidebarPresented)
+                        if compactSidebarIsMounted {
+                            Color.black.opacity(compactSidebarScrimOpacity)
+                                .ignoresSafeArea()
+                                .onTapGesture { closeSidebar() }
+                                .allowsHitTesting(sidebarPresented)
 
-                        sidebar
-                            .frame(width: compactSidebarWidth)
-                            .offset(x: compactSidebarOffsetX)
-                            .simultaneousGesture(compactSidebarSwipeToDismissGesture)
+                            sidebar
+                                .frame(width: compactSidebarWidth)
+                                .offset(x: compactSidebarOffsetX)
+                                .simultaneousGesture(compactSidebarSwipeToDismissGesture)
+                        }
                     }
                     .navigationDestination(for: TasksRoute.self, destination: routeDestination)
                 }
@@ -157,8 +159,9 @@ struct TasksHomeView<RouteDestination: View>: View {
 
 private extension TasksHomeView {
     var worklist: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            if visibleTasks.isEmpty {
+        let tasks = visibleTasks
+        return ScrollView(.vertical, showsIndicators: false) {
+            if tasks.isEmpty {
                 TaskEmptyPanel(
                     icon: selectedEmptyIcon,
                     title: selectedEmptyTitle,
@@ -169,7 +172,7 @@ private extension TasksHomeView {
                 .padding(.top, CueInSpacing.xl)
             } else {
                 ReorderableTaskList(
-                    tasks: visibleTasks,
+                    tasks: tasks,
                     listKey: listKey,
                     onOpenTask: onOpenTask,
                     onPoolMove: onPoolMove,
@@ -212,12 +215,16 @@ private extension TasksHomeView {
         )
     }
 
+    var compactSidebarIsMounted: Bool {
+        sidebarPresented || sidebarInteractiveOffset != 0
+    }
+
     func closeSidebar() {
-        withAnimation(.snappy(duration: 0.25, extraBounce: 0)) {
+        guard !usesPersistentSidebar else {
             sidebarPresented = false
+            return
         }
-        sidebarInteractiveOffset = 0
-        sidebarDragAxisLocked = nil
+        finishCompactSidebarInteractiveDismiss()
     }
 
     var compactSidebarWidth: CGFloat {

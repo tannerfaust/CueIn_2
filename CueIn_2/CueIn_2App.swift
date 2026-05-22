@@ -39,6 +39,9 @@ struct CueIn_2App: App {
                 }
                 .onOpenURL { url in
                     Task {
+                        if await NotionIntegrationStore.shared.handleIncomingURL(url) {
+                            return
+                        }
                         await SupabaseAuthStore.shared.handleIncomingURL(url)
                     }
                 }

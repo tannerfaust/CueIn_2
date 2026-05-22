@@ -12,6 +12,23 @@ final class LocalSyncRepository {
     }
 
     func upsert<Record: SupabaseSyncRecord>(_ record: Record, table: SupabaseTable, enqueueMutation: Bool) throws {
+        try upsertWithoutSaving(record, table: table, enqueueMutation: enqueueMutation)
+        try modelContext.save()
+    }
+
+    func upsert<Record: SupabaseSyncRecord>(_ records: [Record], table: SupabaseTable, enqueueMutation: Bool) throws {
+        guard !records.isEmpty else { return }
+        for record in records {
+            try upsertWithoutSaving(record, table: table, enqueueMutation: enqueueMutation)
+        }
+        try modelContext.save()
+    }
+
+    private func upsertWithoutSaving<Record: SupabaseSyncRecord>(
+        _ record: Record,
+        table: SupabaseTable,
+        enqueueMutation: Bool
+    ) throws {
         let payload = try encoder.encode(record)
         let localKey = "\(table.rawValue):\(record.id.uuidString)"
         let descriptor = FetchDescriptor<LocalSyncRecord>(
@@ -48,8 +65,6 @@ final class LocalSyncRepository {
                 payloadData: payload
             )
         }
-
-        try modelContext.save()
     }
 
     func records<Record: SupabaseSyncRecord>(_ type: Record.Type, table: SupabaseTable, userID: UUID) throws -> [Record] {

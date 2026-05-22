@@ -99,10 +99,11 @@ struct DataAndResetSettingsView: View {
             Button("Remove", role: .destructive) {
                 CueInAppDataService.removeGimmickDemoData()
                 gimmickDemoRemoved = true
+                hideBundledDummyTestDayTimeMap = true
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Demo tasks, fields, goals, and Today’s task-led blocks will be deleted. You can restore later from this screen.")
+            Text("Demo tasks, fields, goals, bundled TimeMaps, and Today blocks will be removed. You can restore later from this screen.")
         }
         .confirmationDialog(
             "Restore demo data?",
@@ -112,10 +113,11 @@ struct DataAndResetSettingsView: View {
             Button("Restore") {
                 CueInAppDataService.restoreGimmickDemoData()
                 gimmickDemoRemoved = false
+                hideBundledDummyTestDayTimeMap = false
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Sample tasks, goals, and Today blocks will return.")
+            Text("Sample tasks, goals, bundled TimeMaps, and Today blocks will return.")
         }
         .confirmationDialog(
             "Clear saved library?",
@@ -187,6 +189,10 @@ struct DataAndResetSettingsView: View {
                 AccountExperienceSettingsView(confirmDeleteAccount: $confirmDeleteAccount)
             }
 
+            CueInEditorSettingsCard(title: "Integrations") {
+                NotionIntegrationSettingsView()
+            }
+
             CueInEditorSettingsCard(title: "Appearance") {
                 appearanceSectionContent
             }
@@ -238,13 +244,13 @@ struct DataAndResetSettingsView: View {
             statusInset(
                 title: gimmickDemoRemoved ? "Demo data removed" : "Demo data active",
                 subtitle: gimmickDemoRemoved
-                    ? "Tasks, Goals, and task-led Today use empty starter content."
+                    ? "Tasks, Goals, TimeMaps, and Today use empty starter content."
                     : "Sample tasks, goals, and TimeMaps match the bundled mock day."
             )
 
             settingsRow(
                 title: "Remove demo data",
-                subtitle: "Delete seeded Tasks, Goals, and Today blocks",
+                subtitle: "Delete seeded Tasks, Goals, Today blocks, and demo TimeMaps",
                 icon: "trash",
                 role: .destructive
             ) {
@@ -493,6 +499,148 @@ struct DataAndResetSettingsView: View {
         }
         .padding(.vertical, 6)
         .opacity(disabled ? 0.45 : 1)
+    }
+}
+
+// MARK: - NotionIntegrationSettingsView
+
+private struct NotionIntegrationSettingsView: View {
+    @Bindable private var authStore = SupabaseAuthStore.shared
+    @Bindable private var notionStore = NotionIntegrationStore.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: CueInSpacing.md) {
+            statusPanel
+
+            HStack(spacing: CueInSpacing.sm) {
+                switch notionStore.state {
+                case .connected:
+                    notionButton(title: "Sync Notion", icon: "arrow.triangle.2.circlepath", isPrimary: true) {
+                        Task { await notionStore.syncNow(action: .full) }
+                    }
+                    notionButton(title: "Disconnect", icon: "xmark.circle", isPrimary: false) {
+                        Task { await notionStore.disconnect() }
+                    }
+                case .working:
+                    notionButton(title: "Working...", icon: "hourglass", isPrimary: true, disabled: true) {}
+                default:
+                    notionButton(
+                        title: "Connect Notion",
+                        icon: "square.and.arrow.up.on.square",
+                        isPrimary: true,
+                        disabled: !authStore.isSignedIn
+                    ) {
+                        Task { await notionStore.connect() }
+                    }
+                }
+            }
+
+            if let result = notionStore.lastSyncResult {
+                Text(syncSummary(result))
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(CueInColors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text("CueIn uses Notion OAuth and creates CueIn-managed Projects and Tasks databases in a page you grant access to. Tokens stay on the backend.")
+                .font(CueInTypography.caption)
+                .foregroundStyle(CueInColors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .task {
+            await notionStore.refreshStatus()
+        }
+    }
+
+    private var statusPanel: some View {
+        HStack(alignment: .center, spacing: CueInSpacing.md) {
+            Image(systemName: statusIcon)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(statusColor)
+                .frame(width: 42, height: 42)
+                .background(statusColor.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Notion")
+                    .font(CueInTypography.bodyMedium)
+                    .foregroundStyle(CueInColors.textPrimary)
+                Text(statusText)
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(CueInColors.textSecondary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(CueInSpacing.md)
+        .background(CueInColors.surfaceSecondary.opacity(0.62))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var statusIcon: String {
+        switch notionStore.state {
+        case .connected: return "checkmark.circle.fill"
+        case .working: return "arrow.triangle.2.circlepath.circle"
+        case .failed: return "exclamationmark.triangle.fill"
+        case .disconnected: return "square.grid.2x2"
+        }
+    }
+
+    private var statusColor: Color {
+        switch notionStore.state {
+        case .connected: return CueInColors.success
+        case .working: return CueInColors.accentFocus
+        case .failed: return CueInColors.danger
+        case .disconnected: return CueInColors.textSecondary
+        }
+    }
+
+    private var statusText: String {
+        guard authStore.isSignedIn else {
+            return "Sign in to CueIn Cloud before connecting Notion."
+        }
+        switch notionStore.state {
+        case .disconnected:
+            return "Notion is not connected."
+        case let .connected(connection):
+            let name = connection.workspaceName ?? "Notion workspace"
+            if let lastSyncedAt = connection.lastSyncedAt {
+                return "\(name). Last synced \(lastSyncedAt.formatted(date: .omitted, time: .shortened))."
+            }
+            return "\(name) connected."
+        case let .working(message):
+            return message
+        case let .failed(message):
+            return message
+        }
+    }
+
+    private func syncSummary(_ result: NotionSyncResult) -> String {
+        let pulled = (result.projectsPulled ?? 0) + (result.tasksPulled ?? 0)
+        let pushed = (result.projectsPushed ?? 0) + (result.tasksPushed ?? 0)
+        return "Last Notion sync: \(pulled) pulled, \(pushed) pushed."
+    }
+
+    private func notionButton(
+        title: String,
+        icon: String,
+        isPrimary: Bool,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(CueInTypography.captionMedium)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, CueInSpacing.sm)
+                .padding(.horizontal, CueInSpacing.sm)
+                .background(disabled ? CueInColors.surfaceSecondary : (isPrimary ? CueInColors.accentFocus : CueInColors.surfaceSecondary))
+                .foregroundStyle(disabled ? CueInColors.textTertiary : (isPrimary ? Color.white : CueInColors.textPrimary))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
     }
 }
 
@@ -1087,6 +1235,8 @@ private struct AppNavigationLayoutSettingsView: View {
     @AppStorage(TodayDisplayPreferences.taskLedViewMode) private var taskLedViewModeRaw
         = TodayDisplayPreferences.TaskLedViewMode.timeline.rawValue
     @Environment(\.dismiss) private var dismiss
+    @State private var draftTabs: [AppTab] = AppTab.defaultTabs
+    @State private var hasLoadedDraft = false
     #if os(iOS)
     @State private var editMode: EditMode = .active
     #endif
@@ -1096,8 +1246,8 @@ private struct AppNavigationLayoutSettingsView: View {
     }
 
     private var selectedTabs: [AppTab] {
-        get { AppTab.storedTabs(from: storedTabsRaw) }
-        nonmutating set { storedTabsRaw = AppTab.storageValue(for: newValue) }
+        get { AppTab.sanitize(draftTabs) }
+        nonmutating set { draftTabs = AppTab.sanitize(newValue) }
     }
 
     private var hiddenTabs: [AppTab] {
@@ -1177,16 +1327,15 @@ private struct AppNavigationLayoutSettingsView: View {
         .cueInNavigationToolbarMaterial()
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }
+                Button("Done") { commitAndDismiss() }
                     .font(CueInTypography.bodyMedium)
                     .foregroundStyle(CueInColors.accentFocus)
             }
         }
         .onAppear {
-            storedTabsRaw = AppTab.storageValue(for: selectedTabs)
-        }
-        .onChange(of: storedTabsRaw) { _, _ in
-            CueInSyncRuntimeBridge.shared.recordAppLayoutSnapshot()
+            guard !hasLoadedDraft else { return }
+            draftTabs = AppTab.storedTabs(from: storedTabsRaw)
+            hasLoadedDraft = true
         }
         .onChange(of: taskLedViewModeRaw) { _, _ in
             CueInSyncRuntimeBridge.shared.recordAppLayoutSnapshot()
@@ -1336,6 +1485,23 @@ private struct AppNavigationLayoutSettingsView: View {
     private func add(_ tab: AppTab) {
         guard selectedTabs.count < AppTab.maximumVisibleTabs else { return }
         selectedTabs = selectedTabs + [tab]
+    }
+
+    private func commitAndDismiss() {
+        #if os(iOS)
+        editMode = .inactive
+        #endif
+
+        let nextRaw = AppTab.storageValue(for: selectedTabs)
+        if storedTabsRaw != nextRaw {
+            storedTabsRaw = nextRaw
+            CueInSyncRuntimeBridge.shared.recordAppLayoutSnapshot()
+        }
+
+        Task { @MainActor in
+            await Task.yield()
+            dismiss()
+        }
     }
 }
 
