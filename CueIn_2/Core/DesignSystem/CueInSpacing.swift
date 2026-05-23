@@ -35,7 +35,7 @@ enum CueInSpacing {
     /// Bottom tab bar height
     static let tabBarHeight: CGFloat = 60
     /// Plus button size (matches `CueInLayout.fabPlusDiameter` floating add control).
-    static let plusButtonSize: CGFloat = 62
+    static let plusButtonSize: CGFloat = 60
     /// Screen horizontal margin
     static let screenHorizontal: CGFloat = 20
 }
@@ -58,9 +58,9 @@ enum CueInLayout {
     // MARK: Floating FAB column (execution + add)
 
     /// Execution bolt — scaled with the tab bar / plus cluster.
-    static let fabExecutionDiameter: CGFloat = 55
+    static let fabExecutionDiameter: CGFloat = 52
     /// Main floating add — matches tab bar height scale (was 56 when bar was 54pt).
-    static let fabPlusDiameter: CGFloat = 62
+    static let fabPlusDiameter: CGFloat = 60
     static let fabExecutionIconSize: CGFloat = 20
     static let fabPlusIconSize: CGFloat = 22
     /// Space between lightning and + — matches `AppShellView` bar HStack spacing (tab ↔ FABs).
@@ -77,21 +77,18 @@ enum CueInLayout {
     /// (bar + FAB column + comfortable breathing room).
     /// Use this as `.padding(.bottom, CueInLayout.scrollBottomInset)` on every
     /// full-screen scroll view so content is never hidden behind the floating bar.
-    static let scrollBottomInset: CGFloat = max(floatingBarHeight, stackedFabColumnHeight) + 36
+    static var scrollBottomInset: CGFloat {
+        max(floatingBarHeight, stackedFabColumnHeight) + 48
+    }
 
     /// Bottom padding applied to the floating bar itself.
-    /// On home-button iPhones (SE 2020 / SE 3, safeAreaInsets.bottom == 0)
-    /// we add a small gap so the bar breathes above the bezel.
-    /// On notched / Dynamic-Island iPhones the bar extends into the
-    /// home-indicator zone so no extra padding is needed.
     static func barBottomPadding(safeAreaBottom: CGFloat) -> CGFloat {
-        // Slightly tighter on home-button phones so the bar sits a touch lower; notched devices use `offset` instead.
-        safeAreaBottom == 0 ? 6 : 0
+        safeAreaBottom > 0 ? 24 : 10
     }
 
     /// Lowers the custom bottom chrome into the same visual band as the iOS 26 native floating tab bar.
     static func bottomChromeYOffset(safeAreaBottom: CGFloat) -> CGFloat {
-        safeAreaBottom > 0 ? 12 : 7
+        0
     }
 
     // MARK: - Top safe-area chrome (Today + paged Execution day nav)

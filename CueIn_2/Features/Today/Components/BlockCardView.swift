@@ -154,14 +154,14 @@ struct BlockCardView: View {
                 HStack(spacing: 8) {
                     Text(remainingLabel(for: remaining))
                         .font(CueInTypography.caption)
-                        .foregroundStyle(CueInColors.textSecondary)
+                        .foregroundStyle(remaining >= 0 ? CueInColors.textSecondary : CueInColors.danger)
                         .monospacedDigit()
 
                     Spacer(minLength: 0)
 
                     Text(remaining >= 0 ? "Live" : "Over")
                         .font(CueInTypography.micro)
-                        .foregroundStyle(CueInColors.textTertiary)
+                        .foregroundStyle(remaining >= 0 ? CueInColors.textTertiary : CueInColors.danger)
                 }
 
                 GeometryReader { geo in
@@ -171,7 +171,7 @@ struct BlockCardView: View {
                             .fill(CueInColors.surfaceTertiary)
 
                         Capsule()
-                            .fill(accent.opacity(0.92))
+                            .fill((remaining >= 0 ? accent : CueInColors.danger).opacity(0.92))
                             .frame(width: max(4, geo.size.width * progress))
                     }
                 }
@@ -185,7 +185,7 @@ struct BlockCardView: View {
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
         let base = String(format: "%d:%02d", minutes, seconds)
-        return remaining >= 0 ? base : "+\(base)"
+        return remaining >= 0 ? base : "-\(base)"
     }
 
     // MARK: Tasks

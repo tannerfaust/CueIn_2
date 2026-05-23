@@ -7,6 +7,8 @@ extension Notification.Name {
     static let cueInApplySavedFormula = Notification.Name("cuein.today.applySavedFormula")
     /// Opens the floating TimeMap block template library (same as long-press on TimeMap).
     static let cueInOpenBlockTemplateLibrary = Notification.Name("cuein.today.openBlockTemplateLibrary")
+    /// Present full-screen focus on the active TimeMap block (Today).
+    static let cueInOpenTimeblockFocus = Notification.Name("cuein.today.openTimeblockFocus")
     /// Switch shell to the Pomodoro tab (Hub tile, deep links, etc.).
     static let cueInOpenFocus = Notification.Name("cuein.focus.open")
     /// Switch shell to the focus audio tab.

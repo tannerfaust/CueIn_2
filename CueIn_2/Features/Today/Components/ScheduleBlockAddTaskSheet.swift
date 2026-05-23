@@ -19,6 +19,7 @@ struct ScheduleBlockAddTaskSheet: View {
     }
 
     @State private var path = NavigationPath()
+    @State private var isComposing = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -30,31 +31,37 @@ struct ScheduleBlockAddTaskSheet: View {
                 },
                 onDismiss: onDismiss,
                 onExpand: onQuickCaptureExpand,
-                showsDragHandle: false
+                showsDragHandle: false,
+                presentationMode: .compactComposer,
+                autoExpandWhenTyping: true,
+                onComposingActiveChanged: { isComposing = $0 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(CueInColors.surfacePrimary)
-            .navigationTitle("Add task")
+            .navigationTitle(isComposing ? "" : "Add task")
             .cueInNavigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        onDismiss()
+                if !isComposing {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") {
+                            onDismiss()
+                        }
+                        .foregroundStyle(CueInColors.textPrimary)
                     }
-                    .foregroundStyle(CueInColors.textPrimary)
-                }
-                ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
-                    Button {
-                        CueInHaptics.impact(.light)
-                        path.append(LibraryRoute.library)
-                    } label: {
-                        Text("Choose from tasks")
-                            .font(CueInTypography.caption)
-                            .foregroundStyle(CueInColors.textTertiary)
+                    ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
+                        Button {
+                            CueInHaptics.impact(.light)
+                            path.append(LibraryRoute.library)
+                        } label: {
+                            Text("Choose from tasks")
+                                .font(CueInTypography.caption)
+                                .foregroundStyle(CueInColors.textTertiary)
+                        }
+                        .accessibilityHint("Search your task library")
                     }
-                    .accessibilityHint("Search your task library")
                 }
             }
+            .animation(.easeInOut(duration: 0.18), value: isComposing)
             .navigationDestination(for: LibraryRoute.self) { _ in
                 TaskLibraryPickerView(
                     store: store,

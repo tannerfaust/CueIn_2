@@ -13,6 +13,22 @@ struct ScheduleBlockEditSheet: View {
     @State private var draft: ScheduleBlockDraft
     let availableScopes: ScheduleMakerTaskScopes
 
+    @AppStorage(TodayDisplayPreferences.enableCategoryTracking) private var enableCategoryTracking = false
+    @State private var customCategories: [String] = UserDefaults.standard.stringArray(forKey: "today.schedule.customCategories") ?? []
+    @State private var showingNewCategoryAlert = false
+    @State private var newCategoryName = ""
+
+    private var allCategories: [String] {
+        var list = ["Work", "Others"]
+        for cat in customCategories {
+            let trimmed = cat.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty && !list.contains(trimmed) {
+                list.append(trimmed)
+            }
+        }
+        return list
+    }
+
     let onSave: (ScheduleBlockDraft) -> Void
     let onCancel: () -> Void
 
@@ -45,32 +61,34 @@ struct ScheduleBlockEditSheet: View {
 
     var body: some View {
         NavigationStack {
-            // Vertical scroll + non-empty title so the system navigation bar matches other Today sheets.
-            ScrollView(.vertical, showsIndicators: false) {
-                ScheduleBlockEditorForm(
-                    block: $draft,
-                    availableScopes: availableScopes,
-                    allowsPoolFillSource: allowsPoolFillSource,
-                    showsAnchorNotice: !allowsPoolFillSource,
-                    allowsFixedClockEdit: allowsFixedClockEdit,
-                    showsPresetLibrary: true,
-                    createdTasksGoToToday: true,
-                    onSavePreset: {
-                        let trimmed = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !trimmed.isEmpty else { return false }
-                        return FormulaLibraryService.saveCustomBlockPreset(draft.toFormulaBlockTemplate())
-                    },
-                    liveCountdownContext: liveCountdownContext,
-                    onDurationCommit: commitDurationImmediately,
-                    allowsDurationOverride: allowsDurationOverride,
-                    durationOverrideWarning: durationOverrideWarning
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, CueInSpacing.screenHorizontal)
-                .padding(.bottom, CueInSpacing.lg)
+            ZStack {
+                CueInColors.background.ignoresSafeArea()
+
+                ScrollView(.vertical, showsIndicators: false) {
+                    ScheduleBlockEditorForm(
+                        block: $draft,
+                        availableScopes: availableScopes,
+                        allowsPoolFillSource: allowsPoolFillSource,
+                        showsAnchorNotice: !allowsPoolFillSource,
+                        allowsFixedClockEdit: allowsFixedClockEdit,
+                        showsPresetLibrary: true,
+                        createdTasksGoToToday: true,
+                        onSavePreset: {
+                            let trimmed = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !trimmed.isEmpty else { return false }
+                            return FormulaLibraryService.saveCustomBlockPreset(draft.toFormulaBlockTemplate())
+                        },
+                        liveCountdownContext: liveCountdownContext,
+                        allowsDurationOverride: allowsDurationOverride,
+                        durationOverrideWarning: durationOverrideWarning
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, CueInSpacing.screenHorizontal)
+                    .padding(.top, CueInSpacing.sm)
+                    .padding(.bottom, CueInSpacing.lg)
+                }
+                .scrollDismissesKeyboard(.interactively)
             }
-            .scrollDismissesKeyboard(.interactively)
-            .background(CueInColors.background)
             .navigationTitle("Block")
             .cueInNavigationBarTitleDisplayMode(.inline)
             .cueInNavigationToolbarColorScheme()
@@ -80,13 +98,56 @@ struct ScheduleBlockEditSheet: View {
                     onClose: onCancel,
                     onSave: saveTapped
                 ) {
-                    Text("Block")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(CueInColors.textPrimary)
-                        .lineLimit(1)
+                    Menu {
+                        ForEach(allCategories, id: \.self) { cat in
+                            Button {
+                                draft.category = cat
+                                draft.isCategoryManuallySet = true
+                            } label: {
+                                HStack {
+                                    Text(cat)
+                                    if draft.category == cat {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Divider()
+                        
+                        Button {
+                            newCategoryName = ""
+                            showingNewCategoryAlert = true
+                        } label: {
+                            Label("New Category...", systemImage: "plus")
+                        }
+                    } label: {
+                        CueInEditorCategoryChip(category: draft.category)
+                    }
                 }
             }
+            .alert("New Category", isPresented: $showingNewCategoryAlert) {
+                TextField("Category name", text: $newCategoryName)
+                    .textInputAutocapitalization(.words)
+                Button("Cancel", role: .cancel) { }
+                Button("Create") {
+                    let trimmed = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        var updated = customCategories
+                        if !updated.contains(trimmed) {
+                            updated.append(trimmed)
+                            customCategories = updated
+                            UserDefaults.standard.set(updated, forKey: "today.schedule.customCategories")
+                        }
+                        draft.category = trimmed
+                        draft.isCategoryManuallySet = true
+                    }
+                }
+            } message: {
+                Text("Enter a name for the new category.")
+            }
         }
+        .cueInPreferredColorScheme()
     }
 
     private func saveTapped() {
@@ -124,4 +185,27 @@ struct ScheduleBlockEditSheet: View {
         onCancel: { }
     )
     .cueInPreferredColorScheme()
+}
+
+struct CueInEditorCategoryChip: View {
+    let category: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "tag.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(CueInColors.textSecondary)
+            Text(category)
+                .font(CueInTypography.captionMedium)
+                .foregroundStyle(CueInColors.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(CueInColors.textTertiary)
+        }
+        .padding(.horizontal, 13)
+        .frame(height: 38)
+        .cueInEditorGlassCapsule()
+    }
 }

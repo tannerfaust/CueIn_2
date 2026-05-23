@@ -13,18 +13,63 @@ struct ShellFabOverflowMenu: View {
         let icon: String
         let title: String
         let subtitle: String
+        let tint: Color?
+        let isEnabled: Bool
         let action: () -> Void
 
-        init(icon: String, title: String, subtitle: String, action: @escaping () -> Void) {
+        init(
+            icon: String,
+            title: String,
+            subtitle: String,
+            tint: Color? = nil,
+            isEnabled: Bool = true,
+            action: @escaping () -> Void
+        ) {
             self.id = "\(icon)|\(title)"
             self.icon = icon
             self.title = title
             self.subtitle = subtitle
+            self.tint = tint
+            self.isEnabled = isEnabled
             self.action = action
         }
     }
 
     let rows: [Row]
+    var style: Style = .standard
+
+    enum Style {
+        case standard
+        case execution
+
+        var width: CGFloat {
+            switch self {
+            case .standard: return 236
+            case .execution: return 224
+            }
+        }
+
+        var rowMinHeight: CGFloat {
+            switch self {
+            case .standard: return 42
+            case .execution: return 40
+            }
+        }
+
+        var cornerRadius: CGFloat {
+            switch self {
+            case .standard: return 22
+            case .execution: return 20
+            }
+        }
+
+        var tint: Color {
+            switch self {
+            case .standard: return Color.white.opacity(0.16)
+            case .execution: return Color(red: 1.0, green: 0.86, blue: 0.35).opacity(0.15)
+            }
+        }
+    }
 
     var body: some View {
         menuSurface
@@ -45,11 +90,11 @@ struct ShellFabOverflowMenu: View {
         if #available(iOS 26.0, *) {
             GlassEffectContainer(spacing: 6) {
                 menuBody
-                    .shellFabMenuGlassChrome()
+                    .shellFabMenuGlassChrome(style: style)
             }
         } else {
             menuBody
-                .shellFabMenuGlassChrome()
+                .shellFabMenuGlassChrome(style: style)
         }
     }
 
@@ -61,7 +106,7 @@ struct ShellFabOverflowMenu: View {
             }
         }
         .padding(7)
-        .frame(width: 236, alignment: .leading)
+        .frame(width: style.width, alignment: .leading)
     }
 
     @ViewBuilder
@@ -70,7 +115,7 @@ struct ShellFabOverflowMenu: View {
             HStack(alignment: .center, spacing: 10) {
                 Image(systemName: row.icon)
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(CueInColors.textPrimary)
+                    .foregroundStyle(row.tint ?? CueInColors.textPrimary)
                     .frame(width: 22, alignment: .center)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -90,7 +135,7 @@ struct ShellFabOverflowMenu: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
-            .frame(minHeight: 42, alignment: .center)
+            .frame(minHeight: style.rowMinHeight, alignment: .center)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color.white.opacity(0.045))
@@ -98,26 +143,30 @@ struct ShellFabOverflowMenu: View {
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
+        .disabled(!row.isEnabled)
+        .opacity(row.isEnabled ? 1 : 0.42)
     }
 }
 
 // MARK: - Chrome (matches Schedule block context menu)
 
 private struct ShellFabMenuGlassChrome: ViewModifier {
+    let style: ShellFabOverflowMenu.Style
+
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
             content
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous))
                 .glassEffect(
-                    .regular.tint(Color.white.opacity(0.16)).interactive(),
-                    in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .regular.tint(style.tint).interactive(),
+                    in: RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous)
                 )
         } else {
             content
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.7)
                 }
         }
@@ -125,8 +174,8 @@ private struct ShellFabMenuGlassChrome: ViewModifier {
 }
 
 private extension View {
-    func shellFabMenuGlassChrome() -> some View {
-        modifier(ShellFabMenuGlassChrome())
+    func shellFabMenuGlassChrome(style: ShellFabOverflowMenu.Style) -> some View {
+        modifier(ShellFabMenuGlassChrome(style: style))
     }
 }
 

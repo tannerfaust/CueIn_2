@@ -159,12 +159,14 @@ final class TasksStore {
     // MARK: - Task CRUD
 
     func addTask(_ task: TaskItem) {
+        AppLogger.shared.log("TasksStore: Adding task '\(task.title)'", category: .database)
         tasks.append(task)
         recordSyncSnapshot()
     }
 
     func restoreTask(_ task: TaskItem, listKey: String? = nil) {
         guard !tasks.contains(where: { $0.id == task.id }) else { return }
+        AppLogger.shared.log("TasksStore: Restoring task '\(task.title)'", category: .database)
         tasks.append(task)
         if let listKey {
             var order = taskListOrder[listKey] ?? []
@@ -177,6 +179,7 @@ final class TasksStore {
 
     func updateTask(_ task: TaskItem) {
         guard let i = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        AppLogger.shared.log("TasksStore: Updating task '\(task.title)'", category: .database)
         var next = task
         next.updatedAt = Date()
         tasks[i] = next
@@ -214,6 +217,11 @@ final class TasksStore {
 
     func deleteTask(_ id: UUID) {
         let deletedTask = tasks.first { $0.id == id }
+        AppLogger.shared.log("TasksStore: Requesting deletion of task ID \(id) ('\(deletedTask?.title ?? "unknown")')", category: .database)
+        if let deletedTask, deletedTask.isNotionImported {
+            archiveImportedTaskLocally(deletedTask)
+            return
+        }
         tasks.removeAll { $0.id == id }
         for key in Array(taskListOrder.keys) {
             taskListOrder[key]?.removeAll { $0 == id }
@@ -223,6 +231,20 @@ final class TasksStore {
         }
         if let deletedTask {
             CueInSyncRuntimeBridge.shared.recordDeletedTask(deletedTask)
+        }
+        recordSyncSnapshot()
+    }
+
+    private func archiveImportedTaskLocally(_ task: TaskItem) {
+        guard let index = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        AppLogger.shared.log("TasksStore: Archiving imported Notion task '\(task.title)'", category: .database)
+        tasks[index].status = .archived
+        tasks[index].updatedAt = Date()
+        for key in Array(taskListOrder.keys) {
+            taskListOrder[key]?.removeAll { $0 == task.id }
+        }
+        if pendingCompleteUndoSnapshot?.id == task.id {
+            clearCompleteUndo()
         }
         recordSyncSnapshot()
     }
@@ -275,6 +297,7 @@ final class TasksStore {
     func setTaskPriority(id: UUID, priority: TaskPriority) {
         guard let i = tasks.firstIndex(where: { $0.id == id }) else { return }
         guard tasks[i].priority != priority else { return }
+        AppLogger.shared.log("TasksStore: Setting task '\(tasks[i].title)' priority to \(priority.rawValue)", category: .database)
         tasks[i].priority = priority
         tasks[i].updatedAt = Date()
         recordSyncSnapshot()
@@ -283,6 +306,7 @@ final class TasksStore {
     func setTaskStatus(id: UUID, status: TaskStatus) {
         guard let i = tasks.firstIndex(where: { $0.id == id }) else { return }
         guard tasks[i].status != status else { return }
+        AppLogger.shared.log("TasksStore: Setting task '\(tasks[i].title)' status to \(status.rawValue)", category: .database)
         switch status {
         case .inbox:
             tasks[i].scheduledDate = nil
@@ -309,6 +333,8 @@ final class TasksStore {
 
     func toggleComplete(_ id: UUID) {
         guard let i = tasks.firstIndex(where: { $0.id == id }) else { return }
+        let nextCompletedState = !tasks[i].isCompleted
+        AppLogger.shared.log("TasksStore: Toggling completion of task '\(tasks[i].title)' to \(nextCompletedState)", category: .database)
         if tasks[i].isCompleted {
             tasks[i].status = tasks[i].scheduledDate == nil ? .inbox : .scheduled
             tasks[i].completedAt = nil
@@ -324,6 +350,7 @@ final class TasksStore {
     func setCompletion(_ id: UUID, completed: Bool) {
         guard let i = tasks.firstIndex(where: { $0.id == id }) else { return }
         guard tasks[i].isCompleted != completed else { return }
+        AppLogger.shared.log("TasksStore: Setting completion of task '\(tasks[i].title)' to \(completed)", category: .database)
         if completed {
             tasks[i].status = .completed
             tasks[i].completedAt = Date()
@@ -337,6 +364,7 @@ final class TasksStore {
 
     func scheduleTask(_ id: UUID, on date: Date?) {
         guard let i = tasks.firstIndex(where: { $0.id == id }) else { return }
+        AppLogger.shared.log("TasksStore: Scheduling task '\(tasks[i].title)' on date \(date?.description ?? "nil")", category: .database)
         tasks[i].scheduledDate = date
         tasks[i].status = date == nil
             ? (tasks[i].isCompleted ? .completed : .inbox)
@@ -349,6 +377,7 @@ final class TasksStore {
     func setTodayTodoTaskStatus(id: UUID, status: TaskStatus) {
         guard let i = tasks.firstIndex(where: { $0.id == id }) else { return }
         let today = Calendar.current.startOfDay(for: Date())
+        AppLogger.shared.log("TasksStore: Setting Today Todo status of task '\(tasks[i].title)' to \(status.rawValue)", category: .database)
         switch status {
         case .inbox:
             tasks[i].scheduledDate = nil
@@ -379,6 +408,7 @@ final class TasksStore {
     func toggleTodayTodoSubtask(taskID: UUID, subtaskID: UUID) {
         guard let ti = tasks.firstIndex(where: { $0.id == taskID }) else { return }
         guard let si = tasks[ti].subtasks.firstIndex(where: { $0.id == subtaskID }) else { return }
+        AppLogger.shared.log("TasksStore: Toggling Today subtask '\(tasks[ti].subtasks[si].title)' in '\(tasks[ti].title)'", category: .database)
         tasks[ti].subtasks[si].isCompleted.toggle()
         tasks[ti].updatedAt = Date()
         recordSyncSnapshot()
@@ -387,12 +417,14 @@ final class TasksStore {
     // MARK: - Field CRUD
 
     func addField(_ f: Field) {
+        AppLogger.shared.log("TasksStore: Adding field '\(f.name)'", category: .database)
         fields.append(f)
         recordSyncSnapshot()
     }
 
     func updateField(_ f: Field) {
         guard let i = fields.firstIndex(where: { $0.id == f.id }) else { return }
+        AppLogger.shared.log("TasksStore: Updating field '\(f.name)'", category: .database)
         fields[i] = f
         recordSyncSnapshot()
     }
@@ -400,6 +432,7 @@ final class TasksStore {
     /// Removes the field, its projects, and clears `fieldID` on any orphaned tasks.
     func deleteField(_ id: UUID) {
         let deletedField = fields.first { $0.id == id }
+        AppLogger.shared.log("TasksStore: Deleting field ID: \(id) ('\(deletedField?.name ?? "unknown")')", category: .database)
         let deletedProjects = projects.filter { $0.fieldID == id }
         let projIDs = deletedProjects.map(\.id)
         projects.removeAll { $0.fieldID == id }
@@ -422,12 +455,14 @@ final class TasksStore {
     // MARK: - Project CRUD
 
     func addProject(_ p: Project) {
+        AppLogger.shared.log("TasksStore: Adding project '\(p.name)'", category: .database)
         projects.append(p)
         recordSyncSnapshot()
     }
 
     func updateProject(_ p: Project) {
         guard let i = projects.firstIndex(where: { $0.id == p.id }) else { return }
+        AppLogger.shared.log("TasksStore: Updating project '\(p.name)'", category: .database)
         projects[i] = p
         recordSyncSnapshot()
     }
@@ -435,6 +470,7 @@ final class TasksStore {
     /// Removes the project and clears `projectID` on its tasks (tasks stay on the field).
     func deleteProject(_ id: UUID) {
         let deletedProject = projects.first { $0.id == id }
+        AppLogger.shared.log("TasksStore: Deleting project ID: \(id) ('\(deletedProject?.name ?? "unknown")')", category: .database)
         projects.removeAll { $0.id == id }
         for i in tasks.indices where tasks[i].projectID == id {
             tasks[i].projectID = nil

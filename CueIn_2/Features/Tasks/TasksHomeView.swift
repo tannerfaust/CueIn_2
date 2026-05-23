@@ -342,6 +342,10 @@ private extension TasksHomeView {
             return store.activeTasks
                 .filter { $0.tags.contains("ritual") || $0.tags.contains("routine") }
                 .sorted(by: actionSort)
+        case .notionTasks:
+            return store.tasks
+                .filter { $0.isNotionImported && $0.status != .archived }
+                .sorted(by: actionSort)
         case .field(let id):
             return store.activeTasks
                 .filter { $0.fieldID == id }
@@ -415,6 +419,7 @@ private extension TasksHomeView {
         case .saved: return "tasks-worklist:saved"
         case .habits: return "tasks-worklist:habits"
         case .rituals: return "tasks-worklist:rituals"
+        case .notionTasks: return "tasks-worklist:notion"
         case .field(let id): return "tasks-worklist:field:\(id.uuidString)"
         case .project(let id): return "tasks-worklist:project:\(id.uuidString)"
         }
@@ -429,6 +434,7 @@ private extension TasksHomeView {
         case .saved: return "Saved"
         case .habits: return "Habits"
         case .rituals: return "Rituals"
+        case .notionTasks: return "Notion"
         case .field(let id): return store.field(id)?.name ?? "Field"
         case .project(let id): return store.project(id)?.name ?? "Project"
         }
@@ -446,6 +452,7 @@ private extension TasksHomeView {
         case .saved: return "bookmark"
         case .habits: return "repeat"
         case .rituals: return "sparkles"
+        case .notionTasks: return "doc.text"
         case .field: return "square.grid.2x2"
         case .project: return "folder"
         }
@@ -463,6 +470,7 @@ private extension TasksHomeView {
         case .saved: return "Nothing saved"
         case .habits: return "No habits yet"
         case .rituals: return "No rituals yet"
+        case .notionTasks: return "No Notion tasks"
         case .field: return "No active tasks"
         case .project: return "No project tasks"
         }
@@ -567,6 +575,7 @@ private struct TasksLinearSidebar: View {
     let showsTrailingHairline: Bool
     /// Split layout: overflow menu in sidebar header. Compact: menu is separate leading toolbar item when drawer is open.
     let showsHeaderDisplayPreferencesMenu: Bool
+    @Bindable private var notionStore = NotionIntegrationStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: CueInSpacing.sm) {
@@ -584,6 +593,16 @@ private struct TasksLinearSidebar: View {
                     sidebarSection("Plan") {
                         sidebarRouteRow(title: "Projects", icon: "folder", route: .projects, count: store.projects.count)
                         sidebarRouteRow(title: "Fields", icon: "square.grid.2x2", route: .initiatives, count: store.fields.count)
+                    }
+
+                    if notionIsConnected || notionTaskCount > 0 || notionProjectCount > 0 {
+                        sidebarSection("Notion") {
+                            sidebarRow(.notionTasks, title: "Tasks", icon: "doc.text", count: notionTaskCount, tint: CueInColors.textPrimary)
+                            sidebarRouteRow(title: "Projects", icon: "tray.full", route: .projects, count: notionProjectCount)
+                            if let workspaceTitle {
+                                sidebarStaticRow(title: workspaceTitle, icon: "building.2", count: nil, tint: CueInColors.textTertiary)
+                            }
+                        }
                     }
 
                     sidebarSection("Rhythm") {
@@ -648,6 +667,26 @@ private struct TasksLinearSidebar: View {
         store.activeTasks.filter { $0.tags.contains("ritual") || $0.tags.contains("routine") }.count
     }
 
+    private var notionTaskCount: Int {
+        store.tasks.filter { $0.isNotionImported && $0.status != .archived }.count
+    }
+
+    private var notionProjectCount: Int {
+        store.projects.filter(\.isNotionImported).count
+    }
+
+    private var notionIsConnected: Bool {
+        if case .connected = notionStore.state { return true }
+        return false
+    }
+
+    private var workspaceTitle: String? {
+        if case let .connected(connection) = notionStore.state {
+            return connection.workspaceName ?? "Notion workspace"
+        }
+        return nil
+    }
+
     private func sidebarSection<Content: View>(
         _ title: String,
         @ViewBuilder content: () -> Content
@@ -705,10 +744,21 @@ private struct TasksLinearSidebar: View {
         .buttonStyle(.plain)
     }
 
+    private func sidebarStaticRow(title: String, icon: String, count: Int?, tint: Color) -> some View {
+        sidebarRowContent(
+            title: title,
+            icon: icon,
+            count: count,
+            isSelected: false,
+            tint: tint
+        )
+        .accessibilityElement(children: .combine)
+    }
+
     private func sidebarRowContent(
         title: String,
         icon: String,
-        count: Int,
+        count: Int?,
         isSelected: Bool,
         tint: Color
     ) -> some View {
@@ -725,10 +775,12 @@ private struct TasksLinearSidebar: View {
 
             Spacer(minLength: CueInSpacing.sm)
 
-            Text("\(count)")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(CueInColors.textTertiary)
-                .monospacedDigit()
+            if let count {
+                Text("\(count)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(CueInColors.textTertiary)
+                    .monospacedDigit()
+            }
         }
         .padding(.horizontal, CueInSpacing.sm)
         .padding(.vertical, 8)

@@ -34,13 +34,16 @@ struct AppShellView: View {
     @State private var quickCaptureFields: [Field] = []
     @State private var quickCaptureProjects: [Project] = []
     @State private var showExecutionSheet = false
+    @State private var quickBlockNowMenuPresented = false
+    @State private var quickBlockNowTitle = ""
     @State private var showTimelineCapture = false
-    @State private var showScheduleBlockTaskSheet = false
     @State private var screenSafeAreaBottom: CGFloat = 0
     @State private var showDevCaptureSheet = false
     /// Tracks Timer / Sounds tab switches initiated from Hub tiles so a leading back control can return to Hub.
     @State private var auxiliaryTabOpenedFromHub: AppTab? = nil
     @AppStorage("cuein.devNotebook.showCaptureButton") private var showDevNotebookCaptureButton = false
+    @AppStorage(TodayDisplayPreferences.pullsTasksFromExecutionPool) private var pullsTasksFromExecutionPool = true
+    @AppStorage(TodayDisplayPreferences.scheduleShowsPagePlaybackControl) private var scheduleShowsPagePlaybackControl = false
     @Bindable private var toastCenter = CueInToastCenter.shared
     @State private var tasksStore = TasksStore.shared
     @State private var todayViewModel = TodayViewModel.shared
@@ -51,25 +54,21 @@ struct AppShellView: View {
         ZStack {
             CueInColors.background.ignoresSafeArea()
             // Read safe area once so the bar can adapt to home-button vs notched phones.
-            Color.clear
-                .ignoresSafeArea()
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: BottomSafeAreaKey.self,
-                            value: geo.safeAreaInsets.bottom
-                        )
-                    }
-                    .ignoresSafeArea()
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: BottomSafeAreaKey.self,
+                    value: geo.safeAreaInsets.bottom
                 )
-                .onPreferenceChange(BottomSafeAreaKey.self) { screenSafeAreaBottom = $0 }
+            }
+            .allowsHitTesting(false)
+            .onPreferenceChange(BottomSafeAreaKey.self) { screenSafeAreaBottom = $0 }
             tabContent
-            if fabOverflowPresented {
+            if fabOverflowPresented || quickBlockNowMenuPresented {
                 Color.black.opacity(0.36)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        dismissFabOverflow()
+                        dismissFloatingMenus()
                     }
                     .transition(.opacity)
             }
@@ -90,6 +89,7 @@ struct AppShellView: View {
         .onChange(of: selectedTab) { _, newValue in
             storedSelectedTabRaw = newValue.rawValue
             if fabOverflowPresented { fabOverflowPresented = false }
+            if quickBlockNowMenuPresented { quickBlockNowMenuPresented = false }
             if newValue != .tasks {
                 tasksStore.clearCompleteUndo()
             }
@@ -123,19 +123,6 @@ struct AppShellView: View {
                 .presentationDetents([.medium])
                 .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
                 .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $showScheduleBlockTaskSheet) {
-            ScheduleQuickAddTaskSheet(
-                blocks: todayViewModel.todayScheduleBlocks,
-                onAdd: { blockID, title in
-                    todayViewModel.addTemplateTaskToFormulaBlock(blockID: blockID, title: title)
-                    showScheduleBlockTaskSheet = false
-                },
-                onCancel: { showScheduleBlockTaskSheet = false }
-            )
-            .presentationDetents([.medium])
-            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
-            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showFabBlockLibrary) {
             BlockTemplateLibrarySheet(
@@ -327,7 +314,7 @@ struct AppShellView: View {
     }
 
     private func presentQuickCaptureComposer(timeline: Bool = false) {
-        dismissFabOverflow()
+        dismissFloatingMenus()
         quickCaptureExpanded = false
         quickCaptureFields = tasksStore.fields
         quickCaptureProjects = tasksStore.projects
@@ -422,6 +409,7 @@ struct AppShellView: View {
                         + 8
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .ignoresSafeArea(edges: .bottom)
                 .zIndex(1)
                 .allowsHitTesting(true)
             }
@@ -438,13 +426,12 @@ struct AppShellView: View {
             || auxiliaryTaskSheet != nil
             || showExecutionSheet
             || showTimelineCapture
-            || showScheduleBlockTaskSheet
     }
 
     /// Clears the floating tab bar + FAB column using the same heights as on-screen chrome.
     private var shellToastBottomInset: CGFloat {
-        let showExecution = isTodayDestination(selectedTab) && shouldShowFloatingExecutionButton
-        let fabColumnHeight: CGFloat = showExecution
+        let showTaskLedExecution = selectedTab == .taskLed && shouldShowFloatingExecutionButton
+        let fabColumnHeight: CGFloat = showTaskLedExecution
             ? CueInLayout.fabExecutionDiameter + CueInLayout.floatingFabVerticalSpacing + CueInLayout.fabPlusDiameter
             : CueInLayout.fabPlusDiameter
         let chromeHeight = max(CueInLayout.floatingBarHeight, fabColumnHeight)
@@ -479,6 +466,7 @@ struct AppShellView: View {
                 .zIndex(3)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .ignoresSafeArea(edges: .bottom)
     }
 
     private var barContents: some View {
@@ -525,22 +513,31 @@ struct AppShellView: View {
             return "Adds something you are choosing not to do."
         case .quantifiedSelf:
             return "Opens the new tracker sheet for Measures."
+        case .schedule:
+            if todayMode == .formulaBased, todayViewModel.hasFormulaRunStarted {
+                return "Opens the add menu for your TimeMap."
+            }
+            return nil
         default:
             return nil
         }
     }
 
-    /// Trailing **two separate** circular actions: execution (Today only) above add.
-    /// Formula preview starts from Today chrome; after a schedule starts, the floating bolt
-    /// becomes the schedule action entry point above add.
+    /// TimeMap tab after the day has been started: + opens the block menu instead of inserting immediately.
+    private var schedulePlusOpensAddMenu: Bool {
+        selectedTab == .schedule
+            && todayMode == .formulaBased
+            && todayViewModel.hasFormulaRunStarted
+    }
+
     private var floatingFabColumn: some View {
-        let showExecution = isTodayDestination(selectedTab) && shouldShowFloatingExecutionButton
+        let showTaskLedExecution = selectedTab == .taskLed && shouldShowFloatingExecutionButton
         let rows = fabOverflowRows
         let showTasksCompleteUndo = selectedTab == .tasks && tasksStore.pendingCompleteUndoSnapshot != nil
         return VStack(spacing: CueInLayout.floatingFabVerticalSpacing) {
             if showTasksCompleteUndo {
                 TasksFloatingCompleteUndoChip {
-                    dismissFabOverflow()
+                    dismissFloatingMenus()
                     tasksStore.consumeCompleteUndo()
                 }
                 .transition(
@@ -550,18 +547,25 @@ struct AppShellView: View {
                     )
                 )
             }
-            if showExecution {
-                FloatingLightningButton { showExecutionSheet = true }
-                    .transition(
-                        .asymmetric(
-                            insertion: fabInsertionTransition,
-                            removal: fabRemovalTransition
-                        )
+            if showTaskLedExecution {
+                FloatingLightningButton {
+                    dismissFabOverflow()
+                    showExecutionSheet = true
+                }
+                .transition(
+                    .asymmetric(
+                        insertion: fabInsertionTransition,
+                        removal: fabRemovalTransition
                     )
+                )
             }
             FloatingPlusButton(
                 onTap: {
-                    dismissFabOverflow()
+                    if schedulePlusOpensAddMenu {
+                        toggleScheduleAddMenu()
+                        return
+                    }
+                    dismissFloatingMenus()
                     if selectedTab == .antiTodo {
                         showAntiTodoCapture = true
                     } else if selectedTab == .quantifiedSelf {
@@ -578,7 +582,12 @@ struct AppShellView: View {
                     }
                 },
                 onLongPress: {
+                    if schedulePlusOpensAddMenu {
+                        toggleScheduleAddMenu()
+                        return
+                    }
                     guard !rows.isEmpty else { return }
+                    dismissQuickBlockNowMenu()
                     withAnimation(ShellFabMotion.spring) {
                         fabOverflowPresented = true
                     }
@@ -593,8 +602,21 @@ struct AppShellView: View {
                 ShellFabOverflowMenu(rows: rows)
                     .offset(y: -(CueInLayout.fabPlusDiameter + 12))
             }
+            if quickBlockNowMenuPresented {
+                FormulaBlockNowMenu(
+                    title: $quickBlockNowTitle,
+                    onPickDuration: { minutes in
+                        let title = quickBlockNowTitle
+                        quickBlockNowTitle = ""
+                        dismissQuickBlockNowMenu()
+                        todayViewModel.insertImmediateFormulaBlock(title: title, durationMinutes: minutes)
+                    },
+                    onDismiss: { dismissQuickBlockNowMenu() }
+                )
+                .offset(y: -(CueInLayout.fabPlusDiameter + 12))
+            }
         }
-        .animation(fabSpring, value: showExecution)
+        .animation(fabSpring, value: showTaskLedExecution)
         .animation(fabSpring, value: showTasksCompleteUndo)
         .dynamicTypeSize(.xSmall ... .large)
     }
@@ -603,6 +625,30 @@ struct AppShellView: View {
         guard fabOverflowPresented else { return }
         withAnimation(ShellFabMotion.spring) {
             fabOverflowPresented = false
+        }
+    }
+
+    private func dismissQuickBlockNowMenu() {
+        guard quickBlockNowMenuPresented else { return }
+        withAnimation(ShellFabMotion.spring) {
+            quickBlockNowMenuPresented = false
+        }
+    }
+
+    private func dismissFloatingMenus() {
+        dismissFabOverflow()
+        dismissQuickBlockNowMenu()
+    }
+
+    private func toggleScheduleAddMenu() {
+        guard schedulePlusOpensAddMenu, !fabOverflowRows.isEmpty else { return }
+        if fabOverflowPresented {
+            dismissFabOverflow()
+            return
+        }
+        dismissQuickBlockNowMenu()
+        withAnimation(ShellFabMotion.spring) {
+            fabOverflowPresented = true
         }
     }
 
@@ -644,7 +690,26 @@ struct AppShellView: View {
     }
 
     private var algorithmFabOverflowRows: [ShellFabOverflowMenu.Row] {
-        [
+        var rows: [ShellFabOverflowMenu.Row] = []
+
+        if todayViewModel.isFormulaRunLive, !todayViewModel.isFormulaSchedulePaused {
+            rows.append(
+                .init(
+                    icon: "exclamationmark.triangle.fill",
+                    title: "Block right now",
+                    subtitle: "Drop in a quick interruption",
+                    tint: Color(red: 1.0, green: 0.63, blue: 0.25)
+                ) {
+                    dismissFabOverflow()
+                    quickBlockNowTitle = ""
+                    withAnimation(ShellFabMotion.spring) {
+                        quickBlockNowMenuPresented = true
+                    }
+                }
+            )
+        }
+
+        rows += [
             .init(icon: "rectangle.stack.fill.badge.plus", title: "New block", subtitle: "Insert a fresh time block") {
                 dismissFabOverflow()
                 todayViewModel.insertFormulaBlock(
@@ -658,9 +723,9 @@ struct AppShellView: View {
                 dismissFabOverflow()
                 showFabBlockLibrary = true
             },
-            .init(icon: "checkmark.circle.fill", title: "Add task to block", subtitle: "Attach to an existing block") {
+            .init(icon: "plus.circle.fill", title: "New task", subtitle: "Add to your task list, not on a time block") {
                 dismissFabOverflow()
-                deferPresentation { showScheduleBlockTaskSheet = true }
+                deferPresentation { presentQuickCaptureComposer() }
             },
             .init(icon: "arrow.triangle.2.circlepath", title: "Change schedule", subtitle: "Pick a different day framework") {
                 dismissFabOverflow()
@@ -691,6 +756,7 @@ struct AppShellView: View {
                 )
             },
         ]
+        return rows
     }
 
     private var taskLedFabOverflowRows: [ShellFabOverflowMenu.Row] {
@@ -818,7 +884,7 @@ struct AppShellView: View {
             if mode == .todo { return false }
             return true
         case .formulaBased:
-            return todayViewModel.hasFormulaRunStarted
+            return false
         }
     }
 
@@ -843,6 +909,135 @@ private struct BottomSafeAreaKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+private struct FormulaBlockNowMenu: View {
+    @Binding var title: String
+    let onPickDuration: (Int) -> Void
+    let onDismiss: () -> Void
+
+    private let durations = [5, 10, 15, 20, 30, 45]
+
+    var body: some View {
+        menuSurface
+            .shadow(color: Color.black.opacity(0.30), radius: 22, y: 14)
+            .transition(
+                .asymmetric(
+                    insertion: .opacity
+                        .combined(with: .move(edge: .bottom))
+                        .combined(with: .scale(scale: 0.94, anchor: .bottomTrailing)),
+                    removal: .opacity
+                        .combined(with: .scale(scale: 0.97, anchor: .bottomTrailing))
+                )
+            )
+    }
+
+    @ViewBuilder
+    private var menuSurface: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 6) {
+                menuBody
+                    .formulaBlockNowGlassChrome()
+            }
+        } else {
+            menuBody
+                .formulaBlockNowGlassChrome()
+        }
+    }
+
+    private var menuBody: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Block right now")
+                        .font(CueInTypography.captionMedium)
+                        .foregroundStyle(CueInColors.textPrimary)
+
+                    Text("Choose duration")
+                        .font(CueInTypography.micro)
+                        .foregroundStyle(CueInColors.textTertiary)
+                }
+                Spacer(minLength: 0)
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(CueInColors.textTertiary)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.white.opacity(0.06)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close")
+            }
+
+            TextField("Optional name", text: $title)
+                .font(CueInTypography.captionMedium)
+                .textInputAutocapitalization(.sentences)
+                .submitLabel(.done)
+                .padding(.horizontal, 10)
+                .frame(height: 36)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.white.opacity(0.055))
+                )
+                .foregroundStyle(CueInColors.textPrimary)
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 6),
+                    GridItem(.flexible(), spacing: 6),
+                    GridItem(.flexible(), spacing: 6)
+                ],
+                spacing: 6
+            ) {
+                ForEach(durations, id: \.self) { minutes in
+                    Button {
+                        onPickDuration(minutes)
+                    } label: {
+                        Text("\(minutes)m")
+                            .font(CueInTypography.captionMedium)
+                            .foregroundStyle(CueInColors.textPrimary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 36)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color.white.opacity(minutes == 15 ? 0.12 : 0.06))
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(9)
+        .frame(width: 224, alignment: .leading)
+    }
+}
+
+private struct FormulaBlockNowGlassChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+        if #available(iOS 26.0, *) {
+            content
+                .clipShape(shape)
+                .glassEffect(
+                    .regular.tint(Color(red: 1.0, green: 0.63, blue: 0.25).opacity(0.15)).interactive(),
+                    in: shape
+                )
+        } else {
+            content
+                .clipShape(shape)
+                .background(.ultraThinMaterial, in: shape)
+                .overlay {
+                    shape.strokeBorder(Color.white.opacity(0.16), lineWidth: 0.7)
+                }
+        }
+    }
+}
+
+private extension View {
+    func formulaBlockNowGlassChrome() -> some View {
+        modifier(FormulaBlockNowGlassChrome())
     }
 }
 

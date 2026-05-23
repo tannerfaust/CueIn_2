@@ -52,6 +52,8 @@ struct ScheduleBlockCardView: View {
     let onFinishBlockKeepingPending: () -> Void
     let onRevertCompletedBlock: () -> Void
     let onToggleTask: (UUID) -> Void
+    var onAddTask: (() -> Void)? = nil
+    var onOpenFocus: (() -> Void)? = nil
 
     var onEdit: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
@@ -69,8 +71,15 @@ struct ScheduleBlockCardView: View {
         TodayDisplayPreferences.migratedActiveBlockEmphasis(from: activeBlockEmphasisRaw)
     }
 
-    /// Color for the *running* (current) block: rings, glass, live timer, and glyph.
-    private var runningAccent: Color { blockEmphasis.primary }
+    /// Block accent from Look (custom swatch or lane default) — drives the running card wash and chrome.
+    private var blockTimelineAccent: Color {
+        CueInColors.resolvedTimelineAccent(blockType: block.type, hex: block.timelineAccentHex)
+    }
+
+    /// Running block timer, ring, border, and wash use the block accent; global emphasis is not used here.
+    private var runningAccent: Color {
+        isCurrentBlock ? blockTimelineAccent : blockEmphasis.primary
+    }
 
     private var isRoutineBlock: Bool {
         block.isRepeatable && block.taskSource == .templateTasks
@@ -83,6 +92,14 @@ struct ScheduleBlockCardView: View {
 
     private var showsActiveTasks: Bool {
         isLiveRun && isCurrentBlock && !block.tasks.isEmpty
+    }
+
+    private var showsRunningBlockAddTask: Bool {
+        isLiveRun && isCurrentBlock && block.state == .active && onAddTask != nil
+    }
+
+    private var isCompletedBlock: Bool {
+        block.state == .completed
     }
 
     private var remindersListBodySpacing: CGFloat {
@@ -123,7 +140,22 @@ struct ScheduleBlockCardView: View {
         }
     }
 
+    /// Fill-mode cue (checklist / sparkles). Hidden on the live, active block where tasks are shown inline.
+    private var showsTaskLinkageIndicator: Bool {
+        if isCompletedBlock { return false }
+        if showsActiveTasks { return false }
+        if isLiveRun, block.state == .active { return false }
+        return true
+    }
+
+    @ViewBuilder
     private var taskLinkageIconRow: some View {
+        if showsTaskLinkageIndicator {
+            taskLinkageIconRowContent
+        }
+    }
+
+    private var taskLinkageIconRowContent: some View {
         HStack(spacing: 0) {
             Image(systemName: taskLinkageIconName)
                 .font(.system(size: 12, weight: .semibold))
@@ -197,39 +229,39 @@ struct ScheduleBlockCardView: View {
             switch design {
             case .glass:
                 mainAndTrailing
-                    .padding(CueInSpacing.base)
+                    .padding(glassCardPadding)
                     .modifier(
                         ScheduleBlockGlassDesignModifier(
                             useCanvasLiquidGlass: useCanvasLiquidGlass,
                             isCurrentBlock: isCurrentBlock,
-                            cornerRadius: 22,
-                            runningPrimary: runningAccent
+                            isCompleted: isCompletedBlock,
+                            cornerRadius: isCompletedBlock ? 18 : 22,
+                            runningPrimary: blockTimelineAccent
                         )
                     )
             case .reminders:
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .top, spacing: isCompletedBlock ? 8 : 10) {
                     remindersCompletionDisk
                     mainAndTrailing
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 6)
+                .padding(.vertical, isCompletedBlock ? 3 : 6)
                 .background {
-                    RoundedRectangle(cornerRadius: 0, style: .continuous)
-                        .fill(
-                            isCurrentBlock
-                            ? CueInColors.surfaceSecondary.opacity(0.28)
-                            : .clear
-                        )
+                    if isCurrentBlock, !isCompletedBlock {
+                        RoundedRectangle(cornerRadius: 0, style: .continuous)
+                            .fill(CueInColors.scheduleRunningBlockWash(accent: blockTimelineAccent))
+                    }
                 }
             case .agenda:
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .top, spacing: isCompletedBlock ? 8 : 10) {
                     agendaTimeGutter
                     RoundedRectangle(cornerRadius: 0.5, style: .continuous)
-                        .fill(CueInColors.divider)
-                        .frame(width: 1, height: 40)
+                        .fill(CueInColors.divider.opacity(isCompletedBlock ? 0.45 : 1))
+                        .frame(width: 1, height: isCompletedBlock ? 32 : 40)
                     mainAndTrailing
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, isCompletedBlock ? 2 : 0)
             }
         }
 
@@ -238,7 +270,7 @@ struct ScheduleBlockCardView: View {
                 swipeBackground
             }
             chrome
-                .opacity(block.state == .completed ? 0.50 : 1.0)
+                .modifier(ScheduleBlockCompletedAppearanceModifier(isCompleted: isCompletedBlock))
                 .contentShape(
                     RoundedRectangle(
                         cornerRadius: design.blockInteractionClipRadius,
@@ -255,14 +287,31 @@ struct ScheduleBlockCardView: View {
                     }
                 }
         }
+        .animation(.spring(response: 0.38, dampingFraction: 0.86), value: isCompletedBlock)
+    }
+
+    private var glassCardPadding: EdgeInsets {
+        if isCompletedBlock {
+            return EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
+        }
+        return EdgeInsets(
+            top: CueInSpacing.base,
+            leading: CueInSpacing.base,
+            bottom: CueInSpacing.base,
+            trailing: CueInSpacing.base
+        )
     }
 
     private var agendaTimeGutter: some View {
         VStack(alignment: .trailing, spacing: 2) {
             Text(agendaStartString)
-                .font(CueInTypography.caption)
+                .font(isCompletedBlock ? CueInTypography.micro : CueInTypography.caption)
                 .monospacedDigit()
-                .foregroundStyle(isCurrentBlock ? runningAccent : CueInColors.textSecondary)
+                .foregroundStyle(
+                    isCompletedBlock
+                        ? CueInColors.textTertiary
+                        : (isCurrentBlock ? runningAccent : CueInColors.textSecondary)
+                )
             if showsTimeRange {
                 Text(agendaEndString)
                     .font(CueInTypography.micro)
@@ -455,11 +504,29 @@ struct ScheduleBlockCardView: View {
                         )
                     )
             }
+            if showsRunningBlockAddTask, let onAddTask {
+                if !showsActiveTasks {
+                    Rectangle()
+                        .fill(CueInColors.divider.opacity(design == .reminders ? 0.35 : 0.7))
+                        .frame(height: 0.5)
+                        .padding(.vertical, design == .reminders ? CueInSpacing.xs * 0.5 : CueInSpacing.xs)
+                }
+                runningBlockAddTaskButton(action: onAddTask)
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity
+                                .combined(with: .move(edge: .top))
+                            .combined(with: .scale(scale: 0.98, anchor: .top)),
+                            removal: .opacity.combined(with: .move(edge: .top))
+                        )
+                    )
+            }
             taskLinkageIconRow
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(.spring(response: 0.34, dampingFraction: 0.86, blendDuration: 0.04), value: isCurrentBlock)
         .animation(.spring(response: 0.34, dampingFraction: 0.86, blendDuration: 0.04), value: showsActiveTasks)
+        .animation(.spring(response: 0.34, dampingFraction: 0.86, blendDuration: 0.04), value: showsRunningBlockAddTask)
     }
 
     @ViewBuilder
@@ -478,7 +545,7 @@ struct ScheduleBlockCardView: View {
                     Spacer(minLength: 0)
                 }
                 if isCurrentBlock {
-                    glassCornerLiveTimer
+                    glassCornerRunControls
                         .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .topTrailing)))
                 } else if showsGlassPlannedDurationBadge {
                     glassCornerPlannedDurationBadge
@@ -497,20 +564,20 @@ struct ScheduleBlockCardView: View {
     }
 
     private var titleAndMetaVStack: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: isCompletedBlock ? 3 : 6) {
             HStack(alignment: .center, spacing: CueInSpacing.sm) {
                 Text(block.title)
-                    .font(
-                        (design == .reminders || design == .agenda) ? CueInTypography.bodyMedium : CueInTypography.headline
-                    )
-                    .foregroundStyle(CueInColors.textPrimary)
+                    .font(completedTitleFont)
+                    .foregroundStyle(isCompletedBlock ? CueInColors.textTertiary : CueInColors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if isRoutineBlock {
                     routineTag
+                        .opacity(isCompletedBlock ? 0.65 : 1)
                 }
                 if showsClockPinnedIndicator {
                     clockPinnedTag
+                        .opacity(isCompletedBlock ? 0.65 : 1)
                 }
             }
 
@@ -520,18 +587,43 @@ struct ScheduleBlockCardView: View {
         }
     }
 
+    private var completedTitleFont: Font {
+        switch design {
+        case .glass:
+            return CueInTypography.bodyMedium
+        case .reminders, .agenda:
+            return CueInTypography.captionMedium
+        }
+    }
+
     private var blockIdentityGlyph: some View {
-        Image(systemName: block.resolvedTimelineGlyph)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(isCurrentBlock ? runningAccent : CueInColors.resolvedTimelineAccent(blockType: block.type, hex: block.timelineAccentHex))
-            .frame(width: 30, height: 30)
+        let glyphSize: CGFloat = isCompletedBlock ? 24 : 30
+        let iconPointSize: CGFloat = isCompletedBlock ? 11 : 13
+        let corner: CGFloat = isCompletedBlock ? 8 : 10
+        return Image(systemName: block.resolvedTimelineGlyph)
+            .font(.system(size: iconPointSize, weight: .semibold))
+            .foregroundStyle(
+                isCompletedBlock
+                    ? CueInColors.textTertiary.opacity(0.85)
+                    : (isCurrentBlock
+                        ? runningAccent
+                        : CueInColors.resolvedTimelineAccent(blockType: block.type, hex: block.timelineAccentHex))
+            )
+            .frame(width: glyphSize, height: glyphSize)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(CueInColors.surfaceTertiary.opacity(isRoutineBlock ? 0.72 : 0.52))
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .fill(
+                        CueInColors.surfaceTertiary.opacity(
+                            isCompletedBlock ? 0.38 : (isRoutineBlock ? 0.72 : 0.52)
+                        )
+                    )
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .strokeBorder(
+                        Color.white.opacity(isCompletedBlock ? 0.04 : 0.06),
+                        lineWidth: 0.5
+                    )
             }
     }
 
@@ -588,21 +680,24 @@ struct ScheduleBlockCardView: View {
     }
 
     private var glassCompletedCheckDisk: some View {
-        ZStack {
+        let disk: CGFloat = isCompletedBlock ? 24 : 28
+        return ZStack {
             Circle()
-                .fill(Color.white)
+                .fill(isCompletedBlock ? CueInColors.textTertiary.opacity(0.22) : Color.white)
             Image(systemName: "checkmark")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(Color.black.opacity(0.78))
+                .font(.system(size: isCompletedBlock ? 10 : 11, weight: .bold))
+                .foregroundStyle(
+                    isCompletedBlock ? CueInColors.textSecondary : Color.black.opacity(0.78)
+                )
         }
-        .frame(width: 28, height: 28)
+        .frame(width: disk, height: disk)
     }
 
     private var glassCornerLiveTimer: some View {
         withLiveTimerClock { now in
-            let total = max(block.endTime.timeIntervalSince(block.startTime), 1)
-            let elapsed = now.timeIntervalSince(block.startTime)
-            let progress = min(max(elapsed / total, 0), 1)
+            let progress = liveTimerProgress(at: now)
+            let accent = liveTimerAccent(at: now)
+            let isOvertime = isLiveTimerOvertime(at: now)
             let ring: CGFloat = 34
 
             ZStack {
@@ -613,48 +708,57 @@ struct ScheduleBlockCardView: View {
                     Circle()
                         .trim(from: 0, to: progress)
                         .stroke(
-                            runningAccent.opacity(0.92),
+                            accent.opacity(0.92),
                             style: StrokeStyle(lineWidth: 3, lineCap: .round)
                         )
                         .rotationEffect(.degrees(-90))
-                    Text(liveTimerLabel(at: now))
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(CueInColors.textSecondary)
-                        .monospacedDigit()
+                    liveTimerRingText(
+                        liveTimerRingLabel(at: now),
+                        isOvertime: isOvertime,
+                        accent: accent,
+                        primaryStyle: false
+                    )
                 case .pulse:
                     Circle()
-                        .fill(runningAccent.opacity(0.14 + (0.18 * progress)))
+                        .fill(accent.opacity(0.14 + (0.18 * progress)))
                     Circle()
-                        .stroke(runningAccent.opacity(0.8), lineWidth: 1.5)
-                    Text(liveTimerLabel(at: now))
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(CueInColors.textPrimary)
-                        .monospacedDigit()
+                        .stroke(accent.opacity(0.8), lineWidth: 1.5)
+                    liveTimerRingText(
+                        liveTimerRingLabel(at: now),
+                        isOvertime: isOvertime,
+                        accent: accent,
+                        primaryStyle: true
+                    )
                 case .bars:
                     VStack(spacing: 4) {
                         HStack(spacing: 2) {
                             ForEach(0..<5, id: \.self) { idx in
                                 RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                    .fill(progress >= (Double(idx + 1) / 5.0) ? runningAccent.opacity(0.9) : CueInColors.surfaceTertiary.opacity(0.65))
+                                    .fill(progress >= (Double(idx + 1) / 5.0) ? accent.opacity(0.9) : CueInColors.surfaceTertiary.opacity(0.65))
                                     .frame(width: 5, height: 6)
                             }
                         }
-                        Text(liveTimerLabel(at: now))
-                            .font(.system(size: 9, weight: .semibold, design: .rounded))
-                            .foregroundStyle(CueInColors.textSecondary)
-                            .monospacedDigit()
+                        liveTimerRingText(
+                            liveTimerRingLabel(at: now),
+                            isOvertime: isOvertime,
+                            accent: accent,
+                            primaryStyle: false
+                        )
                     }
                 case .minimal:
-                    Text(liveTimerLabel(at: now))
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(runningAccent.opacity(0.95))
-                        .monospacedDigit()
+                    liveTimerRingText(
+                        liveTimerRingLabel(at: now),
+                        isOvertime: isOvertime,
+                        accent: accent,
+                        primaryStyle: false,
+                        fontSize: 10
+                    )
                 }
             }
             .frame(width: ring, height: ring)
             .animation(nil, value: progress)
         }
-        .accessibilityLabel("Flexible duration \(block.durationMinutes) minutes")
+        .accessibilityLabel(liveTimerAccessibilityLabel(at: frozenLiveProgressDate ?? Date()))
     }
 
     private var routineTag: some View {
@@ -691,9 +795,37 @@ struct ScheduleBlockCardView: View {
     }
 
     private var glassTrailingInset: CGFloat {
-        if isCurrentBlock { return 44 }
+        if isCurrentBlock {
+            let focusSlot: CGFloat = onOpenFocus != nil ? 38 : 0
+            return 40 + focusSlot
+        }
         if showsGlassPlannedDurationBadge { return 58 }
         return 0
+    }
+
+    @ViewBuilder
+    private var glassCornerRunControls: some View {
+        HStack(spacing: 6) {
+            if let onOpenFocus {
+                Button(action: onOpenFocus) {
+                    Image(systemName: "scope")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(blockTimelineAccent)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(blockTimelineAccent.opacity(0.16))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(blockTimelineAccent.opacity(0.38), lineWidth: 0.5)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Focus mode")
+            }
+            glassCornerLiveTimer
+        }
     }
 
     private var showsGlassPlannedDurationBadge: Bool {
@@ -728,8 +860,12 @@ struct ScheduleBlockCardView: View {
                 }
 
                 Text(item)
-                    .font(CueInTypography.caption)
-                    .foregroundStyle(CueInColors.textSecondary)
+                    .font(isCompletedBlock ? CueInTypography.micro : CueInTypography.caption)
+                    .foregroundStyle(
+                        isCompletedBlock
+                            ? CueInColors.textTertiary.opacity(0.75)
+                            : CueInColors.textSecondary
+                    )
                     .monospacedDigit()
             }
         }
@@ -752,13 +888,71 @@ struct ScheduleBlockCardView: View {
         CueInTimeFormat.hourMinute(block.startTime)
     }
 
-    private func liveTimerLabel(at date: Date) -> String {
-        let remaining = max(Int(block.endTime.timeIntervalSince(date)), 0)
-        if showsTimerSeconds || frozenLiveProgressDate != nil {
-            return digitalDurationLabel(totalSeconds: remaining)
+    private var overtimeTimerColor: Color { CueInColors.danger }
+
+    private func liveTimerRemainingSeconds(at date: Date) -> Int {
+        Int(block.endTime.timeIntervalSince(date))
+    }
+
+    private func isLiveTimerOvertime(at date: Date) -> Bool {
+        isCurrentBlock && liveTimerRemainingSeconds(at: date) <= 0
+    }
+
+    private func liveTimerAccent(at date: Date) -> Color {
+        isLiveTimerOvertime(at: date) ? overtimeTimerColor : runningAccent
+    }
+
+    private func liveTimerProgress(at date: Date) -> Double {
+        let total = max(block.endTime.timeIntervalSince(block.startTime), 1)
+        let elapsed = date.timeIntervalSince(block.startTime)
+        return min(max(elapsed / total, 0), 1)
+    }
+
+    /// Compact label for the 34pt corner ring so overtime never wraps (e.g. `-3:41` not `-03:41`).
+    private func liveTimerRingLabel(at date: Date) -> String {
+        let remaining = liveTimerRemainingSeconds(at: date)
+        if remaining > 0 {
+            if showsTimerSeconds || frozenLiveProgressDate != nil {
+                return compactDigitalDurationLabel(totalSeconds: remaining)
+            }
+            let minutes = max(Int(ceil(Double(remaining) / 60.0)), 1)
+            return "\(minutes)m"
         }
-        let minutes = max(Int(ceil(Double(remaining) / 60.0)), 0)
-        return "\(minutes)m"
+        let overtimeSeconds = -remaining
+        if showsTimerSeconds || frozenLiveProgressDate != nil {
+            return "-\(compactDigitalDurationLabel(totalSeconds: overtimeSeconds))"
+        }
+        let minutes = max(Int(ceil(Double(overtimeSeconds) / 60.0)), 1)
+        return "-\(minutes)m"
+    }
+
+    private func liveTimerLabel(at date: Date) -> String {
+        let remaining = liveTimerRemainingSeconds(at: date)
+        if remaining > 0 {
+            if showsTimerSeconds || frozenLiveProgressDate != nil {
+                return digitalDurationLabel(totalSeconds: remaining)
+            }
+            let minutes = max(Int(ceil(Double(remaining) / 60.0)), 1)
+            return "\(minutes)m"
+        }
+        let overtimeSeconds = -remaining
+        if showsTimerSeconds || frozenLiveProgressDate != nil {
+            return "-\(digitalDurationLabel(totalSeconds: overtimeSeconds))"
+        }
+        let minutes = max(Int(ceil(Double(overtimeSeconds) / 60.0)), 1)
+        return "-\(minutes)m"
+    }
+
+    /// `m:ss` without a leading zero on minutes — fits small timer rings.
+    private func compactDigitalDurationLabel(totalSeconds: Int) -> String {
+        let safe = max(totalSeconds, 0)
+        let hours = safe / 3600
+        let minutes = (safe % 3600) / 60
+        let seconds = safe % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%d:%02d", minutes, seconds)
     }
 
     private func digitalDurationLabel(totalSeconds: Int) -> String {
@@ -770,6 +964,44 @@ struct ScheduleBlockCardView: View {
             return String(format: "%d:%02d:%02d", hours, minutes, seconds)
         }
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    private func liveTimerRingText(
+        _ label: String,
+        isOvertime: Bool,
+        accent: Color,
+        primaryStyle: Bool,
+        fontSize: CGFloat = 9
+    ) -> some View {
+        Text(label)
+            .font(.system(size: fontSize, weight: .bold, design: .rounded))
+            .foregroundStyle(
+                isOvertime
+                    ? accent
+                    : (primaryStyle ? CueInColors.textPrimary : CueInColors.textSecondary)
+            )
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+            .allowsTightening(true)
+            .frame(width: 26)
+    }
+
+    private func liveTimerAccessibilityLabel(at date: Date) -> String {
+        let remaining = liveTimerRemainingSeconds(at: date)
+        if remaining > 0 {
+            if showsTimerSeconds || frozenLiveProgressDate != nil {
+                return "\(digitalDurationLabel(totalSeconds: remaining)) remaining"
+            }
+            let minutes = max(Int(ceil(Double(remaining) / 60.0)), 1)
+            return "\(minutes) minutes remaining"
+        }
+        let overtimeSeconds = -remaining
+        if showsTimerSeconds || frozenLiveProgressDate != nil {
+            return "\(digitalDurationLabel(totalSeconds: overtimeSeconds)) overtime"
+        }
+        let minutes = max(Int(ceil(Double(overtimeSeconds) / 60.0)), 1)
+        return "\(minutes) minutes overtime"
     }
 
     @ViewBuilder
@@ -902,9 +1134,9 @@ struct ScheduleBlockCardView: View {
 
     private var liveRunIndicator: some View {
         withLiveTimerClock { now in
-            let total = max(block.endTime.timeIntervalSince(block.startTime), 1)
-            let elapsed = now.timeIntervalSince(block.startTime)
-            let progress = min(max(elapsed / total, 0), 1)
+            let progress = liveTimerProgress(at: now)
+            let accent = liveTimerAccent(at: now)
+            let isOvertime = isLiveTimerOvertime(at: now)
 
             HStack(spacing: CueInSpacing.md) {
                 ZStack {
@@ -916,42 +1148,42 @@ struct ScheduleBlockCardView: View {
                         Circle()
                             .trim(from: 0, to: progress)
                             .stroke(
-                                runningAccent.opacity(0.9),
+                                accent.opacity(0.9),
                                 style: StrokeStyle(lineWidth: 4, lineCap: .round)
                             )
                             .rotationEffect(.degrees(-90))
 
                         Text(liveTimerLabel(at: now))
                             .font(CueInTypography.micro)
-                            .foregroundStyle(CueInColors.textSecondary)
+                            .foregroundStyle(isOvertime ? accent : CueInColors.textSecondary)
                             .monospacedDigit()
                     case .pulse:
                         Circle()
-                            .fill(runningAccent.opacity(0.12 + (0.2 * progress)))
+                            .fill(accent.opacity(0.12 + (0.2 * progress)))
                         Circle()
-                            .stroke(runningAccent.opacity(0.85), lineWidth: 2)
+                            .stroke(accent.opacity(0.85), lineWidth: 2)
                         Text(liveTimerLabel(at: now))
                             .font(CueInTypography.micro)
-                            .foregroundStyle(CueInColors.textPrimary)
+                            .foregroundStyle(isOvertime ? accent : CueInColors.textPrimary)
                             .monospacedDigit()
                     case .bars:
                         VStack(spacing: 5) {
                             HStack(spacing: 3) {
                                 ForEach(0..<8, id: \.self) { idx in
                                     RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                        .fill(progress >= (Double(idx + 1) / 8.0) ? runningAccent.opacity(0.9) : CueInColors.surfaceTertiary.opacity(0.7))
+                                        .fill(progress >= (Double(idx + 1) / 8.0) ? accent.opacity(0.9) : CueInColors.surfaceTertiary.opacity(0.7))
                                         .frame(width: 3, height: 8)
                                 }
                             }
                             Text(liveTimerLabel(at: now))
                                 .font(CueInTypography.micro)
-                                .foregroundStyle(CueInColors.textSecondary)
+                                .foregroundStyle(isOvertime ? accent : CueInColors.textSecondary)
                                 .monospacedDigit()
                         }
                     case .minimal:
                         Text(liveTimerLabel(at: now))
                             .font(CueInTypography.captionMedium)
-                            .foregroundStyle(runningAccent.opacity(0.95))
+                            .foregroundStyle(accent.opacity(0.95))
                             .monospacedDigit()
                     }
                 }
@@ -962,7 +1194,7 @@ struct ScheduleBlockCardView: View {
             }
             .padding(.top, 2)
         }
-        .accessibilityLabel("Flexible duration \(block.durationMinutes) minutes")
+        .accessibilityLabel(liveTimerAccessibilityLabel(at: frozenLiveProgressDate ?? Date()))
     }
 
     /// Keep the progress indicator cadence tied to the user's timer precision setting.
@@ -989,12 +1221,32 @@ struct ScheduleBlockCardView: View {
                 .padding(.vertical, design == .reminders ? CueInSpacing.xs * 0.5 : CueInSpacing.xs)
 
             ForEach(block.tasks) { task in
-                TaskRowView(task: task) {
+                TaskRowView(task: task, blockAccent: blockTimelineAccent) {
                     onToggleTask(task.id)
                 }
             }
         }
         .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    private func runningBlockAddTaskButton(action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: CueInSpacing.sm) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: design == .glass ? 18 : 16, weight: .semibold))
+                    .foregroundStyle(blockTimelineAccent)
+                Text("Add task")
+                    .font(design == .glass ? CueInTypography.bodyMedium : CueInTypography.captionMedium)
+                    .foregroundStyle(CueInColors.textPrimary)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, design == .reminders ? CueInSpacing.xs : CueInSpacing.sm)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add task to this block")
+        .accessibilityHint("Create a new task or choose one from your library")
     }
 }
 
@@ -1253,9 +1505,25 @@ private typealias HorizontalSwipeGestureView = HorizontalSwipeUIKitGestureView
 // MARK: - Liquid glass block chrome
 
 /// When **Canvas dots** is on, use the same iOS 26 `glassEffect` + rounded-rect shape as other liquid UI (see `MenuGlassBackground`).
+/// Softens and slightly compresses finished blocks without washing out the whole row.
+private struct ScheduleBlockCompletedAppearanceModifier: ViewModifier {
+    let isCompleted: Bool
+
+    func body(content: Content) -> some View {
+        if isCompleted {
+            content
+                .opacity(0.9)
+                .saturation(0.82)
+        } else {
+            content
+        }
+    }
+}
+
 private struct ScheduleBlockGlassDesignModifier: ViewModifier {
     var useCanvasLiquidGlass: Bool
     let isCurrentBlock: Bool
+    let isCompleted: Bool
     let cornerRadius: CGFloat
     let runningPrimary: Color
 
@@ -1268,45 +1536,66 @@ private struct ScheduleBlockGlassDesignModifier: ViewModifier {
             liquidGlassBody(content: content)
         } else {
             content
+                .background(runningBlockWashBackground)
                 .clipShape(shape)
-                .background(
-                    (isCurrentBlock ? CueInColors.surfaceSecondary : CueInColors.surfacePrimary)
-                        .opacity(0.4)
-                )
+                .background(flatGlassFill)
                 .glassSurface(cornerRadius: cornerRadius)
         }
     }
 
     @ViewBuilder
+    private var runningBlockWashBackground: some View {
+        if isCurrentBlock, !isCompleted {
+            shape.fill(CueInColors.scheduleRunningBlockWash(accent: runningPrimary))
+        }
+    }
+
+    private var flatGlassFill: Color {
+        if isCompleted {
+            return CueInColors.surfacePrimary.opacity(0.22)
+        }
+        if isCurrentBlock {
+            return CueInColors.scheduleRunningBlockWash(accent: runningPrimary).opacity(0.55)
+        }
+        return CueInColors.surfacePrimary.opacity(0.4)
+    }
+
+    private var liquidGlassTint: Color {
+        if isCompleted {
+            return Color.white.opacity(0.05)
+        }
+        if isCurrentBlock {
+            return runningPrimary.opacity(CueInThemePreference.current == .light ? 0.20 : 0.24)
+        }
+        return Color.white.opacity(0.10)
+    }
+
+    @ViewBuilder
     private func liquidGlassBody(content: Content) -> some View {
         if #available(iOS 26.0, macOS 26.0, *) {
-            let tint: Color = isCurrentBlock
-                ? runningPrimary.opacity(0.16)
-                : Color.white.opacity(0.10)
             content
+                .background(runningBlockWashBackground)
                 .clipShape(shape)
                 .glassEffect(
                     .regular
-                        .tint(tint)
+                        .tint(liquidGlassTint)
                         .interactive(),
                     in: shape
                 )
                 .overlay {
                     shape
                         .strokeBorder(
-                            isCurrentBlock
-                                ? runningPrimary.opacity(0.32)
-                                : Color.white.opacity(0.16),
+                            isCurrentBlock && !isCompleted
+                                ? runningPrimary.opacity(0.30)
+                                : Color.white.opacity(isCompleted ? 0.08 : 0.16),
                             lineWidth: 0.65
                         )
                 }
         } else {
             content
+                .background(runningBlockWashBackground)
                 .clipShape(shape)
-                .background(
-                    (isCurrentBlock ? CueInColors.surfaceSecondary : CueInColors.surfacePrimary)
-                        .opacity(0.4)
-                )
+                .background(flatGlassFill)
                 .glassSurface(cornerRadius: cornerRadius)
         }
     }

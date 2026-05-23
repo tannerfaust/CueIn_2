@@ -58,6 +58,11 @@ struct ScheduleBlockDraft: Identifiable {
     var locksPlannedDuration: Bool
     /// Editor-only precision for active block retiming; persisted model remains minute-based.
     var liveDurationOverrideSeconds: Int?
+    
+    /// Optional tracking category for this block (e.g. Work, Others).
+    var category: String = "Others"
+    /// Flag to check if category was manually overwritten by user.
+    var isCategoryManuallySet: Bool = false
 
     /// Maps editor flags to the persisted schedule source.
     var resolvedTaskSource: ScheduleBlockTaskSource {
@@ -88,7 +93,9 @@ struct ScheduleBlockDraft: Identifiable {
         compactPresentation: Bool = false,
         locksPlannedDuration: Bool = false,
         timelineAccentHex: UInt32? = nil,
-        liveDurationOverrideSeconds: Int? = nil
+        liveDurationOverrideSeconds: Int? = nil,
+        category: String = "Others",
+        isCategoryManuallySet: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -112,6 +119,8 @@ struct ScheduleBlockDraft: Identifiable {
         self.compactPresentation = compactPresentation
         self.locksPlannedDuration = locksPlannedDuration
         self.liveDurationOverrideSeconds = liveDurationOverrideSeconds
+        self.category = category
+        self.isCategoryManuallySet = isCategoryManuallySet
     }
 
     init(from block: DayBlock) {
@@ -167,6 +176,8 @@ struct ScheduleBlockDraft: Identifiable {
         compactPresentation = block.compactPresentation
         locksPlannedDuration = block.locksPlannedDuration
         liveDurationOverrideSeconds = nil
+        category = block.category
+        isCategoryManuallySet = block.isCategoryManuallySet
         if block.pinsToClock {
             let dayStart = Calendar.current.startOfDay(for: block.startTime)
             let mins = Int(block.startTime.timeIntervalSince(dayStart) / 60)
@@ -222,6 +233,8 @@ struct ScheduleBlockDraft: Identifiable {
         compactPresentation = template.compactPresentation
         locksPlannedDuration = template.locksPlannedDuration
         liveDurationOverrideSeconds = nil
+        category = template.category
+        isCategoryManuallySet = template.isCategoryManuallySet
     }
 
     /// Replace fields from a library preset while keeping this block’s identity (same row in the builder).
@@ -346,7 +359,9 @@ struct ScheduleBlockDraft: Identifiable {
             compactPresentation: compactPresentation,
             locksPlannedDuration: locksPlannedDuration,
             timelineGlyph: timelineGlyph,
-            timelineAccentHex: timelineAccentHex
+            timelineAccentHex: timelineAccentHex,
+            category: category,
+            isCategoryManuallySet: isCategoryManuallySet
         )
     }
 

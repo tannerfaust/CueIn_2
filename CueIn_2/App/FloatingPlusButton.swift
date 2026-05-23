@@ -119,7 +119,7 @@ private struct FloatingCircularGlassIconButton: View {
                     showsBorder: true,
                     borderColor: CueInColors.cardBorder,
                     borderWidth: 0.75,
-                    shadow: CueInGlassShadow(color: Color.black.opacity(0.24), radius: 18, x: 0, y: 8)
+                    shadow: CueInGlassShadow(color: Color.black.opacity(0.24), radius: 22, x: 0, y: 8)
                 )
         }
         .buttonStyle(GlassPressStyle())
@@ -135,7 +135,7 @@ private struct GlassPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.88 : 1.0)
-            .animation(.easeOut(duration: 0.10), value: configuration.isPressed)
+            .animation(.spring(response: 0.20, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
 

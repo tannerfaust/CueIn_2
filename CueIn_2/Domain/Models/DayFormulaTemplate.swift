@@ -84,7 +84,9 @@ struct DayFormulaTemplate: Identifiable, Codable {
                 compactPresentation: template.compactPresentation,
                 locksPlannedDuration: template.locksPlannedDuration,
                 timelineGlyph: template.timelineGlyph,
-                timelineAccentHex: template.timelineAccentHex
+                timelineAccentHex: template.timelineAccentHex,
+                category: template.category,
+                isCategoryManuallySet: template.isCategoryManuallySet
             )
         }
     }
@@ -125,6 +127,11 @@ struct DayFormulaBlockTemplate: Identifiable, Codable {
     var timelineGlyph: String?
     /// Optional 0xRRGGBB cosmetic colour for timeline / icon.
     var timelineAccentHex: UInt32?
+    
+    /// Optional tracking category for this block template (e.g. Work, Others).
+    var category: String = "Others"
+    /// Flag to check if category was manually overwritten by user.
+    var isCategoryManuallySet: Bool = false
 
     init(
         id: UUID = UUID(),
@@ -143,7 +150,9 @@ struct DayFormulaBlockTemplate: Identifiable, Codable {
         compactPresentation: Bool = false,
         locksPlannedDuration: Bool = false,
         timelineGlyph: String? = nil,
-        timelineAccentHex: UInt32? = nil
+        timelineAccentHex: UInt32? = nil,
+        category: String = "Others",
+        isCategoryManuallySet: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -162,6 +171,8 @@ struct DayFormulaBlockTemplate: Identifiable, Codable {
         self.locksPlannedDuration = locksPlannedDuration
         self.timelineGlyph = timelineGlyph
         self.timelineAccentHex = timelineAccentHex
+        self.category = category
+        self.isCategoryManuallySet = isCategoryManuallySet
     }
 
     enum CodingKeys: String, CodingKey {
@@ -169,6 +180,8 @@ struct DayFormulaBlockTemplate: Identifiable, Codable {
         case fillMatchesType, fillRule, tasks, isRepeatable
         case pinsToClock, fixedClockMinutesFromDayStart, schedulingPriority, compactPresentation, locksPlannedDuration, timelineGlyph
         case timelineAccentHex
+        case category
+        case isCategoryManuallySet
     }
 
     init(from decoder: Decoder) throws {
@@ -193,6 +206,8 @@ struct DayFormulaBlockTemplate: Identifiable, Codable {
         locksPlannedDuration = try c.decodeIfPresent(Bool.self, forKey: .locksPlannedDuration) ?? false
         timelineGlyph = try c.decodeIfPresent(String.self, forKey: .timelineGlyph)
         timelineAccentHex = try c.decodeIfPresent(UInt32.self, forKey: .timelineAccentHex)
+        category = try c.decodeIfPresent(String.self, forKey: .category) ?? "Others"
+        isCategoryManuallySet = try c.decodeIfPresent(Bool.self, forKey: .isCategoryManuallySet) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -214,6 +229,8 @@ struct DayFormulaBlockTemplate: Identifiable, Codable {
         try c.encode(locksPlannedDuration, forKey: .locksPlannedDuration)
         try c.encodeIfPresent(timelineGlyph, forKey: .timelineGlyph)
         try c.encodeIfPresent(timelineAccentHex, forKey: .timelineAccentHex)
+        try c.encode(category, forKey: .category)
+        try c.encode(isCategoryManuallySet, forKey: .isCategoryManuallySet)
     }
 }
 
@@ -249,7 +266,9 @@ extension DayFormulaBlockTemplate {
             compactPresentation: compactPresentation,
             locksPlannedDuration: locksPlannedDuration,
             timelineGlyph: timelineGlyph,
-            timelineAccentHex: timelineAccentHex
+            timelineAccentHex: timelineAccentHex,
+            category: category,
+            isCategoryManuallySet: isCategoryManuallySet
         )
     }
 }

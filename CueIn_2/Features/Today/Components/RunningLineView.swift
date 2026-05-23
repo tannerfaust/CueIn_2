@@ -53,7 +53,7 @@ struct RunningLineView: View {
         return isStopped ? normalized.map { $0.opacity(0.42) } : normalized
     }
     private var primaryAccent: Color {
-        if let c = blockSegments.first?.color { return isStopped ? c.opacity(0.42) : c }
+        if greyFillWhilePausedReplan { return pausedReplanGrey }
         return resolvedAccentColors.first ?? ePrimary
     }
     private var pausedReplanGrey: Color { CueInColors.textTertiary.opacity(0.55) }

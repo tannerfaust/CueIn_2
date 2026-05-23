@@ -43,6 +43,7 @@ create table if not exists public.notion_object_links (
     notion_page_id text not null,
     notion_last_edited_time timestamptz,
     cuein_updated_at timestamptz,
+    sync_direction text not null default 'two_way' check (sync_direction in ('two_way', 'pull_only')),
     last_synced_at timestamptz not null default now(),
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
@@ -50,6 +51,22 @@ create table if not exists public.notion_object_links (
     unique (user_id, object_kind, cuein_object_id),
     unique (connection_id, object_kind, notion_page_id)
 );
+
+alter table public.notion_object_links
+    add column if not exists sync_direction text not null default 'two_way';
+
+alter table public.notion_object_links
+    drop constraint if exists notion_object_links_sync_direction_check;
+
+alter table public.notion_object_links
+    add constraint notion_object_links_sync_direction_check
+    check (sync_direction in ('two_way', 'pull_only'));
+
+alter table public.tasks
+    add column if not exists external_source text;
+
+alter table public.projects
+    add column if not exists external_source text;
 
 create table if not exists public.notion_sync_runs (
     id uuid primary key default gen_random_uuid(),
@@ -108,3 +125,8 @@ grant select, insert, update, delete on table public.notion_oauth_states to auth
 grant select, insert, update, delete on table public.notion_connections to authenticated;
 grant select, insert, update, delete on table public.notion_object_links to authenticated;
 grant select, insert on table public.notion_sync_runs to authenticated;
+
+grant select, insert, update, delete on table public.notion_oauth_states to service_role;
+grant select, insert, update, delete on table public.notion_connections to service_role;
+grant select, insert, update, delete on table public.notion_object_links to service_role;
+grant select, insert, update, delete on table public.notion_sync_runs to service_role;

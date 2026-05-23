@@ -42,6 +42,7 @@ extension ProjectDTO {
             status: project.status.rawValue,
             targetDate: project.targetDate,
             colorHexOverride: project.colorHexOverride.map(Int64.init),
+            externalSource: project.externalSource,
             createdAt: project.createdAt,
             updatedAt: project.createdAt,
             deletedAt: deletedAt,
@@ -60,6 +61,7 @@ extension ProjectDTO {
             status: Project.Status(rawValue: status) ?? .active,
             targetDate: targetDate,
             colorHexOverride: colorHexOverride.map(UInt.init),
+            externalSource: externalSource,
             createdAt: createdAt
         )
     }
@@ -85,6 +87,7 @@ extension TaskDTO {
             completedAt: task.completedAt,
             subtasks: task.subtasks,
             savesToArchive: task.savesToArchive,
+            externalSource: task.externalSource,
             createdAt: task.createdAt,
             updatedAt: task.updatedAt,
             deletedAt: deletedAt,
@@ -111,7 +114,8 @@ extension TaskDTO {
             updatedAt: updatedAt,
             completedAt: completedAt,
             subtasks: subtasks,
-            savesToArchive: savesToArchive
+            savesToArchive: savesToArchive,
+            externalSource: externalSource
         )
     }
 }

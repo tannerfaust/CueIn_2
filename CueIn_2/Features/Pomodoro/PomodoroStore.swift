@@ -119,6 +119,7 @@ final class PomodoroStore {
 
     func start() {
         if isRunning { return }
+        AppLogger.shared.log("Pomodoro: Start requested", category: .ui)
         if let paused = pausedRemainingSeconds {
             resume(from: paused)
             return
@@ -129,6 +130,7 @@ final class PomodoroStore {
     func pause() {
         guard isRunning, let end = phaseEndsAt else { return }
         let left = max(0, Int(ceil(end.timeIntervalSinceNow)))
+        AppLogger.shared.log("Pomodoro: Pause requested with \(left) seconds remaining", category: .ui)
         pausedRemainingSeconds = left
         phaseEndsAt = nil
         isRunning = false
@@ -138,14 +140,17 @@ final class PomodoroStore {
     }
 
     func pauseFromNotification() {
+        AppLogger.shared.log("Pomodoro: Pause triggered from notification", category: .ui)
         pause()
     }
 
     func skipPhaseFromNotification() {
+        AppLogger.shared.log("Pomodoro: Skip phase triggered from notification", category: .ui)
         skipPhase()
     }
 
     func resetSession() {
+        AppLogger.shared.log("Pomodoro: Resetting session", category: .ui)
         stopTicking()
         isRunning = false
         phase = .work
@@ -159,6 +164,7 @@ final class PomodoroStore {
 
     func skipPhase() {
         guard canSkipPhase else { return }
+        AppLogger.shared.log("Pomodoro: Skipping phase '\(phase.rawValue)'", category: .ui)
         PomodoroNotificationService.cancelPhaseEndNotification()
         stopTicking()
         isRunning = false
@@ -175,6 +181,7 @@ final class PomodoroStore {
     }
 
     func applyNotificationToggle(_ on: Bool) async {
+        AppLogger.shared.log("Pomodoro: Toggling notification preference to \(on)", category: .ui)
         if on {
             let ok = await PomodoroNotificationService.requestAuthorizationIfNeeded()
             notifyWhenPhaseEnds = ok
@@ -195,6 +202,7 @@ final class PomodoroStore {
         phase = .work
         pausedRemainingSeconds = nil
         let duration = durationSeconds(for: .work)
+        AppLogger.shared.log("Pomodoro: Beginning fresh work block (\(duration / 60) min)", category: .ui)
         remainingSeconds = duration
         let end = Date().addingTimeInterval(TimeInterval(duration))
         phaseEndsAt = end
@@ -206,6 +214,7 @@ final class PomodoroStore {
     }
 
     private func resume(from seconds: Int) {
+        AppLogger.shared.log("Pomodoro: Resuming timer with \(seconds) seconds remaining", category: .ui)
         let end = Date().addingTimeInterval(TimeInterval(max(1, seconds)))
         phaseEndsAt = end
         pausedRemainingSeconds = nil
@@ -217,6 +226,7 @@ final class PomodoroStore {
     }
 
     private func completeCurrentPhaseBecauseTimerFired() {
+        AppLogger.shared.log("Pomodoro: Timer fired. Completed phase '\(phase.rawValue)'", category: .ui)
         stopTicking()
         isRunning = false
         phaseEndsAt = nil
@@ -235,6 +245,7 @@ final class PomodoroStore {
 
     private func finishWorkInterval() {
         workoutsUntilLongBreak -= 1
+        AppLogger.shared.log("Pomodoro: Finished work interval. Remaining workouts until long break: \(workoutsUntilLongBreak)", category: .ui)
         if workoutsUntilLongBreak <= 0 {
             workoutsUntilLongBreak = durationPreferences.longBreakEvery
             enterBreakPhase(.longBreak)
@@ -247,6 +258,7 @@ final class PomodoroStore {
         phase = kind
         pausedRemainingSeconds = nil
         let duration = durationSeconds(for: kind)
+        AppLogger.shared.log("Pomodoro: Entering break phase '\(kind.rawValue)' for \(duration / 60) min", category: .ui)
         remainingSeconds = duration
         let end = Date().addingTimeInterval(TimeInterval(duration))
         phaseEndsAt = end
@@ -260,6 +272,7 @@ final class PomodoroStore {
         phase = .work
         pausedRemainingSeconds = nil
         let duration = durationSeconds(for: .work)
+        AppLogger.shared.log("Pomodoro: Entering work phase '\(phase.rawValue)' for \(duration / 60) min", category: .ui)
         remainingSeconds = duration
         let end = Date().addingTimeInterval(TimeInterval(duration))
         phaseEndsAt = end
@@ -388,6 +401,7 @@ final class PomodoroStore {
     // MARK: - Data reset hook
 
     func resetForFreshInstall() {
+        AppLogger.shared.log("Pomodoro: Resetting store for fresh install", category: .ui)
         resetSession()
         durationPreferences = PomodoroDurationPreferences.clamped(
             PomodoroDurationPreferences(workMinutes: 25, shortBreakMinutes: 5, longBreakMinutes: 15, longBreakEvery: 4)

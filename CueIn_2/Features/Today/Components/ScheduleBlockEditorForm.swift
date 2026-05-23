@@ -1,63 +1,17 @@
 import SwiftUI
+import UniformTypeIdentifiers
 #if os(iOS)
 import UIKit
 #endif
 
-// MARK: - ScheduleBlockEditorForm
-/// Shared editor: duration, ``BlockFlowMode``, scheduling flags, task source, tasks / pool fill.
+// MARK: - SavePresetBannerKind
 
 private enum SavePresetBannerKind: Equatable {
     case success
     case failure
 }
 
-/// Corner radii aligned with grouped cards — slightly tighter than full-screen cards to save vertical space.
-private enum BlockEditorSurface {
-    static let outer: CGFloat = 18
-    static let inset: CGFloat = 12
-    static let chip: CGFloat = 10
-}
-
-// MARK: - Info popovers (block editor)
-
-private enum BlockEditorInfoTopic: String, Identifiable {
-    case liveRun
-    case pinTime
-    case priorities
-    case taskSource
-    case poolFill
-    case savePreset
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .liveRun: return "Live run"
-        case .pinTime: return "Pin the time"
-        case .priorities: return "When time is tight"
-        case .taskSource: return "Tasks"
-        case .poolFill: return "Pool scope"
-        case .savePreset: return "Save to library"
-        }
-    }
-
-    var message: String {
-        switch self {
-        case .liveRun:
-            return "Blocking means the next block waits until you finish this one—the slice can run past its timer. Flowing means when the timer ends, the day can move on to what’s next."
-        case .pinTime:
-            return "When pinned, this block starts on the date and clock time you set. Other blocks flow before or after it instead of only following each other in order."
-        case .priorities:
-            return "If the day must shrink, Balanced uses the usual mix with other blocks, High priority keeps more of this block’s time when slices compress, and Fix duration holds this block’s planned length until the schedule can’t honor it."
-        case .taskSource:
-            return "Choose No tasks for a time-only slice. Choose Tasks to attach work: optionally turn on Autofill for matching Timeline cards, or tap the plus button for quick new-task capture (same flow as timeline quick add)."
-        case .poolFill:
-            return "Narrows which Timeline cards autofill can pull in: field, project, optional deep-work–only, and how candidates are ordered before packing."
-        case .savePreset:
-            return "Stores this block’s setup under Saved in the TimeMap block library so you can reuse the shape on other days. It’s one TimeMap block template, not a full TimeMap."
-        }
-    }
-}
+// MARK: - ScheduleBlockEditorForm
 
 struct ScheduleBlockEditorForm: View {
     struct LiveCountdownContext: Equatable {
@@ -89,7 +43,6 @@ struct ScheduleBlockEditorForm: View {
     @State private var savePresetBannerDismiss: Task<Void, Never>?
     @State private var showAppearancePicker = false
     @State private var showDurationWheelSheet = false
-    @State private var infoBubbleTopic: BlockEditorInfoTopic?
     @State private var showTaskCreateSheet = false
     @State private var showAutofillPickOrderSheet = false
     @State private var showPinnedDatePicker = false
@@ -97,11 +50,21 @@ struct ScheduleBlockEditorForm: View {
     @State private var durationAutoFollowsLive = true
     @State private var durationLiveSyncTask: Task<Void, Never>?
 
+    struct TaskEditorItem: Identifiable {
+        let id: UUID
+    }
+
+    @State private var editingTaskItem: TaskEditorItem? = nil
+    @State private var activeStatusPopoverTaskID: UUID? = nil
+    @State private var draggedTask: ScheduleTaskDraft? = nil
+
     @Bindable private var tasksStore = TasksStore.shared
+
+    @State private var didRequestInitialFocus = false
+    @FocusState private var titleFocused: Bool
 
     private enum PriorityTier: String, CaseIterable, Identifiable, Hashable {
         case balanced
-        /// Sets `schedulingPriority` to 75 so compression favors keeping this block’s nominal share.
         case highPriority
         case fixDuration
 
@@ -112,6 +75,22 @@ struct ScheduleBlockEditorForm: View {
             case .balanced: return "Balanced"
             case .highPriority: return "High priority"
             case .fixDuration: return "Fix duration"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .balanced: return "equal"
+            case .highPriority: return "exclamationmark.circle"
+            case .fixDuration: return "lock"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .balanced: return CueInColors.textSecondary
+            case .highPriority: return CueInColors.accentFocus
+            case .fixDuration: return CueInColors.textPrimary
             }
         }
 
@@ -127,23 +106,6 @@ struct ScheduleBlockEditorForm: View {
             self = .balanced
         }
 
-        /// Subtle segment fills — Balanced / High priority / Fix duration (locks nominal length when compressing).
-        func segmentFill(selected: Bool) -> Color {
-            switch self {
-            case .balanced:
-                let blue = Color(hex: 0x5E9EFF)
-                return selected ? blue.opacity(0.42) : blue.opacity(0.1)
-            case .highPriority:
-                return selected
-                    ? CueInColors.accentFocus.opacity(0.44)
-                    : CueInColors.accentFocus.opacity(0.1)
-            case .fixDuration:
-                return selected
-                    ? CueInColors.textPrimary.opacity(0.22)
-                    : CueInColors.surfaceSecondary.opacity(0.55)
-            }
-        }
-
         func apply(to block: Binding<ScheduleBlockDraft>) {
             switch self {
             case .fixDuration:
@@ -157,14 +119,6 @@ struct ScheduleBlockEditorForm: View {
                 block.wrappedValue.schedulingPriority = 75
             }
         }
-
-        var accessibilityHint: String {
-            switch self {
-            case .balanced: return "Default share when the schedule shrinks."
-            case .highPriority: return "Resists losing time to other blocks when the schedule shrinks."
-            case .fixDuration: return "Keeps planned length until it cannot."
-            }
-        }
     }
 
     var body: some View {
@@ -173,22 +127,20 @@ struct ScheduleBlockEditorForm: View {
                 anchorBanner
             }
 
-            titleAccentRow
+            topProperties
 
-            durationSection
+            titleField
 
-            flowModeSection
-
-            schedulingSection
-
-            sourceSection
-
-            taskAttachmentsSection
-
-            if onSavePreset != nil {
-                savePresetControl
-                    .padding(.top, CueInSpacing.xs)
+            if block.pinsToClock {
+                pinnedStartSection
             }
+
+            if block.assignsTasks {
+                linkedTasksSection
+                autofillSection
+            }
+
+            libraryActionsSection
         }
         .onChange(of: block.pinsToClock) { _, pinned in
             if !pinned {
@@ -207,9 +159,11 @@ struct ScheduleBlockEditorForm: View {
         }
         .task(id: block.id) {
             applyInitialTimelineGlyphSuggestionIfNeeded()
+            applyCategoryAutoAssignment(to: block.title)
         }
         .onChange(of: block.title) { oldTitle, newTitle in
             applyTimelineGlyphSuggestionAfterTitleChange(from: oldTitle, to: newTitle)
+            applyCategoryAutoAssignment(to: newTitle)
         }
         .onChange(of: block.id) { _, _ in
             savePresetBannerDismiss?.cancel()
@@ -226,7 +180,6 @@ struct ScheduleBlockEditorForm: View {
             resetDurationPickerFromBlock()
         }
         .onChange(of: block.durationMinutes) { _, _ in
-            // Avoid resetting the wheel while the user is actively adjusting it.
             if showDurationWheelSheet { return }
             resetDurationPickerFromBlock()
         }
@@ -282,13 +235,568 @@ struct ScheduleBlockEditorForm: View {
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }
+        .sheet(item: $editingTaskItem) { item in
+            TaskDetailSheet(mode: .edit(item.id), store: tasksStore) {
+                editingTaskItem = nil
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
+        .onAppear(perform: focusTitleOnce)
+    }
+}
+
+// MARK: - Layout Views
+
+private extension ScheduleBlockEditorForm {
+    var anchorBanner: some View {
+        Text("Timeline anchor — pool fill is off.")
+            .font(CueInTypography.caption)
+            .foregroundStyle(CueInColors.textSecondary)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cueInEditorGlassSurface(cornerRadius: 14)
     }
 
-    private var canPersistBlockAsPreset: Bool {
+    var topProperties: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                // 1. Duration Chip
+                Button {
+                    if allowsDurationOverride {
+                        showDurationWheelSheet = true
+                    } else {
+                        CueInToastCenter.shared.showWarning(
+                            icon: "pin.slash",
+                            title: "Duration locked by pinned task",
+                            message: durationOverrideWarning ?? "This block comes from a pinned task, so its duration is fixed by the task's clock window."
+                        )
+                    }
+                } label: {
+                    durationChipLabel
+                }
+                .buttonStyle(.plain)
+
+                // 2. Flow Mode Chip
+                Menu {
+                    ForEach(BlockFlowMode.allCases) { mode in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                block.flowMode = mode
+                            }
+                        } label: {
+                            Label(mode.label, systemImage: mode.editorIconName)
+                        }
+                    }
+                } label: {
+                    BlockEditorPropertyChip(
+                        icon: block.flowMode.editorIconName,
+                        title: block.flowMode.label,
+                        tint: CueInColors.textSecondary
+                    )
+                }
+                .buttonStyle(.plain)
+
+                // 3. Priority Chip
+                let selection = PriorityTier(
+                    schedulingPriority: block.schedulingPriority,
+                    locksPlannedDuration: block.locksPlannedDuration
+                )
+                Menu {
+                    ForEach(PriorityTier.allCases) { tier in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                tier.apply(to: $block)
+                            }
+                        } label: {
+                            Label(tier.label, systemImage: tier.icon)
+                        }
+                    }
+                } label: {
+                    BlockEditorPropertyChip(
+                        icon: selection.icon,
+                        title: selection.label,
+                        tint: selection.color
+                    )
+                }
+                .buttonStyle(.plain)
+
+                // 4. Pin Clock / Pin Start Chip
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        block.pinsToClock.toggle()
+                    }
+                } label: {
+                    BlockEditorPropertyChip(
+                        icon: block.pinsToClock ? "pin.fill" : "pin",
+                        title: block.pinsToClock ? "Pinned (\(pinnedDateShortLabel))" : "No pin",
+                        tint: block.pinsToClock ? CueInColors.accentFixed : CueInColors.textSecondary
+                    )
+                }
+                .buttonStyle(.plain)
+
+                // 5. Task Source Chip
+                Menu {
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                            block.assignsTasks = false
+                            block.poolFillEnabled = false
+                            block.tasks = []
+                            block.deepWorkOnly = false
+                        }
+                    } label: {
+                        Label("No tasks", systemImage: "circle.dashed")
+                    }
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                            block.assignsTasks = true
+                        }
+                    } label: {
+                        Label("Tasks", systemImage: "checkmark.circle.fill")
+                    }
+                } label: {
+                    BlockEditorPropertyChip(
+                        icon: block.assignsTasks ? "checkmark.circle.fill" : "circle.dashed",
+                        title: block.assignsTasks ? "Tasks" : "No tasks",
+                        tint: block.assignsTasks ? CueInColors.textPrimary : CueInColors.textSecondary
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.vertical, 2)
+        }
+        .scrollClipDisabled()
+    }
+
+    @ViewBuilder
+    var durationChipLabel: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "clock")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(allowsDurationOverride ? CueInColors.textSecondary : CueInColors.warning)
+
+            if let context = liveCountdownContext, durationAutoFollowsLive {
+                TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                    let remaining = liveCountdownSignedSeconds(context: context, now: timeline.date)
+                    Text(liveCountdownDigitalLabel(signedSeconds: remaining))
+                        .font(CueInTypography.captionMedium)
+                        .foregroundStyle(remaining <= 0 ? CueInColors.danger : CueInColors.textPrimary)
+                        .monospacedDigit()
+                }
+            } else {
+                Text(durationDigitalLabel(totalSeconds: durationPickerTotalSeconds))
+                    .font(CueInTypography.captionMedium)
+                    .foregroundStyle(CueInColors.textPrimary)
+                    .monospacedDigit()
+            }
+        }
+        .padding(.horizontal, 11)
+        .frame(height: 36)
+        .cueInEditorGlassCapsule()
+    }
+
+    var titleField: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Button {
+                showAppearancePicker = true
+            } label: {
+                let tintColor = CueInColors.resolvedTimelineAccent(blockType: block.timelineAccent, hex: block.timelineAccentHex)
+                ZStack {
+                    Circle()
+                        .fill(tintColor.opacity(0.12))
+                        .frame(width: 48, height: 48)
+                    Circle()
+                        .strokeBorder(tintColor.opacity(0.24), lineWidth: 1.5)
+                        .frame(width: 48, height: 48)
+                    Image(systemName: block.resolvedTimelineGlyph)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(tintColor)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Pick color and icon")
+
+            TextField("Block title", text: $block.title, axis: .vertical)
+                .font(Font.system(size: 30, weight: .bold))
+                .foregroundStyle(CueInColors.textPrimary)
+                .tint(CueInColors.textPrimary)
+                .focused($titleFocused)
+                .lineLimit(1...3)
+        }
+        .padding(.top, 10)
+        .padding(.bottom, 6)
+    }
+
+    var pinnedStartSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Pinned Start")
+                .font(CueInTypography.micro)
+                .foregroundStyle(CueInColors.textTertiary)
+                .textCase(.uppercase)
+                .tracking(0.5)
+                .padding(.horizontal, 4)
+
+            pinnedStartCard
+        }
+    }
+
+    var pinnedStartCard: some View {
+        pinnedStartControls
+            .padding(CueInSpacing.md)
+            .cueInEditorGlassSurface(cornerRadius: 22)
+    }
+
+    var linkedTasksSection: some View {
+        linkedTasksCard
+    }
+
+    var linkedTasksCard: some View {
+        VStack(spacing: 0) {
+            if block.tasks.isEmpty {
+                Button {
+                    showTaskCreateSheet = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(CueInColors.textTertiary)
+                            .frame(width: 18)
+                        Text("Link tasks...")
+                            .font(CueInTypography.body)
+                            .foregroundStyle(CueInColors.textTertiary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, CueInSpacing.md)
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(block.tasks) { task in
+                        if let index = block.tasks.firstIndex(where: { $0.id == task.id }) {
+                            HStack(spacing: CueInSpacing.sm) {
+                                // 1. Checkbox button with popover status picker
+                                Button {
+                                    let pid = ensurePersistentTask(for: index)
+                                    activeStatusPopoverTaskID = pid
+                                } label: {
+                                    let isCompleted = taskIsCompleted(for: task)
+                                    let status = taskStatus(for: task)
+                                    CueInTaskStatusCheckbox(
+                                        isCompleted: isCompleted,
+                                        workflowStatus: isCompleted ? nil : status,
+                                        diameter: 18
+                                    )
+                                    .frame(width: 24, height: 24, alignment: .center)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(taskIsCompleted(for: task) ? "Completed task status" : "Task status")
+                                .accessibilityHint("Opens task status options")
+                                .popover(isPresented: Binding(
+                                    get: { activeStatusPopoverTaskID == task.plannerTaskItemID && task.plannerTaskItemID != nil },
+                                    set: { if !$0 { activeStatusPopoverTaskID = nil } }
+                                )) {
+                                    if let pid = task.plannerTaskItemID {
+                                        CueInTaskStatusPopoverContent(selection: taskStatus(for: task)) { newStatus in
+                                            tasksStore.setTodayTodoTaskStatus(id: pid, status: newStatus)
+                                            activeStatusPopoverTaskID = nil
+                                        }
+                                    }
+                                }
+
+                                // 2. Row title click to open task editor sheet
+                                Button {
+                                    let pid = ensurePersistentTask(for: index)
+                                    editingTaskItem = TaskEditorItem(id: pid)
+                                } label: {
+                                    HStack {
+                                        let isCompleted = taskIsCompleted(for: task)
+                                        Text(displayTitle(for: task))
+                                            .font(CueInTypography.body)
+                                            .foregroundStyle(isCompleted ? CueInColors.textTertiary : CueInColors.textPrimary)
+                                            .strikethrough(isCompleted, color: CueInColors.textTertiary)
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.leading)
+                                        Spacer()
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+
+                                Spacer(minLength: CueInSpacing.sm)
+
+                                // 3. Delete button
+                                Button {
+                                    withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+                                        block.tasks.removeAll { $0.id == task.id }
+                                    }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 16))
+                                        .foregroundStyle(CueInColors.textTertiary)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Remove from block")
+                            }
+                            .padding(.horizontal, CueInSpacing.md)
+                            .padding(.vertical, 12)
+                            .contentShape(Rectangle())
+                            .onDrag {
+                                self.draggedTask = task
+                                return NSItemProvider(object: task.id.uuidString as NSString)
+                            }
+                            .onDrop(of: [.text], delegate: TaskDropDelegate(
+                                item: task,
+                                list: $block.tasks,
+                                draggedItem: $draggedTask
+                            ))
+
+                            if index < block.tasks.count - 1 {
+                                Divider()
+                                    .background(CueInColors.divider.opacity(0.4))
+                                    .padding(.leading, 46)
+                            }
+                        }
+                    }
+
+                    Divider()
+                        .background(CueInColors.divider.opacity(0.4))
+
+                    Button {
+                        showTaskCreateSheet = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(CueInColors.textTertiary)
+                                .frame(width: 18)
+                            Text("Add task...")
+                                .font(CueInTypography.body)
+                                .foregroundStyle(CueInColors.textTertiary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, CueInSpacing.md)
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .cueInEditorGlassSurface(cornerRadius: 22)
+    }
+
+    var autofillSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Autofill Tasks")
+                    .font(CueInTypography.micro)
+                    .foregroundStyle(CueInColors.textTertiary)
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+                Spacer()
+                Toggle("", isOn: $block.poolFillEnabled)
+                    .labelsHidden()
+                    .tint(CueInColors.accentFocus)
+            }
+            .padding(.horizontal, 4)
+
+            if block.poolFillEnabled {
+                autofillCard
+            }
+        }
+    }
+
+    var autofillCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Automatically pull tasks matching criteria:")
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(CueInColors.textSecondary)
+                Spacer()
+            }
+            .padding(.horizontal, CueInSpacing.md)
+            .padding(.vertical, 12)
+
+            Divider()
+                .background(CueInColors.divider.opacity(0.4))
+
+            poolScopeFilterRow(
+                title: "Field",
+                systemImage: "square.grid.2x2",
+                value: $block.fillField,
+                anyMenuTitle: "Any field",
+                options: availableScopes.fields
+            )
+
+            Divider()
+                .background(CueInColors.divider.opacity(0.4))
+                .padding(.leading, 46)
+
+            poolScopeFilterRow(
+                title: "Project",
+                systemImage: "folder",
+                value: $block.fillProject,
+                anyMenuTitle: "Any project",
+                options: availableScopes.projects
+            )
+
+            Divider()
+                .background(CueInColors.divider.opacity(0.4))
+
+            Button {
+                showAutofillPickOrderSheet = true
+            } label: {
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: "arrow.up.arrow.down")
+                       .font(.system(size: 13, weight: .medium))
+                       .foregroundStyle(CueInColors.textTertiary)
+                       .frame(width: 18)
+
+                    Text("Order by")
+                        .font(CueInTypography.body)
+                        .foregroundStyle(CueInColors.textSecondary)
+
+                    Spacer(minLength: CueInSpacing.md)
+
+                    HStack(spacing: 4) {
+                        Text(block.autofillPickOrder.editorTitle)
+                            .font(CueInTypography.body)
+                            .foregroundStyle(CueInColors.textPrimary)
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(CueInColors.textTertiary)
+                    }
+                }
+                .padding(.horizontal, CueInSpacing.md)
+                .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+
+            Divider()
+                .background(CueInColors.divider.opacity(0.4))
+
+            Toggle(isOn: $block.deepWorkOnly) {
+                HStack(spacing: 12) {
+                    Image(systemName: "flame")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(CueInColors.textTertiary)
+                        .frame(width: 18)
+                    Text("Deep work only")
+                        .font(CueInTypography.body)
+                        .foregroundStyle(CueInColors.textSecondary)
+                }
+            }
+            .tint(CueInColors.accentFocus)
+            .padding(.horizontal, CueInSpacing.md)
+            .padding(.vertical, 10)
+        }
+        .cueInEditorGlassSurface(cornerRadius: 22)
+    }
+
+    var libraryActionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Templates")
+                .font(CueInTypography.micro)
+                .foregroundStyle(CueInColors.textTertiary)
+                .textCase(.uppercase)
+                .tracking(0.5)
+                .padding(.horizontal, 4)
+
+            libraryActionsCard
+        }
+    }
+
+    @ViewBuilder
+    var libraryActionsCard: some View {
+        if showsPresetLibrary || onSavePreset != nil {
+            VStack(spacing: 0) {
+                if let banner = savePresetBanner {
+                    savePresetBannerRow(banner)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+
+                if showsPresetLibrary {
+                    Button {
+                        showPresetSheet = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "square.stack")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(CueInColors.textTertiary)
+                                .frame(width: 18)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Block templates library")
+                                    .font(CueInTypography.body)
+                                    .foregroundStyle(CueInColors.textPrimary)
+                                Text("Reuse a saved block or sample templates")
+                                    .font(CueInTypography.caption)
+                                    .foregroundStyle(CueInColors.textTertiary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(CueInColors.textTertiary)
+                        }
+                        .padding(.horizontal, CueInSpacing.md)
+                        .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if showsPresetLibrary && onSavePreset != nil {
+                    Divider()
+                        .background(CueInColors.divider.opacity(0.4))
+                        .padding(.leading, 46)
+                }
+
+                if onSavePreset != nil {
+                    Button(action: runSavePreset) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "square.and.arrow.down")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(CueInColors.textTertiary)
+                                .frame(width: 18)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Save current block to library")
+                                    .font(CueInTypography.body)
+                                    .foregroundStyle(CueInColors.textPrimary)
+                                Text("Add this setup to your template shortcuts")
+                                    .font(CueInTypography.caption)
+                                    .foregroundStyle(CueInColors.textTertiary)
+                            }
+                            Spacer()
+                            Image(systemName: "plus")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(CueInColors.textSecondary)
+                        }
+                        .padding(.horizontal, CueInSpacing.md)
+                        .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canPersistBlockAsPreset)
+                    .opacity(canPersistBlockAsPreset ? 1 : 0.44)
+                }
+            }
+            .cueInEditorGlassSurface(cornerRadius: 22)
+        }
+    }
+}
+
+// MARK: - Logic & Subcomponents
+
+private extension ScheduleBlockEditorForm {
+    var canPersistBlockAsPreset: Bool {
         !block.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private func attachCreatedPlannerTask(_ item: TaskItem) {
+    func attachCreatedPlannerTask(_ item: TaskItem) {
         block.tasks.append(
             ScheduleTaskDraft(
                 title: item.title,
@@ -298,43 +806,8 @@ struct ScheduleBlockEditorForm: View {
         )
     }
 
-    private var savePresetControl: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-            if let banner = savePresetBanner {
-                savePresetBannerRow(banner)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-
-            Button(action: runSavePreset) {
-                HStack(spacing: 10) {
-                    Image(systemName: "square.and.arrow.down")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(CueInColors.accentFocus.opacity(0.95))
-                    Text("Save to library")
-                        .font(CueInTypography.caption.weight(.semibold))
-                    Spacer(minLength: 0)
-                    editorInfoButton(for: .savePreset)
-                }
-                .foregroundStyle(canPersistBlockAsPreset ? CueInColors.textPrimary : CueInColors.textTertiary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, CueInSpacing.md + 2)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: BlockEditorSurface.inset, style: .continuous)
-                        .fill(CueInColors.surfaceSecondary.opacity(0.96))
-                )
-            }
-            .buttonStyle(.plain)
-            .disabled(!canPersistBlockAsPreset)
-            .opacity(canPersistBlockAsPreset ? 1 : 0.44)
-            .animation(.easeOut(duration: 0.28), value: savePresetBanner)
-            .accessibilityHint("Copies this block into Saved blocks in the library")
-        }
-        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: savePresetBanner)
-    }
-
     @ViewBuilder
-    private func savePresetBannerRow(_ kind: SavePresetBannerKind) -> some View {
+    func savePresetBannerRow(_ kind: SavePresetBannerKind) -> some View {
         switch kind {
         case .success:
             HStack(alignment: .center, spacing: 8) {
@@ -351,7 +824,7 @@ struct ScheduleBlockEditorForm: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 CueInColors.success.opacity(0.14),
-                in: RoundedRectangle(cornerRadius: BlockEditorSurface.chip, style: .continuous)
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
             )
             .accessibilityLabel("Preset saved")
         case .failure:
@@ -368,13 +841,13 @@ struct ScheduleBlockEditorForm: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 CueInColors.danger.opacity(0.12),
-                in: RoundedRectangle(cornerRadius: BlockEditorSurface.chip, style: .continuous)
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
             )
             .accessibilityLabel("Save failed")
         }
     }
 
-    private func runSavePreset() {
+    func runSavePreset() {
         guard let save = onSavePreset, canPersistBlockAsPreset else { return }
 
         #if os(iOS)
@@ -422,15 +895,13 @@ struct ScheduleBlockEditorForm: View {
         }
     }
 
-    /// If no explicit glyph is set, infer one from the title (`ScheduleBlockTitleGlyphSuggester`).
-    private func applyInitialTimelineGlyphSuggestionIfNeeded() {
+    func applyInitialTimelineGlyphSuggestionIfNeeded() {
         let trimmedGlyph = block.timelineGlyph?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard trimmedGlyph.isEmpty else { return }
         block.timelineGlyph = ScheduleBlockTitleGlyphSuggester.suggestedSymbol(for: block.title)
     }
 
-    /// Updates the glyph from the title unless the user chose an icon that doesn’t match the previous title’s keyword suggestion.
-    private func applyTimelineGlyphSuggestionAfterTitleChange(from oldTitle: String, to newTitle: String) {
+    func applyTimelineGlyphSuggestionAfterTitleChange(from oldTitle: String, to newTitle: String) {
         let trimmedGlyph = block.timelineGlyph?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let priorSuggestion = ScheduleBlockTitleGlyphSuggester.suggestedSymbol(for: oldTitle)
         let nextSuggestion = ScheduleBlockTitleGlyphSuggester.suggestedSymbol(for: newTitle)
@@ -446,195 +917,16 @@ struct ScheduleBlockEditorForm: View {
         block.timelineGlyph = nextSuggestion
     }
 
-    private func editorSettingsCard<Content: View>(
-        title: String,
-        infoTopic: BlockEditorInfoTopic? = nil,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(title.uppercased())
-                    .font(CueInTypography.micro)
-                    .tracking(0.4)
-                    .foregroundStyle(CueInColors.textTertiary)
-                Spacer(minLength: 0)
-                if let topic = infoTopic {
-                    editorInfoButton(for: topic)
-                }
-            }
-            content()
-        }
-        .padding(.horizontal, CueInSpacing.md)
-        .padding(.vertical, CueInSpacing.sm + 2)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: BlockEditorSurface.outer, style: .continuous)
-                .fill(CueInColors.surfacePrimary.opacity(0.82))
-        )
-    }
-
-    private func editorInfoButton(for topic: BlockEditorInfoTopic) -> some View {
-        Button {
-            CueInHaptics.impact(.light)
-            infoBubbleTopic = topic
-        } label: {
-            Image(systemName: "info.circle")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(CueInColors.textTertiary.opacity(0.95))
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("About \(topic.title)")
-        .popover(isPresented: Binding(
-            get: { infoBubbleTopic == topic },
-            set: { presented in
-                if !presented { infoBubbleTopic = nil }
-            }
-        )) {
-            editorInfoPopoverBody(for: topic)
-                .presentationCompactAdaptation(.popover)
+    func applyCategoryAutoAssignment(to title: String) {
+        guard !block.isCategoryManuallySet else { return }
+        if title.localizedCaseInsensitiveContains("work") {
+            block.category = "Work"
+        } else {
+            block.category = "Others"
         }
     }
 
-    private func editorInfoPopoverBody(for topic: BlockEditorInfoTopic) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(topic.title)
-                    .font(CueInTypography.caption.weight(.semibold))
-                    .foregroundStyle(CueInColors.textPrimary)
-                Text(topic.message)
-                    .font(CueInTypography.caption)
-                    .foregroundStyle(CueInColors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-        }
-        .frame(minWidth: 280, idealWidth: 320, maxWidth: 360)
-        .frame(maxHeight: 320)
-    }
-
-    private var anchorBanner: some View {
-        Text("Timeline anchor — pool fill is off.")
-            .font(CueInTypography.caption)
-            .foregroundStyle(CueInColors.textSecondary)
-            .padding(CueInSpacing.xs)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(CueInColors.surfacePrimary.opacity(0.55), in: RoundedRectangle(cornerRadius: BlockEditorSurface.chip, style: .continuous))
-    }
-
-    private var titleAccentRow: some View {
-        HStack(alignment: .center, spacing: CueInSpacing.sm) {
-            Button {
-                showAppearancePicker = true
-            } label: {
-                Image(systemName: block.resolvedTimelineGlyph)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(CueInColors.textPrimary)
-                    .frame(width: 44, height: 44)
-                    .background(
-                        CueInColors.resolvedTimelineAccent(
-                            blockType: block.timelineAccent,
-                            hex: block.timelineAccentHex
-                        ).opacity(0.38),
-                        in: RoundedRectangle(cornerRadius: BlockEditorSurface.inset, style: .continuous)
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Choose colour and icon")
-
-            TextField("Title", text: $block.title)
-                .font(CueInTypography.bodyMedium)
-                .foregroundStyle(CueInColors.textPrimary)
-                .padding(.horizontal, CueInSpacing.md)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity)
-                .background(CueInColors.surfacePrimary, in: RoundedRectangle(cornerRadius: BlockEditorSurface.inset, style: .continuous))
-
-            if showsPresetLibrary {
-                Button {
-                    showPresetSheet = true
-                } label: {
-                    Image(systemName: "square.stack.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(CueInColors.textSecondary)
-                        .frame(width: 44, height: 44)
-                        .background(CueInColors.surfacePrimary, in: RoundedRectangle(cornerRadius: BlockEditorSurface.inset, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Block library")
-                .accessibilityHint("Reuse a saved block or pick from sample day blocks")
-            }
-        }
-    }
-
-    private var schedulingSection: some View {
-        editorSettingsCard(title: "Time block") {
-            VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-                HStack(alignment: .center, spacing: CueInSpacing.sm) {
-                    Toggle(isOn: $block.pinsToClock) {
-                        Text("Pin start")
-                            .font(CueInTypography.caption)
-                            .foregroundStyle(CueInColors.textSecondary)
-                    }
-                    .tint(CueInColors.accentFixed)
-                    .disabled(!allowsFixedClockEdit)
-
-                    Spacer(minLength: 0)
-
-                    editorInfoButton(for: .pinTime)
-                }
-
-                if block.pinsToClock, allowsFixedClockEdit {
-                    pinnedStartControls
-                }
-
-                HStack(alignment: .center, spacing: CueInSpacing.sm) {
-                    prioritySegmentsView
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    editorInfoButton(for: .priorities)
-                }
-                .padding(.top, CueInSpacing.xs)
-            }
-        }
-    }
-
-    private var prioritySegmentsView: some View {
-        let selection = PriorityTier(
-            schedulingPriority: block.schedulingPriority,
-            locksPlannedDuration: block.locksPlannedDuration
-        )
-        return HStack(spacing: 8) {
-            ForEach(PriorityTier.allCases) { tier in
-                let isOn = selection == tier
-                Button {
-                    withAnimation(.easeInOut(duration: 0.22)) {
-                        tier.apply(to: $block)
-                    }
-                } label: {
-                    Text(tier.label)
-                        .font(CueInTypography.caption.weight(isOn ? .semibold : .regular))
-                        .foregroundStyle(isOn ? CueInColors.textPrimary : CueInColors.textSecondary)
-                        .multilineTextAlignment(.center)
-                        .minimumScaleFactor(0.72)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 7)
-                        .padding(.horizontal, 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: BlockEditorSurface.chip, style: .continuous)
-                                .fill(tier.segmentFill(selected: isOn))
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(tier.label)
-                .accessibilityHint(tier.accessibilityHint)
-            }
-        }
-    }
-
-    private var pinnedStartControls: some View {
+    var pinnedStartControls: some View {
         VStack(alignment: .leading, spacing: CueInSpacing.sm) {
             HStack(spacing: CueInSpacing.sm) {
                 DatePicker(
@@ -648,8 +940,8 @@ struct ScheduleBlockEditorForm: View {
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity)
                 .background(
-                    CueInColors.surfaceSecondary.opacity(0.45),
-                    in: RoundedRectangle(cornerRadius: BlockEditorSurface.inset, style: .continuous)
+                    CueInColors.surfacePrimary.opacity(0.48),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                 )
 
                 Button {
@@ -660,16 +952,17 @@ struct ScheduleBlockEditorForm: View {
                     HStack(spacing: 6) {
                         Image(systemName: "calendar")
                             .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(CueInColors.accentFixed)
                         Text(pinnedDateShortLabel)
                             .font(CueInTypography.micro)
                             .monospacedDigit()
                     }
                     .foregroundStyle(CueInColors.textPrimary)
-                    .padding(.horizontal, 10)
-                    .frame(height: 40)
+                    .padding(.horizontal, 12)
+                    .frame(height: 38)
                     .background(
-                        CueInColors.surfaceSecondary.opacity(0.45),
-                        in: RoundedRectangle(cornerRadius: BlockEditorSurface.inset, style: .continuous)
+                        CueInColors.surfacePrimary.opacity(0.48),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                     )
                 }
                 .buttonStyle(.plain)
@@ -687,14 +980,14 @@ struct ScheduleBlockEditorForm: View {
                 .tint(CueInColors.accentFixed)
                 .padding(CueInSpacing.sm)
                 .background(
-                    CueInColors.surfaceSecondary.opacity(0.45),
-                    in: RoundedRectangle(cornerRadius: BlockEditorSurface.inset, style: .continuous)
+                    CueInColors.surfacePrimary.opacity(0.48),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                 )
             }
         }
     }
 
-    private var fixedStartBinding: Binding<Date> {
+    var fixedStartBinding: Binding<Date> {
         Binding(
             get: {
                 let mins = block.fixedClockMinutesFromDayStart ?? 9 * 60
@@ -712,7 +1005,7 @@ struct ScheduleBlockEditorForm: View {
         )
     }
 
-    private var fixedDateBinding: Binding<Date> {
+    var fixedDateBinding: Binding<Date> {
         Binding(
             get: {
                 Calendar.current.startOfDay(for: block.fixedClockDate ?? Date())
@@ -723,7 +1016,7 @@ struct ScheduleBlockEditorForm: View {
         )
     }
 
-    private var pinnedDateShortLabel: String {
+    var pinnedDateShortLabel: String {
         let date = block.fixedClockDate ?? Date()
         if Calendar.current.isDateInToday(date) {
             return "Today"
@@ -733,137 +1026,7 @@ struct ScheduleBlockEditorForm: View {
         return formatter.string(from: date)
     }
 
-    private var sourceSection: some View {
-        editorSettingsCard(title: "Tasks", infoTopic: .taskSource) {
-            CueInLiquidGlassSegmentStrip(
-                segments: [
-                    CueInLiquidGlassSegmentStrip.Segment(
-                        id: "none",
-                        title: "No tasks",
-                        systemImage: "circle.dashed",
-                        accessibilityHint: "Time block without checklist or pool."
-                    ),
-                    CueInLiquidGlassSegmentStrip.Segment(
-                        id: "tasks",
-                        title: "Tasks",
-                        systemImage: "checkmark.circle.fill",
-                        accessibilityHint: "Attach Timeline pool fill and/or real tasks from the Tasks tab."
-                    ),
-                ],
-                selectionID: block.assignsTasks ? "tasks" : "none",
-                onSelect: { raw in
-                    let wantsTasks = raw == "tasks"
-                    guard wantsTasks != block.assignsTasks else { return }
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                        block.assignsTasks = wantsTasks
-                        if !wantsTasks {
-                            block.poolFillEnabled = false
-                            block.tasks = []
-                            block.deepWorkOnly = false
-                        }
-                    }
-                }
-            )
-        }
-    }
-
-    private var taskAttachmentsSection: some View {
-        Group {
-            if block.assignsTasks {
-                VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-                    if allowsPoolFillSource {
-                        poolFillToggleRow
-                            .disabled(!allowsPoolFillSource)
-                            .opacity(allowsPoolFillSource ? 1 : 0.45)
-                    }
-
-                    linkedTasksSection
-
-                    if block.poolFillEnabled, allowsPoolFillSource {
-                        poolFillSection
-                    }
-                }
-            }
-        }
-    }
-
-    private var poolFillToggleRow: some View {
-        HStack(alignment: .center, spacing: CueInSpacing.md) {
-            Text("Autofill")
-                .font(CueInTypography.caption)
-                .foregroundStyle(CueInColors.textSecondary)
-            Spacer(minLength: 0)
-            Toggle("", isOn: $block.poolFillEnabled)
-                .labelsHidden()
-                .tint(CueInColors.accentFocus)
-        }
-        .padding(.horizontal, CueInSpacing.md)
-        .padding(.vertical, 9)
-        .modifier(CueInLiquidGlassToggleShellModifier())
-        .accessibilityHint("When on, matching Timeline tasks can be added automatically; you can still add or create tasks yourself.")
-    }
-
-    private var linkedTasksSection: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.xs) {
-            HStack(alignment: .center, spacing: CueInSpacing.sm) {
-                Text("Tasks")
-                    .font(CueInTypography.caption)
-                    .foregroundStyle(CueInColors.textSecondary)
-                Spacer(minLength: 0)
-                Button {
-                    showTaskCreateSheet = true
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 26, weight: .semibold))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(CueInColors.accentFocus)
-                        .frame(width: 36, height: 36)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("New task")
-                .accessibilityHint("Opens quick capture to add a task here")
-            }
-
-            if block.tasks.isEmpty {
-                Text("No tasks")
-                    .font(CueInTypography.caption)
-                    .foregroundStyle(CueInColors.textTertiary.opacity(0.9))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
-            } else {
-                VStack(spacing: 4) {
-                    ForEach($block.tasks) { $task in
-                        HStack(spacing: CueInSpacing.sm) {
-                            Text(displayTitle(for: task))
-                                .font(CueInTypography.caption)
-                                .foregroundStyle(CueInColors.textPrimary)
-                                .lineLimit(2)
-
-                            Spacer(minLength: 0)
-
-                            Button {
-                                withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
-                                    block.tasks.removeAll { $0.id == task.id }
-                                }
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(CueInColors.textTertiary)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Remove from block")
-                        }
-                        .padding(.horizontal, CueInSpacing.md)
-                        .padding(.vertical, 6)
-                        .background(CueInColors.surfacePrimary, in: RoundedRectangle(cornerRadius: BlockEditorSurface.inset, style: .continuous))
-                    }
-                }
-            }
-        }
-    }
-
-    private func displayTitle(for task: ScheduleTaskDraft) -> String {
+    func displayTitle(for task: ScheduleTaskDraft) -> String {
         if let pid = task.plannerTaskItemID,
            let item = tasksStore.tasks.first(where: { $0.id == pid }) {
             return item.title
@@ -872,93 +1035,44 @@ struct ScheduleBlockEditorForm: View {
         return trimmed.isEmpty ? "Untitled" : trimmed
     }
 
-    private var durationSection: some View {
-        editorSettingsCard(title: "Planned duration") {
-            Button {
-                if allowsDurationOverride {
-                    showDurationWheelSheet = true
-                } else {
-                    CueInToastCenter.shared.showWarning(
-                        icon: "pin.slash",
-                        title: "Duration locked by pinned task",
-                        message: durationOverrideWarning ?? "This block comes from a pinned task, so its duration is fixed by the task's clock window."
-                    )
-                }
-            } label: {
-                HStack(spacing: CueInSpacing.md) {
-                    durationButtonLabel
-                    Spacer(minLength: 0)
-                    if allowsDurationOverride {
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(CueInColors.textTertiary)
-                    } else {
-                        Image(systemName: "pin.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(CueInColors.warning.opacity(0.9))
-                    }
-                }
-                .padding(.horizontal, CueInSpacing.md)
-                .padding(.vertical, 11)
-                .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: BlockEditorSurface.inset, style: .continuous)
-                        .fill(
-                            allowsDurationOverride
-                                ? CueInColors.surfaceSecondary.opacity(0.42)
-                                : CueInColors.warning.opacity(0.12)
-                        )
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Planned duration, \(ScheduleBlockFormat.durationLabel(minutes: block.durationMinutes))")
-            .accessibilityHint(
-                allowsDurationOverride
-                    ? "Opens hour, minute, and second picker"
-                    : "Duration is locked because this block comes from a pinned task"
-            )
+    func taskStatus(for draft: ScheduleTaskDraft) -> TaskStatus {
+        if let pid = draft.plannerTaskItemID,
+           let item = tasksStore.tasks.first(where: { $0.id == pid }) {
+            return item.status
         }
+        return .scheduled
     }
 
-    @ViewBuilder
-    private var durationButtonLabel: some View {
-        if let context = liveCountdownContext, durationAutoFollowsLive {
-            TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                Text(durationDigitalLabel(totalSeconds: liveRemainingSeconds(context: context, now: timeline.date)))
-                    .font(.system(size: 24, weight: .semibold, design: .rounded))
-                    .foregroundStyle(CueInColors.textPrimary)
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-            }
-        } else {
-            Text(durationDigitalLabel(totalSeconds: durationPickerTotalSeconds))
-                .font(.system(size: 24, weight: .semibold, design: .rounded))
-                .foregroundStyle(CueInColors.textPrimary)
-                .monospacedDigit()
+    func taskIsCompleted(for draft: ScheduleTaskDraft) -> Bool {
+        if let pid = draft.plannerTaskItemID,
+           let item = tasksStore.tasks.first(where: { $0.id == pid }) {
+            return item.isCompleted
         }
+        return false
     }
 
-    private var flowModeSection: some View {
-        editorSettingsCard(title: "Live run", infoTopic: .liveRun) {
-            CueInLiquidGlassSegmentStrip(
-                segments: BlockFlowMode.allCases.map {
-                    CueInLiquidGlassSegmentStrip.Segment(
-                        id: $0.rawValue,
-                        title: $0.label,
-                        systemImage: $0.editorIconName,
-                        accessibilityHint: $0.scheduleEditorHint
-                    )
-                },
-                selectionID: block.flowMode.rawValue,
-                onSelect: { raw in
-                    guard let mode = BlockFlowMode(rawValue: raw) else { return }
-                    block.flowMode = mode
-                }
-            )
+    func ensurePersistentTask(for index: Int) -> UUID {
+        let taskDraft = block.tasks[index]
+        if let pid = taskDraft.plannerTaskItemID,
+           tasksStore.tasks.contains(where: { $0.id == pid }) {
+            return pid
         }
+        
+        let newID = UUID()
+        let scheduledDate = Calendar.current.startOfDay(for: Date())
+        let newTask = TaskItem(
+            id: newID,
+            title: taskDraft.title,
+            notes: "",
+            scheduledDate: scheduledDate,
+            status: .scheduled
+        )
+        tasksStore.addTask(newTask)
+        block.tasks[index].plannerTaskItemID = newID
+        return newID
     }
 
-    private var durationWheelSheet: some View {
+    var durationWheelSheet: some View {
         NavigationStack {
             VStack(spacing: CueInSpacing.sm) {
                 HStack(spacing: 0) {
@@ -988,7 +1102,6 @@ struct ScheduleBlockEditorForm: View {
                 }
                 .frame(height: 180)
                 .clipped()
-
             }
             .padding(.top, 8)
             .navigationTitle("Timer")
@@ -1020,20 +1133,19 @@ struct ScheduleBlockEditorForm: View {
         }
     }
 
-    /// Hour component 0...16 derived from total picker seconds.
-    private var durationHourComponent: Int {
+    var durationHourComponent: Int {
         min(16, durationPickerTotalSeconds / 3600)
     }
 
-    private var durationMinuteComponent: Int {
+    var durationMinuteComponent: Int {
         (durationPickerTotalSeconds % 3600) / 60
     }
 
-    private var durationSecondComponent: Int {
+    var durationSecondComponent: Int {
         durationPickerTotalSeconds % 60
     }
 
-    private var durationHoursBinding: Binding<Int> {
+    var durationHoursBinding: Binding<Int> {
         Binding(
             get: { durationHourComponent },
             set: { newHour in
@@ -1049,7 +1161,7 @@ struct ScheduleBlockEditorForm: View {
         )
     }
 
-    private var durationMinutesComponentBinding: Binding<Int> {
+    var durationMinutesComponentBinding: Binding<Int> {
         Binding(
             get: {
                 durationMinuteComponent
@@ -1067,7 +1179,7 @@ struct ScheduleBlockEditorForm: View {
         )
     }
 
-    private var durationSecondsComponentBinding: Binding<Int> {
+    var durationSecondsComponentBinding: Binding<Int> {
         Binding(
             get: {
                 durationSecondComponent
@@ -1085,7 +1197,7 @@ struct ScheduleBlockEditorForm: View {
         )
     }
 
-    private func clampDurationTotalSeconds(hours: Int, minutes: Int, seconds: Int) -> Int {
+    func clampDurationTotalSeconds(hours: Int, minutes: Int, seconds: Int) -> Int {
         let h = min(16, max(0, hours))
         let m = max(0, min(59, minutes))
         let s = max(0, min(59, seconds))
@@ -1099,7 +1211,7 @@ struct ScheduleBlockEditorForm: View {
         return total
     }
 
-    private func normalizeDurationPicker() {
+    func normalizeDurationPicker() {
         durationPickerTotalSeconds = clampDurationTotalSeconds(
             hours: durationHourComponent,
             minutes: durationMinuteComponent,
@@ -1108,7 +1220,7 @@ struct ScheduleBlockEditorForm: View {
         syncPickerToDraftMinutes()
     }
 
-    private func resetDurationPickerFromBlock() {
+    func resetDurationPickerFromBlock() {
         if let live = block.liveDurationOverrideSeconds {
             durationPickerTotalSeconds = clampDurationTotalSeconds(
                 hours: live / 3600,
@@ -1123,15 +1235,15 @@ struct ScheduleBlockEditorForm: View {
         }
     }
 
-    private func hourRowTitle(_ hour: Int) -> String {
+    func hourRowTitle(_ hour: Int) -> String {
         "\(hour)"
     }
 
-    private func minuteRowTitle(minutes: Int) -> String {
+    func minuteRowTitle(minutes: Int) -> String {
         String(format: "%02d", minutes)
     }
 
-    private func durationDigitalLabel(totalSeconds: Int) -> String {
+    func durationDigitalLabel(totalSeconds: Int) -> String {
         let safe = max(0, totalSeconds)
         let hours = safe / 3600
         let minutes = (safe % 3600) / 60
@@ -1139,12 +1251,23 @@ struct ScheduleBlockEditorForm: View {
         return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
     }
 
-    private func liveRemainingSeconds(context: LiveCountdownContext, now: Date) -> Int {
-        let remaining = max(Int(context.endTime.timeIntervalSince(now)), 0)
+    func liveCountdownSignedSeconds(context: LiveCountdownContext, now: Date) -> Int {
+        Int(context.endTime.timeIntervalSince(now))
+    }
+
+    func liveRemainingSeconds(context: LiveCountdownContext, now: Date) -> Int {
+        let remaining = max(liveCountdownSignedSeconds(context: context, now: now), 0)
         return min(16 * 3600, remaining)
     }
 
-    private func startDurationLiveSyncIfNeeded() {
+    func liveCountdownDigitalLabel(signedSeconds: Int) -> String {
+        if signedSeconds >= 0 {
+            return durationDigitalLabel(totalSeconds: min(16 * 3600, signedSeconds))
+        }
+        return "-\(durationDigitalLabel(totalSeconds: min(16 * 3600, -signedSeconds)))"
+    }
+
+    func startDurationLiveSyncIfNeeded() {
         guard liveCountdownContext != nil else { return }
         durationLiveSyncTask?.cancel()
         durationLiveSyncTask = Task { @MainActor in
@@ -1158,122 +1281,17 @@ struct ScheduleBlockEditorForm: View {
         }
     }
 
-    private func syncPickerToDraftMinutes() {
+    func syncPickerToDraftMinutes() {
         syncDraftDurationFromCurrentPicker()
     }
 
-    /// Keeps the draft in lock-step with the visible countdown/picker value so Save
-    /// uses the exact "now" timer value (not the value from when the user first edited).
-    private func syncDraftDurationFromCurrentPicker() {
+    func syncDraftDurationFromCurrentPicker() {
         let clamped = max(5 * 60, min(16 * 60 * 60, durationPickerTotalSeconds))
         block.liveDurationOverrideSeconds = clamped
         block.durationMinutes = max(5, min(960, Int(round(Double(clamped) / 60.0))))
     }
 
-    private var poolFillSection: some View {
-        VStack(alignment: .leading, spacing: CueInSpacing.sm) {
-            HStack(alignment: .top, spacing: CueInSpacing.sm) {
-                Text("Pool filters")
-                    .font(CueInTypography.caption)
-                    .foregroundStyle(CueInColors.textSecondary)
-                editorInfoButton(for: .poolFill)
-                Spacer(minLength: 0)
-                Text(block.fillRule.displayLabel)
-                    .font(CueInTypography.micro)
-                    .foregroundStyle(CueInColors.textTertiary)
-                    .multilineTextAlignment(.trailing)
-            }
-
-            VStack(spacing: 0) {
-                poolScopeFilterRow(
-                    title: "Field",
-                    systemImage: "square.grid.2x2",
-                    value: $block.fillField,
-                    anyMenuTitle: "Any field",
-                    options: availableScopes.fields
-                )
-                poolScopeDivider
-                poolScopeFilterRow(
-                    title: "Project",
-                    systemImage: "folder",
-                    value: $block.fillProject,
-                    anyMenuTitle: "Any project",
-                    options: availableScopes.projects
-                )
-            }
-            .background(
-                RoundedRectangle(cornerRadius: BlockEditorSurface.outer, style: .continuous)
-                    .fill(CueInColors.surfacePrimary.opacity(0.5))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: BlockEditorSurface.outer, style: .continuous)
-                    .strokeBorder(CueInColors.divider.opacity(0.32), lineWidth: 0.5)
-            )
-
-            Button {
-                showAutofillPickOrderSheet = true
-            } label: {
-                HStack(alignment: .center, spacing: 12) {
-                    Image(systemName: "arrow.up.arrow.down.circle.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(CueInColors.accentFocus)
-                        .frame(width: 30, height: 30)
-                        .background(
-                            CueInColors.accentFocus.opacity(0.12),
-                            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        )
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Choose tasks by")
-                            .font(CueInTypography.caption)
-                            .foregroundStyle(CueInColors.textPrimary)
-                        Text(block.autofillPickOrder.editorTitle)
-                            .font(CueInTypography.micro)
-                            .foregroundStyle(CueInColors.textTertiary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Text("Change")
-                        .font(CueInTypography.caption.weight(.semibold))
-                        .foregroundStyle(CueInColors.accentFocus)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(CueInColors.textTertiary.opacity(0.85))
-                }
-                .padding(.horizontal, CueInSpacing.md)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: BlockEditorSurface.inset, style: .continuous)
-                        .fill(CueInColors.surfaceSecondary.opacity(0.38))
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("Opens autofill ordering options")
-
-            Toggle(isOn: $block.deepWorkOnly) {
-                HStack(spacing: 10) {
-                    Image(systemName: "flame.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(CueInColors.accentFocus.opacity(0.75))
-                    Text("Deep work only")
-                        .font(CueInTypography.caption)
-                        .foregroundStyle(CueInColors.textSecondary)
-                }
-            }
-            .tint(CueInColors.accentFocus)
-        }
-    }
-
-    private var poolScopeDivider: some View {
-        Rectangle()
-            .fill(CueInColors.divider.opacity(0.4))
-            .frame(height: 0.5)
-            .padding(.leading, 54)
-    }
-
-    private func poolScopeFilterRow(
+    func poolScopeFilterRow(
         title: String,
         systemImage: String,
         value: Binding<String>,
@@ -1317,6 +1335,38 @@ struct ScheduleBlockEditorForm: View {
         }
         .buttonStyle(.plain)
     }
+
+    func focusTitleOnce() {
+        guard !didRequestInitialFocus else { return }
+        didRequestInitialFocus = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(16))
+            titleFocused = true
+        }
+    }
+}
+
+// MARK: - Supporting Views
+
+private struct BlockEditorPropertyChip: View {
+    let icon: String
+    let title: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(tint)
+            Text(title)
+                .font(CueInTypography.captionMedium)
+                .foregroundStyle(CueInColors.textPrimary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 11)
+        .frame(height: 36)
+        .cueInEditorGlassCapsule()
+    }
 }
 
 // MARK: - Autofill pick order sheet
@@ -1335,13 +1385,13 @@ private struct AutofillPickOrderPickerSheet: View {
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(mode.editorTitle)
-                                    .font(CueInTypography.bodyMedium)
-                                    .foregroundStyle(CueInColors.textPrimary)
-                                Text(mode.editorDetail)
-                                    .font(CueInTypography.caption)
-                                    .foregroundStyle(CueInColors.textSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                  Text(mode.editorTitle)
+                                      .font(CueInTypography.bodyMedium)
+                                      .foregroundStyle(CueInColors.textPrimary)
+                                  Text(mode.editorDetail)
+                                      .font(CueInTypography.caption)
+                                      .foregroundStyle(CueInColors.textSecondary)
+                                      .fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer(minLength: 0)
                             if pickOrder == mode {
@@ -1369,7 +1419,7 @@ private struct AutofillPickOrderPickerSheet: View {
     }
 }
 
-// MARK: - Appearance picker (sheet — avoids broken Menu rendering & endless icon lists)
+// MARK: - Appearance picker (sheet)
 
 private struct ScheduleBlockAppearancePickerSheet: View {
     @Binding var block: ScheduleBlockDraft
@@ -1446,7 +1496,7 @@ private struct ScheduleBlockAppearancePickerSheet: View {
                                         glyphSelected(symbol)
                                             ? CueInColors.surfaceTertiary.opacity(0.85)
                                             : CueInColors.surfacePrimary.opacity(0.35),
-                                        in: RoundedRectangle(cornerRadius: BlockEditorSurface.inset, style: .continuous)
+                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     )
                             }
                             .buttonStyle(.plain)
@@ -1495,3 +1545,32 @@ private struct ScheduleBlockAppearancePickerSheet: View {
         .accessibilityLabel(a11y)
     }
 }
+
+// MARK: - TaskDropDelegate
+
+struct TaskDropDelegate: DropDelegate {
+    let item: ScheduleTaskDraft
+    @Binding var list: [ScheduleTaskDraft]
+    @Binding var draggedItem: ScheduleTaskDraft?
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggedItem = nil
+        return true
+    }
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedItem = draggedItem else { return }
+        if draggedItem.id != item.id {
+            guard let fromIndex = list.firstIndex(where: { $0.id == draggedItem.id }),
+                  let toIndex = list.firstIndex(where: { $0.id == item.id }) else {
+                return
+            }
+            if fromIndex != toIndex {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                    list.move(fromOffsets: IndexSet(integer: fromIndex), toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
+                }
+            }
+        }
+    }
+}
+

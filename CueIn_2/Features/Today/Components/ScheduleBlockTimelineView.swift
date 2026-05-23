@@ -30,6 +30,7 @@ struct ScheduleBlockTimelineView: View {
     let onContextRearrange: (UUID) -> Void
     let onContextDelete: (UUID) -> Void
     let onSwipeCommitDelete: (UUID) -> Void
+    var onOpenFocus: () -> Void = {}
     let isJiggleRearrangeMode: Bool
 
     // MARK: - Drag State
@@ -147,6 +148,7 @@ struct ScheduleBlockTimelineView: View {
                     }
 
                     row(for: block, index: index)
+                        .padding(.vertical, block.state == .completed ? -3 : 0)
                         .id(block.id)
                 }
                 .zIndex(isDragged ? 1000 : Double(visibleBlocks.count - index))
@@ -204,6 +206,12 @@ struct ScheduleBlockTimelineView: View {
             onFinishBlockKeepingPending: { onFinishBlockKeepingPending(block.id) },
             onRevertCompletedBlock: { onRevertCompletedBlock(block.id) },
             onToggleTask: { onToggleTask(block.id, $0) },
+            onAddTask: block.id == currentBlockID && isLiveRun
+                ? { onContextAddTask(block.id) }
+                : nil,
+            onOpenFocus: block.id == currentBlockID && isLiveRun && block.state == .active
+                ? onOpenFocus
+                : nil,
             onEdit: { onContextEdit(block) },
             onDelete: { onContextDelete(block.id) }
         )

@@ -40,45 +40,57 @@ final class SupabaseAuthStore {
     }
 
     func configure(projectURL: String, anonKey: String, redirectURL: String) {
+        AppLogger.shared.log("Configuring Supabase with project URL: \(projectURL)", category: .system)
         SupabaseConfiguration.save(projectURL: projectURL, anonKey: anonKey, redirectURL: redirectURL)
     }
 
     func sendMagicLink(email: String) async {
+        AppLogger.shared.log("Requesting Magic Link for \(email)", category: .system)
         await perform {
             try await self.client.sendMagicLink(email: email)
             self.lastMagicLinkEmail = email
+            AppLogger.shared.log("Magic Link request succeeded for \(email)", category: .system)
         }
     }
 
     func signInWithPassword(email: String, password: String) async {
+        AppLogger.shared.log("Attempting sign-in with password for \(email)", category: .system)
         await perform {
             let newSession = try await self.client.signInWithPassword(email: email, password: password)
             self.save(newSession)
             self.lastAuthNotice = nil
+            AppLogger.shared.log("Sign-in succeeded for \(email)", category: .system)
             await CueInSyncRuntimeBridge.shared.migrateAndSyncCurrentWorkspace()
         }
     }
 
     func signUpWithPassword(email: String, password: String) async {
+        AppLogger.shared.log("Attempting sign-up with password for \(email)", category: .system)
         await perform {
             let response = try await self.client.signUpWithPassword(email: email, password: password)
             if let session = response.session {
                 self.save(session)
                 self.lastAuthNotice = nil
+                AppLogger.shared.log("Sign-up succeeded and logged in automatically for \(email)", category: .system)
                 await CueInSyncRuntimeBridge.shared.migrateAndSyncCurrentWorkspace()
             } else {
                 self.lastAuthNotice = "Account created. Confirm your email, then sign in."
+                AppLogger.shared.log("Sign-up succeeded for \(email) (requires email confirmation)", category: .system)
             }
         }
     }
 
     func signInWithGoogle() async {
+        AppLogger.shared.log("Triggered Google OAuth sign-in", category: .system)
         await signInWithOAuth(provider: "google")
     }
 
     func signInWithOAuth(provider: String) async {
+        AppLogger.shared.log("Attempting OAuth sign-in with provider: \(provider)", category: .system)
         guard let config = SupabaseConfiguration.current else {
-            lastError = SupabaseClientError.missingConfiguration.localizedDescription
+            let err = SupabaseClientError.missingConfiguration
+            AppLogger.shared.error(err, message: "Missing Supabase configuration for OAuth")
+            lastError = err.localizedDescription
             return
         }
 
@@ -88,7 +100,9 @@ final class SupabaseAuthStore {
             URLQueryItem(name: "redirect_to", value: config.redirectURL.absoluteString)
         ]
         guard let url = components?.url else {
-            lastError = "Unable to build OAuth URL."
+            let msg = "Unable to build OAuth URL."
+            AppLogger.shared.error(SupabaseClientError.invalidResponse, message: msg)
+            lastError = msg
             return
         }
 
@@ -97,16 +111,20 @@ final class SupabaseAuthStore {
         do {
             let callback = try await WebOAuthSession.start(url: url, callbackScheme: config.redirectURL.scheme ?? "cuein")
             try await handleCallback(callback)
+            AppLogger.shared.log("OAuth sign-in succeeded for provider \(provider)", category: .system)
             await CueInSyncRuntimeBridge.shared.migrateAndSyncCurrentWorkspace()
         } catch {
+            AppLogger.shared.error(error, message: "OAuth sign-in failed for provider \(provider)")
             lastError = error.localizedDescription
         }
         isWorking = false
     }
 
     func handleIncomingURL(_ url: URL) async {
+        AppLogger.shared.log("Handling incoming auth callback URL: \(url.host ?? "")", category: .system)
         await perform {
             try await self.handleCallback(url)
+            AppLogger.shared.log("Auth callback URL processed successfully", category: .system)
             await CueInSyncRuntimeBridge.shared.migrateAndSyncCurrentWorkspace()
         }
     }
@@ -116,10 +134,13 @@ final class SupabaseAuthStore {
             let tokenData = credential.identityToken,
             let token = String(data: tokenData, encoding: .utf8)
         else {
-            lastError = "Apple did not return an identity token."
+            let msg = "Apple did not return an identity token."
+            AppLogger.shared.error(SupabaseClientError.invalidResponse, message: msg)
+            lastError = msg
             return
         }
 
+        AppLogger.shared.log("Attempting sign-in with Apple", category: .system)
         await perform {
             let newSession = try await self.client.signInWithIDToken(
                 provider: "apple",
@@ -128,15 +149,18 @@ final class SupabaseAuthStore {
             )
             self.save(newSession)
             self.pendingAppleNonce = nil
+            AppLogger.shared.log("Apple sign-in succeeded", category: .system)
             await CueInSyncRuntimeBridge.shared.migrateAndSyncCurrentWorkspace()
         }
     }
 
     func refreshIfNeeded() async {
         guard let current = session, current.isExpired else { return }
+        AppLogger.shared.log("Token expired; attempting refresh", category: .system)
         await perform {
             let newSession = try await self.client.refreshSession(current)
             self.save(newSession)
+            AppLogger.shared.log("Token refresh succeeded", category: .system)
             await CueInSyncEngine.shared.syncNow()
         }
     }
@@ -144,17 +168,20 @@ final class SupabaseAuthStore {
     func validateStoredSession() async {
         guard let current = session else { return }
         if current.isExpired {
+            AppLogger.shared.log("Stored session expired during validation. Refreshing...", category: .system)
             await refreshIfNeeded()
             return
         }
         do {
             let user = try await client.user(accessToken: current.accessToken)
             if user != current.user {
+                AppLogger.shared.log("User details changed in database; updating local profile", category: .system)
                 var next = current
                 next.user = user
                 save(next)
             }
         } catch {
+            AppLogger.shared.error(error, message: "Stored session validation failed")
             if Self.shouldClearSession(for: error) {
                 clearStaleSessionAfterBackendRejection()
             }
@@ -163,16 +190,20 @@ final class SupabaseAuthStore {
 
     func signOut() async {
         guard let current = session else {
+            AppLogger.shared.log("Sign-out requested but no local session found. Clearing token store.", category: .system)
             tokenStore.clear()
             return
         }
+        AppLogger.shared.log("Signing out user: \(current.user.email ?? "")", category: .system)
         isWorking = true
         lastError = nil
         lastAuthNotice = nil
         do {
             try await client.signOut(current)
             clearSession()
+            AppLogger.shared.log("Sign-out succeeded on remote server and local session cleared", category: .system)
         } catch {
+            AppLogger.shared.error(error, message: "Remote sign-out failed")
             if Self.shouldClearSession(for: error) {
                 clearSession()
                 lastAuthNotice = "Session cleared."
@@ -185,6 +216,7 @@ final class SupabaseAuthStore {
 
     func deleteAccount() async {
         guard let current = session else { return }
+        AppLogger.shared.log("Requesting account deletion for user: \(current.user.email ?? "")", category: .system)
         isWorking = true
         lastError = nil
         lastAuthNotice = nil
@@ -192,7 +224,9 @@ final class SupabaseAuthStore {
             try await client.deleteAccount(session: current)
             clearSession()
             lastAuthNotice = "Account deleted."
+            AppLogger.shared.log("Account deletion succeeded", category: .system)
         } catch {
+            AppLogger.shared.error(error, message: "Account deletion failed")
             if Self.shouldClearSession(for: error) {
                 clearSession()
                 lastAuthNotice = "This account was already deleted. Local session cleared."
@@ -204,6 +238,7 @@ final class SupabaseAuthStore {
     }
 
     func clearStaleSessionAfterBackendRejection() {
+        AppLogger.shared.log("Stale authentication session rejected by backend. Clearing local session.", category: .system)
         clearSession()
         lastError = nil
         lastAuthNotice = "Your account session is no longer valid. Sign in again to sync."
@@ -223,6 +258,7 @@ final class SupabaseAuthStore {
         do {
             try await operation()
         } catch {
+            AppLogger.shared.error(error, message: "Authentication operation failed during perform")
             if Self.shouldClearSession(for: error) {
                 clearStaleSessionAfterBackendRejection()
             } else {

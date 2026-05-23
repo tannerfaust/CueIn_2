@@ -141,7 +141,7 @@ final class NotionIntegrationStore {
                 session: session
             )
             lastSyncResult = result
-            await CueInSyncEngine.shared.syncNow()
+            await CueInSyncEngine.shared.syncWorkspaceFromScratch()
             state = currentConnectedState(lastSyncedAt: result.lastSyncedAt)
         } catch {
             state = .failed(error.localizedDescription)
@@ -178,7 +178,7 @@ final class NotionIntegrationStore {
         self.state = .working("Finishing Notion setup...")
         let response: NotionOAuthCompleteResponse = try await client.invokeFunction(
             "notion-oauth-complete",
-            body: NotionOAuthCompleteRequest(code: code, state: oauthState, redirectURI: callbackURL),
+            body: NotionOAuthCompleteRequest(code: code, state: oauthState),
             session: session
         )
         currentConnection = response.connection
@@ -240,13 +240,6 @@ private struct NotionOAuthStartResponse: Decodable {
 private struct NotionOAuthCompleteRequest: Encodable {
     var code: String
     var state: String
-    var redirectURI: String
-
-    enum CodingKeys: String, CodingKey {
-        case code
-        case state
-        case redirectURI = "redirect_uri"
-    }
 }
 
 private struct NotionOAuthCompleteResponse: Decodable {
@@ -283,6 +276,9 @@ private enum NotionWebOAuthSession {
                 #endif
                 if let callbackURL {
                     continuation.resume(returning: callbackURL)
+                } else if let authError = error as? ASWebAuthenticationSessionError,
+                          authError.code == .canceledLogin {
+                    continuation.resume(throwing: SupabaseClientError.server(status: 400, message: "Notion authorization was cancelled before CueIn received a callback. Select a page and tap Allow access to finish."))
                 } else {
                     continuation.resume(throwing: error ?? SupabaseClientError.invalidResponse)
                 }
@@ -292,7 +288,7 @@ private enum NotionWebOAuthSession {
             session.presentationContextProvider = presenter
             activePresenter = presenter
             #endif
-            session.prefersEphemeralWebBrowserSession = true
+            session.prefersEphemeralWebBrowserSession = false
             activeSession = session
             session.start()
         }

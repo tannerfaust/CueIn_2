@@ -37,36 +37,63 @@ final class CueInSyncEngine {
 
     func loadCachedWorkspaceForCurrentUser() {
         guard let repository, let userID = authStore.session?.user.id else { return }
+        AppLogger.shared.log("Loading cached workspace for user ID: \(userID)", category: .database)
         do {
-            guard try repository.hasCachedWorkspace(for: userID) else { return }
+            guard try repository.hasCachedWorkspace(for: userID) else { 
+                AppLogger.shared.log("No cached workspace found for user ID: \(userID)", category: .database)
+                return 
+            }
             try applyCachedWorkspace(repository: repository, userID: userID)
+            AppLogger.shared.log("Successfully applied cached workspace for user ID: \(userID)", category: .database)
         } catch {
+            AppLogger.shared.error(error, message: "Failed to load cached workspace for user")
             state = .failed(error.localizedDescription)
         }
     }
 
     func enqueue<Record: SupabaseSyncRecord>(_ record: Record, table: SupabaseTable) {
         guard let repository else { return }
+        AppLogger.shared.log("Enqueuing single sync mutation for table: \(table.rawValue)", category: .database)
         do {
             try repository.upsert(record, table: table, enqueueMutation: true)
             scheduleSync()
         } catch {
+            AppLogger.shared.error(error, message: "Failed to enqueue sync record on table \(table.rawValue)")
             state = .failed(error.localizedDescription)
         }
     }
 
     func enqueue<Record: SupabaseSyncRecord>(_ records: [Record], table: SupabaseTable) {
         guard let repository, !records.isEmpty else { return }
+        AppLogger.shared.log("Enqueuing \(records.count) sync mutations for table: \(table.rawValue)", category: .database)
         do {
             try repository.upsert(records, table: table, enqueueMutation: true)
             scheduleSync()
         } catch {
+            AppLogger.shared.error(error, message: "Failed to enqueue \(records.count) sync records on table \(table.rawValue)")
             state = .failed(error.localizedDescription)
         }
     }
 
     func syncNow() async {
+        await syncNow(overwritePendingRemoteRecords: false)
+    }
+
+    func syncWorkspaceFromScratch() async {
+        guard let repository else {
+            state = .blocked("Local database is not ready.")
+            return
+        }
+        AppLogger.shared.log("Resetting pull history to trigger sync-from-scratch", category: .network)
+        for table in SupabaseTable.workspaceTables {
+            repository.resetLastPullDate(for: table)
+        }
+        await syncNow(overwritePendingRemoteRecords: true)
+    }
+
+    private func syncNow(overwritePendingRemoteRecords: Bool) async {
         if isSyncInFlight {
+            AppLogger.shared.log("Sync is already in-flight; queueing subsequent sync run", category: .network)
             needsSyncAfterCurrent = true
             return
         }
@@ -75,6 +102,7 @@ final class CueInSyncEngine {
             isSyncInFlight = false
             if needsSyncAfterCurrent {
                 needsSyncAfterCurrent = false
+                AppLogger.shared.log("Executing queued subsequent sync run", category: .network)
                 Task { @MainActor in
                     await self.syncNow()
                 }
@@ -92,6 +120,7 @@ final class CueInSyncEngine {
             return
         }
 
+        AppLogger.shared.log("Sync run started. Overwrite pending: \(overwritePendingRemoteRecords)", category: .network)
         state = .syncing
         await authStore.refreshIfNeeded()
         if let refreshed = authStore.session {
@@ -100,11 +129,17 @@ final class CueInSyncEngine {
 
         do {
             try await pushPendingMutations(repository: repository, session: session)
-            try await pullRemoteChanges(repository: repository, session: session)
+            try await pullRemoteChanges(
+                repository: repository,
+                session: session,
+                overwritePendingRemoteRecords: overwritePendingRemoteRecords
+            )
             try applyCachedWorkspace(repository: repository, userID: session.user.id)
             let now = Date()
             state = .synced(now)
+            AppLogger.shared.log("Sync run completed successfully", category: .network)
         } catch {
+            AppLogger.shared.error(error, message: "Sync run failed")
             if let clientError = error as? SupabaseClientError, clientError.invalidatesAuthSession {
                 authStore.clearStaleSessionAfterBackendRejection()
                 state = .blocked("Sign in to sync.")
@@ -120,6 +155,7 @@ final class CueInSyncEngine {
         scheduledSyncTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
+            AppLogger.shared.log("Executing scheduled sync trigger", category: .network)
             await self.syncNow()
         }
     }
@@ -259,11 +295,13 @@ final class CueInSyncEngine {
 
     private func pushPendingMutations(repository: LocalSyncRepository, session: SupabaseAuthSession) async throws {
         let mutations = try repository.pendingMutations()
+        AppLogger.shared.log("Sync push phase: \(mutations.count) mutations pending", category: .network)
         for mutation in mutations {
             do {
                 try await push(mutation, session: session)
                 try repository.markSynced(mutation)
             } catch {
+                AppLogger.shared.error(error, message: "Sync push failed for mutation ID \(mutation.id)")
                 try repository.markFailed(mutation, error: error)
                 throw error
             }
@@ -275,6 +313,7 @@ final class CueInSyncEngine {
         guard let payload = mutation.payloadData else { return }
         let decoder = JSONDecoder.cueInSyncDecoder
 
+        AppLogger.shared.log("Pushing pending mutation to table '\(table.rawValue)'", category: .network)
         switch table {
         case .profiles:
             try await client.upsert([try decoder.decode(ProfileDTO.self, from: payload)], table: table, session: session)
@@ -293,30 +332,41 @@ final class CueInSyncEngine {
         }
     }
 
-    private func pullRemoteChanges(repository: LocalSyncRepository, session: SupabaseAuthSession) async throws {
-        try await pull(FieldDTO.self, table: .fields, repository: repository, session: session)
-        try await pull(ProjectDTO.self, table: .projects, repository: repository, session: session)
-        try await pull(TaskDTO.self, table: .tasks, repository: repository, session: session)
-        try await pull(GoalDTO.self, table: .goals, repository: repository, session: session)
-        try await pull(ScheduleRecordDTO.self, table: .scheduleRecords, repository: repository, session: session)
-        try await pull(AppLayoutSettingDTO.self, table: .appLayoutSettings, repository: repository, session: session)
+    private func pullRemoteChanges(
+        repository: LocalSyncRepository,
+        session: SupabaseAuthSession,
+        overwritePendingRemoteRecords: Bool
+    ) async throws {
+        AppLogger.shared.log("Sync pull phase started", category: .network)
+        try await pull(FieldDTO.self, table: .fields, repository: repository, session: session, overwritePendingRemoteRecords: overwritePendingRemoteRecords)
+        try await pull(ProjectDTO.self, table: .projects, repository: repository, session: session, overwritePendingRemoteRecords: overwritePendingRemoteRecords)
+        try await pull(TaskDTO.self, table: .tasks, repository: repository, session: session, overwritePendingRemoteRecords: overwritePendingRemoteRecords)
+        try await pull(GoalDTO.self, table: .goals, repository: repository, session: session, overwritePendingRemoteRecords: overwritePendingRemoteRecords)
+        try await pull(ScheduleRecordDTO.self, table: .scheduleRecords, repository: repository, session: session, overwritePendingRemoteRecords: overwritePendingRemoteRecords)
+        try await pull(AppLayoutSettingDTO.self, table: .appLayoutSettings, repository: repository, session: session, overwritePendingRemoteRecords: overwritePendingRemoteRecords)
     }
 
     private func pull<Record: SupabaseSyncRecord>(
         _ type: Record.Type,
         table: SupabaseTable,
         repository: LocalSyncRepository,
-        session: SupabaseAuthSession
+        session: SupabaseAuthSession,
+        overwritePendingRemoteRecords: Bool
     ) async throws {
+        let lastPull = repository.lastPullDate(for: table)
+        AppLogger.shared.log("Pulling changes for table '\(table.rawValue)' since \(lastPull?.description ?? "beginning of time")", category: .network)
         let records: [Record] = try await client.fetch(
             type,
             table: table,
-            updatedAfter: repository.lastPullDate(for: table),
+            updatedAfter: lastPull,
             session: session
         )
+        AppLogger.shared.log("Pulled \(records.count) records for table '\(table.rawValue)'", category: .network)
         for record in records {
-            if record.deletedAt == nil,
+            if !overwritePendingRemoteRecords,
+               record.deletedAt == nil,
                try repository.hasPendingMutation(table: table, recordID: record.id) {
+                AppLogger.shared.log("Skipping record ID \(record.id) on table '\(table.rawValue)' because of local pending unsynced mutation", category: .database)
                 continue
             }
             try repository.upsert(record, table: table, enqueueMutation: false)
@@ -327,6 +377,7 @@ final class CueInSyncEngine {
     }
 
     private func applyCachedWorkspace(repository: LocalSyncRepository, userID: UUID) throws {
+        AppLogger.shared.log("Applying local sync records to memory stores", category: .database)
         let fields = try repository.records(FieldDTO.self, table: .fields, userID: userID)
             .filter { $0.deletedAt == nil }
             .map(\.domainModel)
@@ -347,7 +398,9 @@ final class CueInSyncEngine {
             .map(\.domainModel)
             .sorted { $0.createdAt < $1.createdAt }
 
+        AppLogger.shared.log("Replacing TasksStore data: \(fields.count) fields, \(projects.count) projects, \(tasks.count) tasks", category: .database)
         TasksStore.shared.replaceFromSync(fields: fields, projects: projects, tasks: tasks)
+        AppLogger.shared.log("Replacing GoalStrategyStore data: \(goals.count) goals", category: .database)
         GoalStrategyStore.shared.replaceFromSync(goals)
         applyCachedScheduleRecords(repository: repository, userID: userID)
         applyCachedLayoutSettings(repository: repository, userID: userID)
@@ -380,5 +433,11 @@ final class CueInSyncEngine {
         if let taskLedViewMode = layout.payload["task_led_view_mode"], !taskLedViewMode.isEmpty {
             UserDefaults.standard.set(taskLedViewMode, forKey: TodayDisplayPreferences.taskLedViewMode)
         }
+    }
+}
+
+private extension SupabaseTable {
+    static var workspaceTables: [SupabaseTable] {
+        [.fields, .projects, .tasks, .goals, .scheduleRecords, .appLayoutSettings]
     }
 }

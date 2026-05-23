@@ -406,6 +406,7 @@ struct TaskProjectsPage: View {
     let onCreateProject: (UUID?) -> Void
     let onEditProject: (UUID) -> Void
     let onDeleteProject: (UUID) -> Void
+    @State private var sourceFilter: ProjectSourceFilter = .all
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -421,6 +422,15 @@ struct TaskProjectsPage: View {
                     Spacer(minLength: 0)
                 }
 
+                if hasNotionProjects {
+                    Picker("Project source", selection: $sourceFilter) {
+                        ForEach(ProjectSourceFilter.allCases) { filter in
+                            Text(filter.title).tag(filter)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
                 LazyVGrid(
                     columns: [
                         GridItem(.flexible(), spacing: CueInSpacing.md),
@@ -428,7 +438,7 @@ struct TaskProjectsPage: View {
                     ],
                     spacing: CueInSpacing.md
                 ) {
-                    ForEach(store.projects) { project in
+                    ForEach(filteredProjects) { project in
                         NavigationLink(value: TasksRoute.project(project.id)) {
                             ProjectDashboardCard(project: project, store: store)
                         }
@@ -473,6 +483,37 @@ struct TaskProjectsPage: View {
             }
         }
     }
+
+    private var filteredProjects: [Project] {
+        switch sourceFilter {
+        case .all:
+            return store.projects
+        case .cueIn:
+            return store.projects.filter { !$0.isNotionImported }
+        case .notion:
+            return store.projects.filter(\.isNotionImported)
+        }
+    }
+
+    private var hasNotionProjects: Bool {
+        store.projects.contains(where: \.isNotionImported)
+    }
+}
+
+private enum ProjectSourceFilter: String, CaseIterable, Identifiable {
+    case all
+    case cueIn
+    case notion
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "All"
+        case .cueIn: return "CueIn"
+        case .notion: return "Notion"
+        }
+    }
 }
 
 private struct ProjectDashboardCard: View {
@@ -508,6 +549,10 @@ private struct ProjectDashboardCard: View {
                 Text(project.status.label)
                 Text("·")
                 Text("\(openCount) open")
+                if project.isNotionImported {
+                    Text("·")
+                    Text("Notion")
+                }
             }
             .font(CueInTypography.micro)
             .foregroundStyle(CueInColors.textTertiary)

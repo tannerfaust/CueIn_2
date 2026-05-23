@@ -20,6 +20,8 @@ struct TodayView: View {
     @State private var blockAddTask: IdentifiedBlockID?
     @State private var blockDeleteConfirm: IdentifiedBlockID?
     @State private var isJiggleRearrangeMode = false
+    @State private var showTimeblockFocus = false
+    @State private var focusEntryBlockID: UUID?
     @AppStorage(TodayDisplayPreferences.showScheduleStartTime) private var showScheduleStartTime = true
     @AppStorage(TodayDisplayPreferences.showScheduleDuration) private var showScheduleDuration = false
     @AppStorage(TodayDisplayPreferences.showScheduleTimeRange) private var showScheduleTimeRange = false
@@ -45,6 +47,7 @@ struct TodayView: View {
     @AppStorage(TodayDisplayPreferences.scheduleBlockTimerShowsSeconds) private var scheduleBlockTimerShowsSeconds = false
     @AppStorage(TodayDisplayPreferences.canvasDotsBackground) private var canvasDotsBackground = false
     @AppStorage(TodayDisplayPreferences.pullsTasksFromExecutionPool) private var pullsTasksFromExecutionPool = true
+    @AppStorage(TodayDisplayPreferences.enableCategoryTracking) private var enableCategoryTracking = false
     @AppStorage(TodayDisplayPreferences.todoViewShowInfoBlock) private var todoViewShowInfoBlock = true
     @AppStorage(TodayDisplayPreferences.todoSummaryPlacement) private var todoSummaryPlacementRaw
         = TodayDisplayPreferences.TodoSummaryPlacement.inList.rawValue
@@ -79,10 +82,9 @@ struct TodayView: View {
         TodayDisplayPreferences.migratedRunningLineStyle(from: runningLineStyleRaw)
     }
 
-    /// “Compress remaining” pause: neutral running-line fill; “End later” keeps block colors and frozen progress.
+    /// Paused / stopped TimeMaps use a neutral running-line fill instead of block colors.
     private var runningLineGreyFillWhilePausedReplan: Bool {
-        viewModel.isFormulaSchedulePaused
-            && TodayDisplayPreferences.migratedSchedulePauseBehavior(from: schedulePauseBehaviorRaw) == .compressRemaining
+        viewModel.isFormulaSchedulePaused || viewModel.isFormulaRunStopped
     }
 
     private var scheduleBlockTimerStyle: TodayDisplayPreferences.ScheduleBlockTimerStyle {
@@ -120,7 +122,7 @@ struct TodayView: View {
                                             currentBlockTitle: viewModel.runningLineTitle,
                                             style: runningLineStyle,
                                             accentColors: viewModel.runningLineProgressAccentPalette,
-                                            blockSegments: [],
+                                            blockSegments: viewModel.runningLineBlockSegments,
                                             greyFillWhilePausedReplan: runningLineGreyFillWhilePausedReplan,
                                             isStopped: viewModel.isFormulaRunStopped
                                         )
@@ -203,6 +205,10 @@ struct TodayView: View {
                                             onSwipeCommitDelete: { blockID in
                                                 viewModel.deleteFormulaBlock(blockID: blockID)
                                             },
+                                            onOpenFocus: {
+                                                focusEntryBlockID = viewModel.currentBlockID
+                                                showTimeblockFocus = true
+                                            },
                                             isJiggleRearrangeMode: isJiggleRearrangeMode
                                         )
                                     }
@@ -236,6 +242,11 @@ struct TodayView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .cueInShowScheduleStartSetup)) { _ in
                 presentScheduleStart()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .cueInOpenTimeblockFocus)) { _ in
+                guard viewModel.currentBlockID != nil else { return }
+                focusEntryBlockID = viewModel.currentBlockID
+                showTimeblockFocus = true
             }
             .onReceive(NotificationCenter.default.publisher(for: .cueInApplySavedFormula)) { note in
                 guard let raw = note.userInfo?[CueInShellNotification.formulaIDUserInfoKey] as? String,
@@ -283,6 +294,19 @@ struct TodayView: View {
         }
         .devNotebookScreen(todayChromeTitle)
         .tint(CueInColors.textPrimary)
+        .fullScreenCover(isPresented: $showTimeblockFocus) {
+            if let entryID = focusEntryBlockID ?? viewModel.currentBlockID ?? viewModel.blocks.first?.id {
+                TimeblockFocusModeView(
+                    initialBlockID: entryID,
+                    frozenProgressDate: viewModel.formulaSchedulePausedAt,
+                    showsFinishControl: viewModel.isFormulaRunLive || viewModel.isTimelessRunLive,
+                    onDismiss: {
+                        focusEntryBlockID = nil
+                        showTimeblockFocus = false
+                    }
+                )
+            }
+        }
         .sheet(isPresented: $showFormulaPickerSheet) {
                 FormulaPickerSheet(
                     formulas: viewModel.availableFormulas,
@@ -323,6 +347,7 @@ struct TodayView: View {
                 scheduleBlockTimerShowsSeconds: $scheduleBlockTimerShowsSeconds,
                 pullsTasksFromExecutionPool: $pullsTasksFromExecutionPool,
                 canvasDotsBackground: $canvasDotsBackground,
+                enableCategoryTracking: $enableCategoryTracking,
                 onDismiss: { showSettingsSheet = false }
             )
             .presentationDetents([.medium, .large])
@@ -431,14 +456,26 @@ struct TodayView: View {
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }
         .sheet(item: $blockAddTask) { box in
-            AddTaskToBlockSheet(
-                onAdd: { text in
-                    viewModel.addTemplateTaskToFormulaBlock(blockID: box.id, title: text)
+            ScheduleBlockAddTaskSheet(
+                store: tasksStore,
+                excludedTaskIDs: excludedPlannerTaskIDs(for: box.id),
+                captureDefaultsToToday: true,
+                onPickExisting: { item in
+                    viewModel.linkPlannerTaskToFormulaBlock(blockID: box.id, item: item)
                     blockAddTask = nil
                 },
-                onCancel: { blockAddTask = nil }
+                onQuickCaptureSaved: { item in
+                    viewModel.linkPlannerTaskToFormulaBlock(blockID: box.id, item: item)
+                    blockAddTask = nil
+                },
+                onQuickCaptureExpand: { draft in
+                    tasksStore.addTask(draft)
+                    viewModel.linkPlannerTaskToFormulaBlock(blockID: box.id, item: draft)
+                    blockAddTask = nil
+                },
+                onDismiss: { blockAddTask = nil }
             )
-            .presentationDetents([.medium])
+            .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }
@@ -594,7 +631,7 @@ struct TodayView: View {
                 }
                 .disabled(!viewModel.canClearFormulaSchedule)
                 Toggle(isOn: $pullsTasksFromExecutionPool) {
-                    Label("Use execution pool for tasks", systemImage: "tray.full")
+                    Label("Auto-fill blocks from To-do list", systemImage: "checklist")
                 }
                 Toggle(isOn: $scheduleShowsPagePlaybackControl) {
                     Label("Show play/pause on page", systemImage: "playpause.fill")
@@ -644,6 +681,10 @@ struct TodayView: View {
                 proxy.scrollTo(currentID, anchor: .center)
             }
         }
+    }
+
+    private func excludedPlannerTaskIDs(for blockID: UUID) -> Set<UUID> {
+        Set((viewModel.blocks.first { $0.id == blockID }?.tasks ?? []).compactMap(\.plannerTaskItemID))
     }
 }
 

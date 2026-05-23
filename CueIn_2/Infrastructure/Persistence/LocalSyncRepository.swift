@@ -130,6 +130,10 @@ final class LocalSyncRepository {
         UserDefaults.standard.set(date, forKey: lastPullKey(table))
     }
 
+    func resetLastPullDate(for table: SupabaseTable) {
+        UserDefaults.standard.removeObject(forKey: lastPullKey(table))
+    }
+
     private func lastPullKey(_ table: SupabaseTable) -> String {
         "cuein.sync.lastPull.\(table.rawValue)"
     }

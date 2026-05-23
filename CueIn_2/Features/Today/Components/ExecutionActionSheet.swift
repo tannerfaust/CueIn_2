@@ -55,6 +55,19 @@ struct ExecutionActionSheet: View {
 
     @ViewBuilder
     private var formulaSection: some View {
+        if viewModel.currentBlock != nil,
+           viewModel.isFormulaRunLive || viewModel.isTimelessRunLive {
+            SheetActionRow(
+                icon: "scope",
+                title: "Focus mode",
+                subtitle: "Open this time block full screen",
+                tint: CueInColors.accentFocus
+            ) {
+                NotificationCenter.default.post(name: .cueInOpenTimeblockFocus, object: nil)
+                onDismiss()
+            }
+        }
+
         if viewModel.isFormulaSchedulePaused {
             SheetActionRow(
                 icon: "play.fill",
@@ -69,17 +82,6 @@ struct ExecutionActionSheet: View {
 
         if viewModel.isFormulaRunLive, !viewModel.isFormulaSchedulePaused {
             SheetActionRow(
-                icon: "checkmark.circle",
-                title: "Finish Current Block",
-                subtitle: "Mark this time block complete and move the TimeMap forward",
-                tint: Color(red: 0.42, green: 0.82, blue: 0.55)
-            ) {
-                viewModel.finishActiveBlock()
-                onDismiss()
-            }
-            .disabled(viewModel.currentBlock == nil)
-
-            SheetActionRow(
                 icon: "pause.fill",
                 title: "Pause TimeMap",
                 subtitle: "Freeze time blocks and timeline; day progress keeps moving",
@@ -92,7 +94,7 @@ struct ExecutionActionSheet: View {
 
         if viewModel.isFormulaRunLive {
             Toggle(isOn: $pullsTasksFromExecutionPool) {
-                Label("Use execution pool for tasks", systemImage: "tray.full")
+                Label("Auto-fill blocks from To-do list", systemImage: "checklist")
                     .font(CueInTypography.bodyMedium)
                     .foregroundStyle(CueInColors.textPrimary)
             }

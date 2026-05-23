@@ -37,6 +37,7 @@ struct TaskItem: Identifiable, Codable, Hashable {
     var subtasks: [TaskSubtask]
     /// Kept by default so archived/completed task history remains available to future planning assistants.
     var savesToArchive: Bool
+    var externalSource: String?
 
     // MARK: Init
 
@@ -58,7 +59,8 @@ struct TaskItem: Identifiable, Codable, Hashable {
         updatedAt: Date = Date(),
         completedAt: Date? = nil,
         subtasks: [TaskSubtask] = [],
-        savesToArchive: Bool = true
+        savesToArchive: Bool = true,
+        externalSource: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -78,6 +80,7 @@ struct TaskItem: Identifiable, Codable, Hashable {
         self.completedAt = completedAt
         self.subtasks = subtasks
         self.savesToArchive = savesToArchive
+        self.externalSource = externalSource
     }
 
     // MARK: Derived state
@@ -96,6 +99,10 @@ struct TaskItem: Identifiable, Codable, Hashable {
 
     var isInboxed: Bool {
         status == .inbox && scheduledDate == nil
+    }
+
+    var isNotionImported: Bool {
+        externalSource?.localizedCaseInsensitiveCompare("notion") == .orderedSame
     }
 
     /// Minutes to reflect this task on a plan — estimate or a conservative fallback.

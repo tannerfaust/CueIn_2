@@ -24,7 +24,7 @@ struct FloatingTabBar: View {
     private var selectionAnimation: Animation {
         reduceMotion
             ? .easeOut(duration: 0.16)
-            : .spring(response: 0.32, dampingFraction: 0.78, blendDuration: 0.08)
+            : .spring(response: 0.26, dampingFraction: 0.68)
     }
 
     var body: some View {
@@ -39,6 +39,7 @@ struct FloatingTabBar: View {
         .modifier(TabBarGlassModifier())
         // Keep the bar compact regardless of the system Dynamic Type size.
         .dynamicTypeSize(.xSmall ... .large)
+        .animation(.spring(response: 0.32, dampingFraction: 0.8), value: tabs)
         .animation(selectionAnimation, value: selectedTab)
     }
 
@@ -63,10 +64,10 @@ struct FloatingTabBar: View {
 
                 VStack(spacing: 3) {
                     tabBarIcon(isSelected: isSelected, systemName: activeSymbol)
+                        .scaleEffect(isSelected && !reduceMotion ? 1.12 : 1.0)
                     tabBarTitle(title: title)
                 }
                 .foregroundStyle(isSelected ? CueInColors.textPrimary : CueInColors.textTertiary)
-                .scaleEffect(isSelected && !reduceMotion ? 1.04 : 1)
                 .offset(y: isSelected && !reduceMotion ? -1 : 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -94,12 +95,14 @@ struct FloatingTabBar: View {
         Image(systemName: systemName)
             .font(.system(size: 22, weight: isSelected ? .semibold : .regular))
             .frame(width: 26, height: 26)
+            .contentTransition(.symbolEffect(.replace))
+            .symbolEffect(.bounce, value: isSelected)
     }
 
     @ViewBuilder
     private func tabBarTitle(title: String) -> some View {
         Text(title)
-            .font(.system(size: 11, weight: .medium))
+            .font(.system(size: 9.5, weight: .medium))
             .fixedSize()
     }
 

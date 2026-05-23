@@ -22,6 +22,10 @@ struct QuickCaptureSheet: View {
     /// When `false`, hides the sheet drag handle (e.g. when embedded in another nav stack).
     var showsDragHandle: Bool
     var presentationMode: PresentationMode
+    /// When `true`, switches to ``PresentationMode/full`` once the title field has text (e.g. block add-task sheet).
+    var autoExpandWhenTyping: Bool
+    /// Fired when ``autoExpandWhenTyping`` toggles between compact chrome and full composer.
+    var onComposingActiveChanged: ((Bool) -> Void)?
     private let fieldsByID: [UUID: Field]
     private let projectsByID: [UUID: Project]
     private let projectsByFieldID: [UUID: [Project]]
@@ -35,7 +39,9 @@ struct QuickCaptureSheet: View {
         onDismiss: @escaping () -> Void,
         onExpand: @escaping (TaskItem) -> Void = { _ in },
         showsDragHandle: Bool = true,
-        presentationMode: PresentationMode = .full
+        presentationMode: PresentationMode = .full,
+        autoExpandWhenTyping: Bool = false,
+        onComposingActiveChanged: ((Bool) -> Void)? = nil
     ) {
         self.store = store
         let resolvedFields = fields ?? store.fields
@@ -50,6 +56,8 @@ struct QuickCaptureSheet: View {
         self.onExpand = onExpand
         self.showsDragHandle = showsDragHandle
         self.presentationMode = presentationMode
+        self.autoExpandWhenTyping = autoExpandWhenTyping
+        self.onComposingActiveChanged = onComposingActiveChanged
         _fieldID = State(initialValue: resolvedFields.first?.id)
         _dueOption = State(initialValue: captureDefaultsToToday ? .today : .noDate)
     }
@@ -61,7 +69,9 @@ struct QuickCaptureSheet: View {
         onDismiss: @escaping () -> Void,
         onExpand: @escaping (TaskItem) -> Void = { _ in },
         showsDragHandle: Bool = true,
-        presentationMode: PresentationMode = .full
+        presentationMode: PresentationMode = .full,
+        autoExpandWhenTyping: Bool = false,
+        onComposingActiveChanged: ((Bool) -> Void)? = nil
     ) {
         self.init(
             store: TasksStore.shared,
@@ -70,7 +80,9 @@ struct QuickCaptureSheet: View {
             onDismiss: onDismiss,
             onExpand: onExpand,
             showsDragHandle: showsDragHandle,
-            presentationMode: presentationMode
+            presentationMode: presentationMode,
+            autoExpandWhenTyping: autoExpandWhenTyping,
+            onComposingActiveChanged: onComposingActiveChanged
         )
     }
 
@@ -126,6 +138,21 @@ struct QuickCaptureSheet: View {
         .sensoryFeedback(.success, trigger: saveHaptic)
         .sensoryFeedback(.selection, trigger: selectHaptic)
         .onAppear(perform: focusTitleOnce)
+        .onChange(of: hasStartedComposing) { _, isActive in
+            guard autoExpandWhenTyping else { return }
+            onComposingActiveChanged?(isActive)
+        }
+    }
+
+    private var effectivePresentationMode: PresentationMode {
+        if autoExpandWhenTyping, hasStartedComposing {
+            return .full
+        }
+        return presentationMode
+    }
+
+    private var hasStartedComposing: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var content: some View {
@@ -135,12 +162,12 @@ struct QuickCaptureSheet: View {
             }
             titleField
                 .padding(.horizontal, CueInSpacing.base)
-                .padding(.top, presentationMode == .full ? CueInSpacing.md : CueInSpacing.sm)
+                .padding(.top, effectivePresentationMode == .full ? CueInSpacing.md : CueInSpacing.sm)
 
             chips
                 .padding(.top, CueInSpacing.md)
 
-            if presentationMode == .full {
+            if effectivePresentationMode == .full {
                 liteEditorContent
                     .padding(.horizontal, CueInSpacing.base)
                     .padding(.top, CueInSpacing.xl)
@@ -155,9 +182,9 @@ struct QuickCaptureSheet: View {
                 }
             }
         }
-        .padding(.bottom, presentationMode == .compactComposer ? CueInSpacing.md : 0)
+        .padding(.bottom, effectivePresentationMode == .compactComposer ? CueInSpacing.md : 0)
         .animation(.easeInOut(duration: 0.18), value: showsExpandedSaveButton)
-        .animation(.spring(response: 0.34, dampingFraction: 0.9), value: presentationMode)
+        .animation(.spring(response: 0.34, dampingFraction: 0.9), value: effectivePresentationMode)
     }
 
     // MARK: Handle + title
@@ -190,7 +217,7 @@ struct QuickCaptureSheet: View {
             .accessibilityLabel("Task status")
 
             TextField("What needs doing?", text: $title)
-                .font(presentationMode == .full ? CueInTypography.title : Font.system(size: 26, weight: .semibold, design: .default))
+                .font(effectivePresentationMode == .full ? CueInTypography.title : Font.system(size: 26, weight: .semibold, design: .default))
                 .foregroundStyle(CueInColors.textPrimary)
                 .tint(CueInColors.accentFocus)
                 .focused($titleFocused)

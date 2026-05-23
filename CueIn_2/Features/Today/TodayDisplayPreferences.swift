@@ -126,6 +126,27 @@ enum TodayDisplayPreferences {
     static let scheduleAvoidTinyBlocks = "today.schedule.engine.avoidTinyBlocks"
     static let schedulePriorityWeightedRebalance = "today.schedule.engine.priorityWeightedRebalance"
     static let scheduleMinimumFlexibleBlockMinutes = "today.schedule.engine.minimumFlexibleBlockMinutes"
+    static let enableCategoryTracking = "today.schedule.enableCategoryTracking"
+
+    // MARK: Timeblock focus mode (full-screen)
+
+    static let timeblockFocusShowBlockIcon = "today.timeblockFocus.showBlockIcon"
+    static let timeblockFocusShowNowLabel = "today.timeblockFocus.showNowLabel"
+    static let timeblockFocusShowTimeRange = "today.timeblockFocus.showTimeRange"
+    static let timeblockFocusShowProgressBar = "today.timeblockFocus.showProgressBar"
+    static let timeblockFocusShowRemainingLine = "today.timeblockFocus.showRemainingLine"
+    static let timeblockFocusShowTaskCount = "today.timeblockFocus.showTaskCount"
+    static let timeblockFocusTimerShowsSeconds = "today.timeblockFocus.timerShowsSeconds"
+
+    static let timeblockFocusStorageKeys: [String] = [
+        timeblockFocusShowBlockIcon,
+        timeblockFocusShowNowLabel,
+        timeblockFocusShowTimeRange,
+        timeblockFocusShowProgressBar,
+        timeblockFocusShowRemainingLine,
+        timeblockFocusShowTaskCount,
+        timeblockFocusTimerShowsSeconds,
+    ]
 
     /// Keys written through Today UI / `@AppStorage` — used for “erase everything”.
     static let allStoredPreferenceKeys: [String] = [
@@ -179,6 +200,14 @@ enum TodayDisplayPreferences {
         scheduleAvoidTinyBlocks,
         schedulePriorityWeightedRebalance,
         scheduleMinimumFlexibleBlockMinutes,
+        enableCategoryTracking,
+        timeblockFocusShowBlockIcon,
+        timeblockFocusShowNowLabel,
+        timeblockFocusShowTimeRange,
+        timeblockFocusShowProgressBar,
+        timeblockFocusShowRemainingLine,
+        timeblockFocusShowTaskCount,
+        timeblockFocusTimerShowsSeconds,
     ]
 
     static func removeAllStoredPreferenceKeys(from defaults: UserDefaults = .standard) {

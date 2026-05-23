@@ -14,8 +14,8 @@ Deno.serve(async (req) => {
   try {
     const admin = adminClient();
     const user = await requireUser(req, admin);
-    const { code, state, redirect_uri } = await req.json().catch(() => ({}));
-    if (!code || !state || !redirect_uri) {
+    const { code, state } = await req.json().catch(() => ({}));
+    if (!code || !state) {
       return json({ error: "Missing OAuth callback data" }, 400);
     }
 
@@ -27,7 +27,7 @@ Deno.serve(async (req) => {
       .is("consumed_at", null)
       .maybeSingle();
     if (stateError) return json({ error: stateError.message }, 500);
-    if (!stateRow || new Date(stateRow.expires_at).getTime() < Date.now() || stateRow.redirect_uri !== redirect_uri) {
+    if (!stateRow || new Date(stateRow.expires_at).getTime() < Date.now()) {
       return json({ error: "Invalid or expired OAuth state" }, 400);
     }
 
@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         grant_type: "authorization_code",
         code,
-        redirect_uri,
+        redirect_uri: stateRow.redirect_uri,
       }),
     });
     const tokenBody = await tokenResponse.json().catch(() => ({}));
@@ -147,7 +147,7 @@ async function createTasksDatabase(token: string, parentPageId: string, projects
         Notes: { rich_text: {} },
         Status: { select: { options: ["Waiting", "To-do", "In Progress", "Paused", "Done", "Archived"].map((name) => ({ name })) } },
         Priority: { select: { options: ["Normal", "High", "Urgent"].map((name) => ({ name })) } },
-        Project: { relation: { database_id: projectsDatabaseId } },
+        Project: { relation: { database_id: projectsDatabaseId, type: "single_property", single_property: {} } },
         Tags: { multi_select: {} },
         "Scheduled Date": { date: {} },
         "Due Date": { date: {} },

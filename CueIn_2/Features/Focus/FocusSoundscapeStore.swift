@@ -95,6 +95,7 @@ final class FocusSoundscapeStore {
     func selectPreset(_ newPreset: FocusSoundscapePreset) {
         flushInteractiveVolumeIfNeeded()
         guard newPreset != preset else { return }
+        AppLogger.shared.log("FocusSoundscapeStore: Selecting preset '\(newPreset.rawValue)'", category: .audio)
         let wasPlaying = isPlaying
         preset = newPreset
         defaults.set(preset.rawValue, forKey: Self.keyPreset)
@@ -108,6 +109,7 @@ final class FocusSoundscapeStore {
                 try configureSessionIfNeeded()
                 try engine.start(mode: preset.engineModeRaw, volume: masterVolume)
             } catch {
+                AppLogger.shared.error(error, message: "FocusSoundscapeStore: Failed to start playback after changing preset to '\(newPreset.rawValue)'")
                 stopPlayback()
             }
         }
@@ -115,16 +117,19 @@ final class FocusSoundscapeStore {
 
     func startPlayback() {
         guard preset != .off else { return }
+        AppLogger.shared.log("FocusSoundscapeStore: Starting audio playback for preset '\(preset.rawValue)' at volume \(masterVolume)", category: .audio)
         do {
             try configureSessionIfNeeded()
             try engine.start(mode: preset.engineModeRaw, volume: masterVolume)
             isPlaying = true
         } catch {
+            AppLogger.shared.error(error, message: "FocusSoundscapeStore: Audio playback failed to start")
             isPlaying = false
         }
     }
 
     func stopPlayback() {
+        AppLogger.shared.log("FocusSoundscapeStore: Stopping audio playback", category: .audio)
         engine.stop()
         isPlaying = false
         #if os(iOS)
@@ -133,6 +138,7 @@ final class FocusSoundscapeStore {
     }
 
     func resetForFreshInstall() {
+        AppLogger.shared.log("FocusSoundscapeStore: Resetting store state for fresh install", category: .audio)
         volumePersistTask?.cancel()
         volumePersistTask = nil
         lastInteractiveMasterVolume = nil

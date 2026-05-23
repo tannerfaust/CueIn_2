@@ -146,6 +146,15 @@ enum CueInColors {
         return blockType.accent
     }
 
+    /// Soft pastel fill for the **running** schedule block card — mixed from the block's own accent.
+    static func scheduleRunningBlockWash(accent: Color) -> Color {
+        let partner: Color = CueInThemePreference.current == .light
+            ? Color.white
+            : surfaceSecondary
+        let partnerAmount: CGFloat = CueInThemePreference.current == .light ? 0.84 : 0.78
+        return accent.cueInBlended(with: partner, partnerAmount: partnerAmount)
+    }
+
     /// Schedule block **Look** sheet: exactly six custom tints (plus cleared `timelineAccentHex` for automatic colour).
     static let scheduleBlockAppearanceHexChoices: [UInt32] = [
         0x34C759, // green
@@ -171,6 +180,30 @@ enum CueInColors {
     ) -> Color {
         let isLight = CueInThemePreference.current == .light
         return (isLight ? light : dark).opacity(isLight ? lightOpacity : darkOpacity)
+    }
+}
+
+// MARK: - Color blend
+
+extension Color {
+    /// Linear blend toward `partner`; `partnerAmount` 0 = self, 1 = partner.
+    fileprivate func cueInBlended(with partner: Color, partnerAmount: CGFloat) -> Color {
+        let t = min(max(partnerAmount, 0), 1)
+        #if os(iOS)
+        var r1: CGFloat = 0, g1: CGFloat = 0, b1: CGFloat = 0, a1: CGFloat = 0
+        var r2: CGFloat = 0, g2: CGFloat = 0, b2: CGFloat = 0, a2: CGFloat = 0
+        guard UIColor(self).getRed(&r1, green: &g1, blue: &b1, alpha: &a1),
+              UIColor(partner).getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
+        else { return self.opacity(1 - t) }
+        return Color(
+            red: Double(r1 + (r2 - r1) * t),
+            green: Double(g1 + (g2 - g1) * t),
+            blue: Double(b1 + (b2 - b1) * t),
+            opacity: Double(a1 + (a2 - a1) * t)
+        )
+        #else
+        return self.opacity(1 - t)
+        #endif
     }
 }
 

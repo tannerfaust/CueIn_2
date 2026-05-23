@@ -37,6 +37,11 @@ struct DayBlock: Identifiable, Codable {
     /// removed from the Schedule on Stop / Reset; the card stays in the
     /// Timeline pool untouched.
     var anchorExecutionCardID: UUID?
+    
+    /// Optional tracking category for this block (e.g. Work, Others).
+    var category: String = "Others"
+    /// Flag to check if category was manually overwritten by user.
+    var isCategoryManuallySet: Bool = false
 
     init(
         id: UUID = UUID(),
@@ -57,7 +62,9 @@ struct DayBlock: Identifiable, Codable {
         locksPlannedDuration: Bool = false,
         timelineGlyph: String? = nil,
         timelineAccentHex: UInt32? = nil,
-        anchorExecutionCardID: UUID? = nil
+        anchorExecutionCardID: UUID? = nil,
+        category: String = "Others",
+        isCategoryManuallySet: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -78,6 +85,8 @@ struct DayBlock: Identifiable, Codable {
         self.timelineGlyph = timelineGlyph
         self.timelineAccentHex = timelineAccentHex
         self.anchorExecutionCardID = anchorExecutionCardID
+        self.category = category
+        self.isCategoryManuallySet = isCategoryManuallySet
     }
 
     /// Glyph shown on cards and lists — custom symbol or fallback to ``BlockType/icon``.
@@ -122,6 +131,8 @@ struct DayBlock: Identifiable, Codable {
         case taskSource, fillMatchesType, fillRule, tasks, isRepeatable, anchorExecutionCardID
         case pinsToClock, schedulingPriority, compactPresentation, locksPlannedDuration, timelineGlyph
         case timelineAccentHex
+        case category
+        case isCategoryManuallySet
     }
 
     init(from decoder: Decoder) throws {
@@ -147,6 +158,8 @@ struct DayBlock: Identifiable, Codable {
         locksPlannedDuration = try c.decodeIfPresent(Bool.self, forKey: .locksPlannedDuration) ?? false
         timelineGlyph = try c.decodeIfPresent(String.self, forKey: .timelineGlyph)
         timelineAccentHex = try c.decodeIfPresent(UInt32.self, forKey: .timelineAccentHex)
+        category = try c.decodeIfPresent(String.self, forKey: .category) ?? "Others"
+        isCategoryManuallySet = try c.decodeIfPresent(Bool.self, forKey: .isCategoryManuallySet) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -170,5 +183,7 @@ struct DayBlock: Identifiable, Codable {
         try c.encode(locksPlannedDuration, forKey: .locksPlannedDuration)
         try c.encodeIfPresent(timelineGlyph, forKey: .timelineGlyph)
         try c.encodeIfPresent(timelineAccentHex, forKey: .timelineAccentHex)
+        try c.encode(category, forKey: .category)
+        try c.encode(isCategoryManuallySet, forKey: .isCategoryManuallySet)
     }
 }

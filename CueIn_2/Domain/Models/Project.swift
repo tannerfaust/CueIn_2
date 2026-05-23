@@ -50,6 +50,7 @@ struct Project: Identifiable, Codable, Hashable {
     var status: Status
     var targetDate: Date?
     var colorHexOverride: UInt?
+    var externalSource: String?
     var createdAt: Date
 
     init(
@@ -61,6 +62,7 @@ struct Project: Identifiable, Codable, Hashable {
         status: Status = .active,
         targetDate: Date? = nil,
         colorHexOverride: UInt? = nil,
+        externalSource: String? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -71,6 +73,7 @@ struct Project: Identifiable, Codable, Hashable {
         self.status = status
         self.targetDate = targetDate
         self.colorHexOverride = colorHexOverride
+        self.externalSource = externalSource
         self.createdAt = createdAt
     }
 }
@@ -80,6 +83,10 @@ extension Project {
     var resolvedIconSystemName: String {
         let s = iconName.trimmingCharacters(in: .whitespacesAndNewlines)
         return s.isEmpty ? "folder.fill" : s
+    }
+
+    var isNotionImported: Bool {
+        externalSource?.localizedCaseInsensitiveCompare("notion") == .orderedSame
     }
 }
 

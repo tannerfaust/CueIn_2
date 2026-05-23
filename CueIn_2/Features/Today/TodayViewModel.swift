@@ -600,6 +600,7 @@ final class TodayViewModel {
     /// `true` only after the user changes preview blocks (add / remove / reorder / edit / unpin, etc.). Resets when the template is loaded or successfully saved.
     var isFormulaPreviewScheduleDirty: Bool {
         guard isFormulaPreviewing else { return false }
+        guard formulaPreviewStructureEditGeneration != formulaPreviewStructureCleanGeneration else { return false }
         let templates = blockTemplatesForLibrarySaveFromPreview()
         guard !templates.isEmpty else { return false }
         return libraryTemplateFingerprint(templates) != formulaPreviewStructureCleanFingerprint
@@ -719,6 +720,14 @@ final class TodayViewModel {
 
     /// Accent for the filled portion of the schedule running line (active block, else next upcoming slice).
     private var runningLineCurrentProgressAccent: Color {
+        let anchor = formulaRunningLineProgressAnchor
+        if let b = blocks.first(where: { block in
+            block.state != .skipped
+                && anchor >= block.startTime
+                && anchor < block.endTime
+        }) {
+            return CueInColors.resolvedTimelineAccent(blockType: b.type, hex: b.timelineAccentHex)
+        }
         if let b = currentBlock {
             return CueInColors.resolvedTimelineAccent(blockType: b.type, hex: b.timelineAccentHex)
         }
@@ -2182,7 +2191,9 @@ final class TodayViewModel {
             compactPresentation: source.compactPresentation,
             locksPlannedDuration: source.locksPlannedDuration,
             timelineGlyph: source.timelineGlyph,
-            timelineAccentHex: source.timelineAccentHex
+            timelineAccentHex: source.timelineAccentHex,
+            category: source.category,
+            isCategoryManuallySet: source.isCategoryManuallySet
         )
 
         candidate[sourceIndex] = firstPart
@@ -2437,6 +2448,8 @@ final class TodayViewModel {
             blocks[index].fillMatchesType = nil
             blocks[index].fillRule = newSource == .executionFill ? effective.fillRule : nil
             blocks[index].isRepeatable = false
+            blocks[index].category = effective.category
+            blocks[index].isCategoryManuallySet = effective.isCategoryManuallySet
 
             if newSource == .templateTasks {
                 blocks[index].tasks = effective.mergedDayTasks(previousTasks: previousTasks)
@@ -2578,7 +2591,9 @@ final class TodayViewModel {
             flowMode: flowMode,
             taskSource: .templateTasks,
             tasks: tasks,
-            isRepeatable: isRepeatable
+            isRepeatable: isRepeatable,
+            category: trimmed.localizedCaseInsensitiveContains("work") ? "Work" : "Others",
+            isCategoryManuallySet: false
         )
 
         withAnimation(
@@ -2603,6 +2618,78 @@ final class TodayViewModel {
             title: "Block added",
             message: trimmed,
             tint: type.accent,
+            undoTitle: "Undo"
+        ) { [self] in
+            self.deleteFormulaBlock(blockID: block.id)
+        }
+
+        return block.id
+    }
+
+    @MainActor
+    @discardableResult
+    func insertImmediateFormulaBlock(
+        title: String? = nil,
+        durationMinutes: Int
+    ) -> UUID? {
+        guard dayEngineMode == .formulaBased, isFormulaRunLive, !isFormulaSchedulePaused else { return nil }
+
+        currentTime = Date()
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let blockTitle = trimmed.isEmpty ? "Block right now" : trimmed
+        let minutes = max(5, min(durationMinutes, 24 * 60))
+        let start = currentTime
+        let end = calendar.date(byAdding: .minute, value: minutes, to: start) ?? start
+        let insertionIndex = blocks.firstIndex(where: {
+            $0.state != .completed && $0.state != .skipped
+        }) ?? blocks.count
+
+        let block = DayBlock(
+            title: blockTitle,
+            type: .fixed,
+            state: .active,
+            startTime: start,
+            endTime: end,
+            flowMode: .blocking,
+            taskSource: .templateTasks,
+            locksPlannedDuration: true,
+            timelineGlyph: "exclamationmark.triangle.fill",
+            category: blockTitle.localizedCaseInsensitiveContains("work") ? "Work" : "Others",
+            isCategoryManuallySet: false
+        )
+
+        withAnimation(.spring(response: 0.36, dampingFraction: 0.88, blendDuration: 0.02)) {
+            blocks.insert(block, at: insertionIndex)
+            formulaNominalMinutesByBlockID[block.id] = minutes
+
+            for index in blocks.indices {
+                if blocks[index].state == .completed || blocks[index].state == .skipped { continue }
+                blocks[index].state = index == insertionIndex ? .active : .upcoming
+            }
+
+            let tail = blocks.indices.filter { index in
+                index > insertionIndex
+                    && blocks[index].state != .completed
+                    && blocks[index].state != .skipped
+            }
+            if !tail.isEmpty {
+                reflowFormulaBlocksAroundFixedTimes(
+                    plannedBlockIndices: Array(tail),
+                    runStart: end,
+                    targetEnd: effectiveFormulaTargetEnd(from: end)
+                )
+            }
+
+            deriveBlockStates()
+            injectScheduleBlocksIntoTimeline()
+        }
+
+        persistCurrentBlocks()
+        CueInToastCenter.shared.show(
+            icon: block.resolvedTimelineGlyph,
+            title: "Block started",
+            message: "\(minutes) min",
+            tint: CueInColors.resolvedTimelineAccent(blockType: block.type, hex: block.timelineAccentHex),
             undoTitle: "Undo"
         ) { [self] in
             self.deleteFormulaBlock(blockID: block.id)
@@ -2669,7 +2756,9 @@ final class TodayViewModel {
             compactPresentation: fresh.compactPresentation,
             locksPlannedDuration: fresh.locksPlannedDuration,
             timelineGlyph: fresh.timelineGlyph,
-            timelineAccentHex: fresh.timelineAccentHex
+            timelineAccentHex: fresh.timelineAccentHex,
+            category: fresh.category,
+            isCategoryManuallySet: fresh.isCategoryManuallySet
         )
 
         withAnimation(
@@ -2755,6 +2844,37 @@ final class TodayViewModel {
         }
     }
 
+    /// Links a planner task to a schedule block (quick capture or library picker).
+    @MainActor
+    func linkPlannerTaskToFormulaBlock(blockID: UUID, item: TaskItem) {
+        guard canUseBlockContextMenu(blockID: blockID) else { return }
+        guard let index = blocks.firstIndex(where: { $0.id == blockID }) else { return }
+        if blocks[index].tasks.contains(where: { $0.plannerTaskItemID == item.id }) {
+            return
+        }
+        let store = TasksStore.shared
+        blocks[index].tasks.append(
+            DayTask(
+                title: item.title,
+                isCompleted: item.isCompleted,
+                isPrimary: item.priority == .urgent || item.priority == .high,
+                isRepeating: item.recurrence != .none,
+                sourceExecutionBlockID: blockID,
+                plannerTaskItemID: item.id,
+                field: item.fieldID.flatMap { store.field($0)?.name },
+                project: item.projectID.flatMap { store.project($0)?.name }
+            )
+        )
+        updateAnchorExecutionCard(from: blocks[index])
+        if isFormulaRunLive || isFormulaRunStopped {
+            injectScheduleBlocksIntoTimeline()
+        }
+        persistCurrentBlocks()
+        if isFormulaPreviewing {
+            markFormulaPreviewScheduleStructureChangedIfPreviewing()
+        }
+    }
+
     @MainActor
     private func rechainFormulaTimesAfterStructuralEdit() {
         if isFormulaRunLive {
@@ -2811,6 +2931,49 @@ final class TodayViewModel {
         blocks[index].state = .completed
         deriveBlockStates()
         injectScheduleBlocksIntoTimeline()
+    }
+
+    /// Jump the live formula run to an upcoming block now (finishes the active block and any
+    /// earlier upcoming blocks without completing their tasks, then reflows the tail from now).
+    @MainActor
+    func startFormulaBlockNow(blockID: UUID) {
+        guard dayEngineMode == .formulaBased, isFormulaRunLive else { return }
+        guard formulaSchedulePausedAt == nil else { return }
+        guard let targetIndex = blocks.firstIndex(where: { $0.id == blockID }) else { return }
+        guard blocks[targetIndex].state == .upcoming else { return }
+        guard !isFixedTimeScheduleBlock(blocks[targetIndex]) else { return }
+
+        let now = Date()
+        currentTime = now
+
+        if let activeIndex = blocks.firstIndex(where: { $0.state == .active }) {
+            guard activeIndex < targetIndex else { return }
+            blocks[activeIndex].state = .completed
+            for index in (activeIndex + 1)..<targetIndex where blocks[index].state == .upcoming {
+                blocks[index].state = .completed
+            }
+        }
+
+        for index in blocks.indices {
+            if blocks[index].state == .completed || blocks[index].state == .skipped { continue }
+            blocks[index].state = index == targetIndex ? .active : .upcoming
+        }
+
+        let remaining = blocks.indices.filter { index in
+            index >= targetIndex
+                && blocks[index].state != .completed
+                && blocks[index].state != .skipped
+        }
+
+        reflowFormulaBlocksAroundFixedTimes(
+            plannedBlockIndices: Array(remaining),
+            runStart: now,
+            targetEnd: effectiveFormulaTargetEnd(from: now)
+        )
+
+        injectScheduleBlocksIntoTimeline()
+        persistCurrentBlocks()
+        deriveBlockStates()
     }
 
     @MainActor
@@ -3021,6 +3184,7 @@ final class TodayViewModel {
     @MainActor
     func pauseTimelineExecution() {
         guard !isExecutionPaused else { return }
+        AppLogger.shared.log("Pausing timeline execution. Paused at: \(currentTime)", category: .ui)
         isExecutionPaused = true
         executionPausedAt = currentTime
     }
@@ -3031,6 +3195,8 @@ final class TodayViewModel {
         guard isExecutionPaused, let pausedAt = executionPausedAt else { return }
         let now = currentTime
         let delta = now.timeIntervalSince(pausedAt)
+        
+        AppLogger.shared.log("Resuming timeline execution. Paused delta was: \(delta) seconds", category: .ui)
 
         defer {
             isExecutionPaused = false
@@ -3063,6 +3229,7 @@ final class TodayViewModel {
             .first
 
         guard let task = firstMovable else { return }
+        AppLogger.shared.log("Snapping first movable task '\(task.title)' to start at \(now)", category: .ui)
 
         let dayStart = calendar.startOfDay(for: now)
         let reflowed = executionReflow.reflow(
@@ -3358,6 +3525,7 @@ final class TodayViewModel {
             blocks = result.blocks
             lastDayRunPlanMetadata = result.metadata
         } catch {
+            AppLogger.shared.error(error, message: "Failed to apply timeless plan")
             chainPlannedBlocksFromNominals(
                 plannedBlockIndices: plannedBlockIndices,
                 startingAt: runStart,
@@ -3385,6 +3553,7 @@ final class TodayViewModel {
             blocks = result.blocks
             lastDayRunPlanMetadata = result.metadata
         } catch {
+            AppLogger.shared.error(error, message: "Failed to apply formula plan")
             chainPlannedBlocksFromNominals(
                 plannedBlockIndices: plannedBlockIndices,
                 startingAt: runStart,
@@ -3783,7 +3952,9 @@ final class TodayViewModel {
                 isRepeatable: false,
                 pinsToClock: true,
                 timelineAccentHex: card.timelineAccentHex,
-                anchorExecutionCardID: card.id
+                anchorExecutionCardID: card.id,
+                category: card.title.localizedCaseInsensitiveContains("work") ? "Work" : "Others",
+                isCategoryManuallySet: false
             )
         }
     }

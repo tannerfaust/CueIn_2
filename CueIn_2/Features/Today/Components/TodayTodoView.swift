@@ -960,12 +960,16 @@ private struct TodayTodoTaskGroup: View {
         }
         TodayViewModel.shared.syncExecutionTimelineAfterExternalTaskEdit()
         CueInToastCenter.shared.show(
-            icon: "trash.fill",
-            title: "Task deleted",
-            message: task.title,
+            icon: task.isNotionImported ? "archivebox.fill" : "trash.fill",
+            title: task.isNotionImported ? "Archived in CueIn" : "Task deleted",
+            message: task.isNotionImported ? "Notion task stays in Notion" : task.title,
             tint: Color(hex: 0x64A8FF)
         ) {
-            store.restoreTask(task, listKey: listKey)
+            if task.isNotionImported {
+                store.updateTask(task)
+            } else {
+                store.restoreTask(task, listKey: listKey)
+            }
             if Calendar.current.isDateInToday(task.scheduledDate ?? .distantPast) {
                 TodayViewModel.shared.enqueuePlannerTask(task)
             }

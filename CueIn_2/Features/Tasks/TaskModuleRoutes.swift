@@ -18,6 +18,7 @@ enum TasksWorklistKind: Hashable, Identifiable {
     case saved
     case habits
     case rituals
+    case notionTasks
     case field(UUID)
     case project(UUID)
 
@@ -30,6 +31,7 @@ enum TasksWorklistKind: Hashable, Identifiable {
         case .saved: return "saved"
         case .habits: return "habits"
         case .rituals: return "rituals"
+        case .notionTasks: return "notion:tasks"
         case .field(let id): return "field:\(id.uuidString)"
         case .project(let id): return "project:\(id.uuidString)"
         }

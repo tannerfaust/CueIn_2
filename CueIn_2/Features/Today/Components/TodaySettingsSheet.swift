@@ -24,6 +24,7 @@ struct TodaySettingsSheet: View {
     @Binding var scheduleBlockTimerShowsSeconds: Bool
     @Binding var pullsTasksFromExecutionPool: Bool
     @Binding var canvasDotsBackground: Bool
+    @Binding var enableCategoryTracking: Bool
     let onDismiss: () -> Void
 
     @State private var showRunningLineAdvanced = false
@@ -111,7 +112,8 @@ struct TodaySettingsSheet: View {
                     scheduleBlockTimerStyleRaw: scheduleBlockTimerStyleRaw,
                     scheduleBlockTimerShowsSeconds: scheduleBlockTimerShowsSeconds,
                     pullsTasksFromExecutionPool: pullsTasksFromExecutionPool,
-                    canvasDotsBackground: canvasDotsBackground
+                    canvasDotsBackground: canvasDotsBackground,
+                    enableCategoryTracking: enableCategoryTracking
                 )
                 todoAppearancePlist = TodayDisplayPreferences.snapshotTodoAppearancePlist()
             }
@@ -138,6 +140,7 @@ struct TodaySettingsSheet: View {
         scheduleBlockTimerShowsSeconds = r.scheduleBlockTimerShowsSeconds
         pullsTasksFromExecutionPool = r.pullsTasksFromExecutionPool
         canvasDotsBackground = r.canvasDotsBackground
+        enableCategoryTracking = r.enableCategoryTracking
     }
 
     // MARK: - To-do list (task-led)
@@ -247,10 +250,10 @@ struct TodaySettingsSheet: View {
     private var executionPoolGroupContent: some View {
         Toggle(isOn: $pullsTasksFromExecutionPool) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Use execution pool for tasks")
+                Text("Auto-fill blocks from To-do list")
                     .font(CueInTypography.bodyMedium)
                     .foregroundStyle(CueInColors.textPrimary)
-                Text("When off, Timeline fill blocks stay empty and do not claim tasks from your queued timeline pool.")
+                Text("When on, time blocks pull the next tasks from your To-do list. When off, fill blocks stay empty until you add tasks manually.")
                     .font(CueInTypography.caption)
                     .foregroundStyle(CueInColors.textSecondary)
             }
@@ -538,6 +541,8 @@ struct TodaySettingsSheet: View {
             toggleRow(title: "Duration", isOn: $showScheduleDuration)
             rowDivider
             toggleRow(title: "Time range", isOn: $showScheduleTimeRange)
+            rowDivider
+            toggleRow(title: "Category tracking", isOn: $enableCategoryTracking)
         }
         .padding(.horizontal, CueInSpacing.md)
         .padding(.vertical, CueInSpacing.xs)
@@ -657,6 +662,7 @@ private struct TodaySettingsBindingRollback: Equatable {
     let scheduleBlockTimerShowsSeconds: Bool
     let pullsTasksFromExecutionPool: Bool
     let canvasDotsBackground: Bool
+    let enableCategoryTracking: Bool
 }
 
 #Preview {
@@ -683,6 +689,7 @@ private struct TodaySettingsBindingRollback: Equatable {
             scheduleBlockTimerShowsSeconds: .constant(false),
             pullsTasksFromExecutionPool: .constant(true),
             canvasDotsBackground: .constant(false),
+            enableCategoryTracking: .constant(false),
             onDismiss: {}
         )
     }

@@ -61,11 +61,15 @@ struct FormulaScheduleSaveSheet: View {
     @State private var summary: String
     @State private var nameValidationMessage: String?
 
-    private let symbols = [
-        "calendar", "sparkles", "bolt.fill", "sun.max.fill", "moon.fill",
-        "heart.text.square.fill", "square.stack.fill", "leaf.fill", "book.fill",
-        "figure.run", "cup.and.saucer.fill"
-    ]
+    private let iconColumns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 5)
+
+    private var pickerSymbols: [String] {
+        var list = FormulaScheduleSymbolPalette.symbols
+        if !list.contains(symbol) {
+            list.insert(symbol, at: 0)
+        }
+        return list
+    }
 
     init(
         initialName: String,
@@ -95,33 +99,25 @@ struct FormulaScheduleSaveSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: CueInSpacing.lg) {
-                    HStack(spacing: CueInSpacing.md) {
-                        Menu {
-                            ForEach(symbols, id: \.self) { candidate in
-                                Button {
-                                    symbol = candidate
-                                } label: {
-                                    Label(candidate, systemImage: candidate)
-                                }
-                            }
-                        } label: {
-                            Image(systemName: symbol)
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(CueInColors.textPrimary)
-                                .frame(width: 48, height: 48)
-                                .background(CueInColors.surfaceSecondary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Schedule icon")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Name")
+                            .font(CueInTypography.micro)
+                            .foregroundStyle(CueInColors.textTertiary)
+                        TextField("Schedule name", text: $name)
+                            .font(CueInTypography.title)
+                            .foregroundStyle(CueInColors.textPrimary)
+                            .textInputAutocapitalization(.words)
+                    }
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Name")
-                                .font(CueInTypography.micro)
-                                .foregroundStyle(CueInColors.textTertiary)
-                            TextField("Schedule name", text: $name)
-                                .font(CueInTypography.title)
-                                .foregroundStyle(CueInColors.textPrimary)
-                                .textInputAutocapitalization(.words)
+                    VStack(alignment: .leading, spacing: CueInSpacing.sm) {
+                        Text("Icon")
+                            .font(CueInTypography.micro)
+                            .foregroundStyle(CueInColors.textTertiary)
+
+                        LazyVGrid(columns: iconColumns, spacing: 10) {
+                            ForEach(pickerSymbols, id: \.self) { candidate in
+                                iconCell(candidate)
+                            }
                         }
                     }
 
@@ -201,6 +197,32 @@ struct FormulaScheduleSaveSheet: View {
                 }
             }
         }
+    }
+
+    private func iconCell(_ candidate: String) -> some View {
+        let selected = symbol == candidate
+        return Button {
+            symbol = candidate
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(selected ? CueInColors.accentFocus.opacity(0.2) : CueInColors.surfaceSecondary)
+                Image(systemName: candidate)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(selected ? CueInColors.accentFocus : CueInColors.textSecondary)
+            }
+            .frame(height: 48)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(
+                        selected ? CueInColors.accentFocus.opacity(0.45) : Color.clear,
+                        lineWidth: 1.5
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(FormulaScheduleSymbolPalette.accessibilityLabel(for: candidate))
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
     private func excludedScheduleID(for intent: FormulaScheduleSaveIntent) -> UUID? {

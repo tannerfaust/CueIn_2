@@ -59,6 +59,9 @@ struct TaskDetailSheet: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: CueInSpacing.md) {
                         topProperties
+                        if isNotionLocked {
+                            notionLockedBanner
+                        }
                         titleAndDescription
                         inlineDetails
                     }
@@ -83,14 +86,14 @@ struct TaskDetailSheet: View {
                     projectHeaderChip
                 }
             }
-            .alert("Delete task?", isPresented: $showingDelete) {
+            .alert(deleteAlertTitle, isPresented: $showingDelete) {
                 Button("Cancel", role: .cancel) { }
-                Button("Delete", role: .destructive) {
+                Button(deleteAlertActionTitle, role: .destructive) {
                     store.deleteTask(draft.id)
                     onDismiss()
                 }
             } message: {
-                Text("This can't be undone.")
+                Text(deleteAlertMessage)
             }
         }
         .cueInPreferredColorScheme()
@@ -108,49 +111,112 @@ private enum TaskEditorAccessoryPanel {
 
 private extension TaskDetailSheet {
     var projectHeaderChip: some View {
-        Menu {
-            Section("Initiative") {
-                fieldMenuContent
-            }
+        Group {
+            if isNotionLocked {
+                CueInEditorPrincipalChip(
+                    icon: "lock.fill",
+                    title: "Notion",
+                    tint: CueInColors.textPrimary
+                )
+            } else {
+                Menu {
+                    Section("Initiative") {
+                        fieldMenuContent
+                    }
 
-            Section("Project") {
-                projectMenuContent
+                    Section("Project") {
+                        projectMenuContent
+                    }
+                } label: {
+                    CueInEditorPrincipalChip(
+                        icon: organizationIcon,
+                        title: organizationTitle,
+                        tint: organizationTint
+                    )
+                }
             }
-        } label: {
-            CueInEditorPrincipalChip(
-                icon: organizationIcon,
-                title: organizationTitle,
-                tint: organizationTint
-            )
         }
     }
 
     var titleAndDescription: some View {
         VStack(alignment: .leading, spacing: 12) {
-            TextField("Task title", text: $draft.title, axis: .vertical)
-                .font(Font.system(size: 30, weight: .bold))
-                .foregroundStyle(CueInColors.textPrimary)
-                .tint(CueInColors.accentFocus)
-                .focused($titleFocused)
-                .lineLimit(1...3)
+            if isNotionLocked {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(CueInColors.textTertiary)
+                            .padding(.top, 9)
 
-            TextField("Add description...", text: $draft.notes, axis: .vertical)
-                .font(Font.system(size: 18, weight: .regular))
-                .foregroundStyle(CueInColors.textSecondary)
-                .tint(CueInColors.accentFocus)
-                .focused($descriptionFocused)
-                .lineLimit(8...22)
-                /// Slightly shorter than before so sub-tasks sit a bit closer under the notes.
-                .frame(minHeight: 260, alignment: .topLeading)
+                        Text(draft.title)
+                            .font(Font.system(size: 30, weight: .bold))
+                            .foregroundStyle(CueInColors.textPrimary)
+                            .lineLimit(1...4)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Text(draft.notes.isEmpty ? "No Notion description." : draft.notes)
+                        .font(Font.system(size: 18, weight: .regular))
+                        .foregroundStyle(draft.notes.isEmpty ? CueInColors.textTertiary : CueInColors.textSecondary)
+                        .lineLimit(8...22)
+                        .frame(maxWidth: .infinity, minHeight: 260, alignment: .topLeading)
+                }
+            } else {
+                TextField("Task title", text: $draft.title, axis: .vertical)
+                    .font(Font.system(size: 30, weight: .bold))
+                    .foregroundStyle(CueInColors.textPrimary)
+                    .tint(CueInColors.accentFocus)
+                    .focused($titleFocused)
+                    .lineLimit(1...3)
+
+                TextField("Add description...", text: $draft.notes, axis: .vertical)
+                    .font(Font.system(size: 18, weight: .regular))
+                    .foregroundStyle(CueInColors.textSecondary)
+                    .tint(CueInColors.accentFocus)
+                    .focused($descriptionFocused)
+                    .lineLimit(8...22)
+                    /// Slightly shorter than before so sub-tasks sit a bit closer under the notes.
+                    .frame(minHeight: 260, alignment: .topLeading)
+            }
         }
         .padding(.top, 18)
+    }
+
+    var notionLockedBanner: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text("N")
+                .font(.system(size: 13, weight: .black))
+                .foregroundStyle(CueInColors.textPrimary)
+                .frame(width: 24, height: 24)
+                .background(Color.white.opacity(0.95), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("This task is from Notion")
+                    .font(CueInTypography.bodyMedium)
+                    .foregroundStyle(CueInColors.textPrimary)
+                Text("CueIn keeps the content read-only here. You can change status or archive the CueIn copy.")
+                    .font(CueInTypography.caption)
+                    .foregroundStyle(CueInColors.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(CueInColors.surfacePrimary.opacity(0.64), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(CueInColors.divider.opacity(0.55), lineWidth: 0.8)
+        )
     }
 
     var topProperties: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 statusChip
-                priorityChip
+                if !isNotionLocked {
+                    priorityChip
+                }
             }
             .padding(.vertical, 2)
         }
@@ -178,8 +244,12 @@ private extension TaskDetailSheet {
                 if !draft.tags.isEmpty {
                     WrappingChipLayout(spacing: 8, lineSpacing: 8) {
                         ForEach(draft.tags, id: \.self) { tag in
-                            TaskEditorTagChip(title: tag) {
-                                draft.tags.removeAll { $0 == tag }
+                            if isNotionLocked {
+                                TaskEditorReadOnlyTagChip(title: tag)
+                            } else {
+                                TaskEditorTagChip(title: tag) {
+                                    draft.tags.removeAll { $0 == tag }
+                                }
                             }
                         }
                     }
@@ -258,12 +328,14 @@ private extension TaskDetailSheet {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    workTypeAccessory
-                    durationAccessory
-                    dateAccessory
-                    repeatAccessory
-                    tagAccessory
-                    archiveAccessory
+                    if !isNotionLocked {
+                        workTypeAccessory
+                        durationAccessory
+                        dateAccessory
+                        repeatAccessory
+                        tagAccessory
+                        archiveAccessory
+                    }
                     if case .edit = mode {
                         deleteAccessory
                     }
@@ -296,6 +368,9 @@ private extension TaskDetailSheet {
     func accessoryPanelView(_ panel: TaskEditorAccessoryPanel) -> some View {
         switch panel {
         case .dates:
+            if isNotionLocked {
+                EmptyView()
+            } else {
             VStack(spacing: 0) {
                 datePickerRow(
                     title: "Start",
@@ -327,8 +402,12 @@ private extension TaskDetailSheet {
             }
             .padding(.vertical, 4)
             .cueInEditorGlassSurface(cornerRadius: 18)
+            }
 
         case .tags:
+            if isNotionLocked {
+                EmptyView()
+            } else {
             HStack(spacing: CueInSpacing.sm) {
                 TextField("Add tag", text: $newTagText)
                     .font(CueInTypography.body)
@@ -346,8 +425,12 @@ private extension TaskDetailSheet {
             .padding(.horizontal, 14)
             .frame(height: 46)
             .cueInEditorGlassSurface(cornerRadius: 18)
+            }
 
         case .subtasks:
+            if isNotionLocked {
+                EmptyView()
+            } else {
             HStack(spacing: CueInSpacing.sm) {
                 TextField("Add sub-task", text: $newSubtaskTitle)
                     .font(CueInTypography.body)
@@ -365,6 +448,7 @@ private extension TaskDetailSheet {
             .padding(.horizontal, 14)
             .frame(height: 46)
             .cueInEditorGlassSurface(cornerRadius: 18)
+            }
         }
     }
 
@@ -850,6 +934,7 @@ private extension TaskDetailSheet {
     func subtaskRow(index: Int) -> some View {
         HStack(spacing: CueInSpacing.sm) {
             Button {
+                guard !isNotionLocked else { return }
                 draft.subtasks[index].isCompleted.toggle()
             } label: {
                 Image(systemName: draft.subtasks[index].isCompleted ? "checkmark.circle.fill" : "circle")
@@ -865,15 +950,18 @@ private extension TaskDetailSheet {
             .font(CueInTypography.body)
             .foregroundStyle(draft.subtasks[index].isCompleted ? CueInColors.textTertiary : CueInColors.textPrimary)
             .strikethrough(draft.subtasks[index].isCompleted, color: CueInColors.textTertiary)
+            .disabled(isNotionLocked)
 
-            Button {
-                draft.subtasks.remove(at: index)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(CueInColors.textTertiary)
+            if !isNotionLocked {
+                Button {
+                    draft.subtasks.remove(at: index)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(CueInColors.textTertiary)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, CueInSpacing.md)
         .padding(.vertical, 11)
@@ -928,11 +1016,33 @@ private extension TaskDetailSheet {
     }
 
     var canAddTag: Bool {
-        !newTagText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isNotionLocked && !newTagText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var canAddSubtask: Bool {
-        !newSubtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isNotionLocked && !newSubtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var isNotionLocked: Bool {
+        if case .edit = mode {
+            return draft.isNotionImported
+        }
+        return false
+    }
+
+    var deleteAlertTitle: String {
+        isNotionLocked ? "Archive Notion task in CueIn?" : "Delete task?"
+    }
+
+    var deleteAlertActionTitle: String {
+        isNotionLocked ? "Archive in CueIn" : "Delete"
+    }
+
+    var deleteAlertMessage: String {
+        if isNotionLocked {
+            return "This will not delete the task in Notion. It only moves the local CueIn copy to Archive."
+        }
+        return "This can't be undone."
     }
 
     var projectTint: Color {
@@ -1151,6 +1261,7 @@ private extension TaskDetailSheet {
     }
 
     func focusTitleOnce() {
+        guard !isNotionLocked else { return }
         guard !didRequestInitialFocus else { return }
         didRequestInitialFocus = true
         Task { @MainActor in
@@ -1236,6 +1347,19 @@ private struct TaskEditorTagChip: View {
         ]
         let total = title.unicodeScalars.reduce(0) { $0 + Int($1.value) }
         return palette[abs(total) % palette.count]
+    }
+}
+
+private struct TaskEditorReadOnlyTagChip: View {
+    let title: String
+
+    var body: some View {
+        Text("#\(title)")
+            .font(CueInTypography.captionMedium)
+            .foregroundStyle(CueInColors.textSecondary)
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(CueInColors.surfacePrimary.opacity(0.48), in: Capsule(style: .continuous))
     }
 }
 

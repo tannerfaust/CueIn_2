@@ -572,6 +572,10 @@ private struct NotionIntegrationSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
+
+            if case let .failed(message) = notionStore.state {
+                copyButton(message: message)
+            }
         }
         .padding(CueInSpacing.md)
         .background(CueInColors.surfaceSecondary.opacity(0.62))
@@ -641,6 +645,21 @@ private struct NotionIntegrationSettingsView: View {
         }
         .buttonStyle(.plain)
         .disabled(disabled)
+    }
+
+    private func copyButton(message: String) -> some View {
+        Button {
+            CueInPasteboard.copy(message)
+        } label: {
+            Image(systemName: "doc.on.doc")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(CueInColors.textSecondary)
+                .frame(width: 32, height: 32)
+                .background(CueInColors.surfaceSecondary.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Copy Notion error")
     }
 }
 

@@ -71,6 +71,7 @@ struct ProjectDTO: SupabaseSyncRecord {
     var status: String
     var targetDate: Date?
     var colorHexOverride: Int64?
+    var externalSource: String?
     var createdAt: Date
     var updatedAt: Date
     var deletedAt: Date?
@@ -86,6 +87,7 @@ struct ProjectDTO: SupabaseSyncRecord {
         case status
         case targetDate = "target_date"
         case colorHexOverride = "color_hex_override"
+        case externalSource = "external_source"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case deletedAt = "deleted_at"
@@ -111,6 +113,7 @@ struct TaskDTO: SupabaseSyncRecord {
     var completedAt: Date?
     var subtasks: [TaskSubtask]
     var savesToArchive: Bool
+    var externalSource: String?
     var createdAt: Date
     var updatedAt: Date
     var deletedAt: Date?
@@ -134,6 +137,7 @@ struct TaskDTO: SupabaseSyncRecord {
         case completedAt = "completed_at"
         case subtasks
         case savesToArchive = "saves_to_archive"
+        case externalSource = "external_source"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case deletedAt = "deleted_at"

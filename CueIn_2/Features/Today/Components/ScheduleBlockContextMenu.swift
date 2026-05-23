@@ -136,38 +136,3 @@ extension View {
     }
 }
 
-// MARK: - Sheets (add task)
-
-struct AddTaskToBlockSheet: View {
-    @State private var text: String = ""
-    let onAdd: (String) -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        CueInBottomSheet(title: "Add a task", onDismiss: onCancel) {
-            VStack(alignment: .leading, spacing: CueInSpacing.md) {
-                TextField("Task name", text: $text)
-                    .font(CueInTypography.bodyMedium)
-                    .cueInSentencesAutocapitalization()
-                    .padding(CueInSpacing.md)
-                    .background(CueInColors.surfaceSecondary)
-                    .clipShape(RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous))
-                    .foregroundStyle(CueInColors.textPrimary)
-
-                Button("Add") {
-                    onAdd(text)
-                }
-                .font(CueInTypography.bodyMedium)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, CueInSpacing.md)
-                .foregroundStyle(SwiftUI.Color.white)
-                .background(
-                    CueInColors.textPrimary,
-                    in: RoundedRectangle(cornerRadius: CueInSpacing.cardRadius, style: .continuous)
-                )
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .opacity(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.45 : 1)
-            }
-        }
-    }
-}

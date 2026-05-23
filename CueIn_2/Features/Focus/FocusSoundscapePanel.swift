@@ -4,6 +4,7 @@ import SwiftUI
 
 struct FocusSoundscapePanel: View {
     @Bindable private var store = FocusSoundscapeStore.shared
+    var accent: Color = CueInColors.accentRoutine
     @State private var volumeSlider: Double = 0.35
 
     private let presetColumns = [
@@ -164,7 +165,7 @@ struct FocusSoundscapePanel: View {
     }
 
     private var activeTint: Color {
-        CueInColors.accentRoutine
+        accent
     }
 
     private var playbackState: String {

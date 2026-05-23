@@ -112,6 +112,24 @@ struct TaskItemRow: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if task.isNotionImported {
+                HStack(spacing: 3) {
+                    Text("N")
+                        .font(.system(size: 8, weight: .black))
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 7, weight: .bold))
+                }
+                .foregroundStyle(CueInColors.textPrimary)
+                .padding(.horizontal, 5)
+                .frame(height: 16)
+                .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .stroke(CueInColors.divider.opacity(0.5), lineWidth: 0.7)
+                )
+                .accessibilityLabel("Imported from Notion")
+            }
+
             if task.isOverdue {
                 Image(systemName: "exclamationmark.circle.fill")
                     .font(.system(size: 10, weight: .semibold))

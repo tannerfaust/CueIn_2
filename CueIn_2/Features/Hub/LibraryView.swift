@@ -920,6 +920,7 @@ private struct LibraryTimeMapEditorView: View {
     let onDismissLibrary: () -> Void
 
     @Bindable private var viewModel = TodayViewModel.shared
+    @Bindable private var tasksStore = TasksStore.shared
 
     @State private var didSeedSession = false
     @State private var dayModeBeforeEditor: DayEngineMode?
@@ -1163,14 +1164,26 @@ private struct LibraryTimeMapEditorView: View {
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }
         .sheet(item: $blockAddTask) { box in
-            AddTaskToBlockSheet(
-                onAdd: { text in
-                    viewModel.addTemplateTaskToFormulaBlock(blockID: box.id, title: text)
+            ScheduleBlockAddTaskSheet(
+                store: tasksStore,
+                excludedTaskIDs: excludedPlannerTaskIDs(for: box.id),
+                captureDefaultsToToday: true,
+                onPickExisting: { item in
+                    viewModel.linkPlannerTaskToFormulaBlock(blockID: box.id, item: item)
                     blockAddTask = nil
                 },
-                onCancel: { blockAddTask = nil }
+                onQuickCaptureSaved: { item in
+                    viewModel.linkPlannerTaskToFormulaBlock(blockID: box.id, item: item)
+                    blockAddTask = nil
+                },
+                onQuickCaptureExpand: { draft in
+                    tasksStore.addTask(draft)
+                    viewModel.linkPlannerTaskToFormulaBlock(blockID: box.id, item: draft)
+                    blockAddTask = nil
+                },
+                onDismiss: { blockAddTask = nil }
             )
-            .presentationDetents([.medium])
+            .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
         }
@@ -1324,6 +1337,10 @@ private struct LibraryTimeMapEditorView: View {
                 .foregroundStyle(CueInColors.accentFocus)
         }
         #endif
+    }
+
+    private func excludedPlannerTaskIDs(for blockID: UUID) -> Set<UUID> {
+        Set((viewModel.blocks.first { $0.id == blockID }?.tasks ?? []).compactMap(\.plannerTaskItemID))
     }
 }
 
