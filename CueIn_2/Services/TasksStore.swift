@@ -33,6 +33,17 @@ final class TasksStore {
     /// tasks missing from a stored order are appended using `prioritySort`.
     var taskListOrder: [String: [UUID]] = [:]
 
+    /// Tasks the integration sync server flagged as 3-way conflicts (both sides
+    /// changed since the last successful sync). Resolved by either pushing
+    /// "keep mine" with a force-overwrite flag or pulling the remote version.
+    /// Cleared automatically once the server stops returning the conflict for
+    /// a given task id on a subsequent push.
+    var taskConflicts: [UUID: TaskConflict] = [:]
+
+    /// `true` when at least one task currently has an unresolved sync conflict.
+    /// Drives the banner in `TasksView`.
+    var hasUnresolvedConflicts: Bool { !taskConflicts.isEmpty }
+
     /// Full task snapshot from immediately before the user marked a task complete from the Tasks list
     /// (swipe-right or status popover). Used by the shell FAB undo chip; cleared on timeout, undo, or tab change.
     var pendingCompleteUndoSnapshot: TaskItem?
@@ -831,6 +842,50 @@ final class TasksStore {
             }
         }
         suppressSyncRecording = false
+    }
+
+    // MARK: - Conflict bookkeeping
+
+    /// Replaces conflicts for `source` with the freshly-returned set. Tasks that
+    /// the server *didn't* re-flag are considered resolved and dropped from the
+    /// local map. Conflicts from the *other* integration are left untouched so
+    /// a Linear push doesn't accidentally clear pending Notion conflicts.
+    func applyServerConflicts(_ remote: [TaskConflict], source: TaskConflict.Source) {
+        let nextIDs = Set(remote.map(\.cueInID))
+        for (id, existing) in taskConflicts where existing.source == source {
+            if !nextIDs.contains(id) {
+                taskConflicts.removeValue(forKey: id)
+            }
+        }
+        for conflict in remote {
+            // Keep the original observedAt if we already had this conflict open;
+            // otherwise stamp it now. Stable observedAt prevents banner flicker.
+            if let existing = taskConflicts[conflict.cueInID], existing.source == source {
+                taskConflicts[conflict.cueInID] = TaskConflict(
+                    cueInID: conflict.cueInID,
+                    source: conflict.source,
+                    remoteUpdatedAt: conflict.remoteUpdatedAt,
+                    localUpdatedAt: conflict.localUpdatedAt,
+                    remoteSnapshot: conflict.remoteSnapshot,
+                    observedAt: existing.observedAt
+                )
+            } else {
+                taskConflicts[conflict.cueInID] = conflict
+            }
+        }
+    }
+
+    func clearConflict(for taskID: UUID) {
+        taskConflicts.removeValue(forKey: taskID)
+    }
+
+    /// Bumps the local task's `updatedAt` so the next push wins the timestamp
+    /// race even after the user picked "Keep mine". The integration store also
+    /// passes `force_overwrite_task_ids` to bypass the server-side check.
+    func markKeptLocalForConflict(taskID: UUID) {
+        guard let i = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[i].updatedAt = Date()
+        recordChanged(task: tasks[i])
     }
 
     // MARK: - Sync recording helpers

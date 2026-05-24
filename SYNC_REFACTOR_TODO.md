@@ -7,42 +7,39 @@ cleanup, `Field`/`Project.updatedAt` correctness, `taskListOrder` preservation)
 landed in commit "sync: kill full-list pushes, post-push loops, and silent
 correctness bugs". The phases below are not yet done.
 
-## Phase 3 — Per-task integration push
+## Phase 3 — Per-task integration push  ✅ DONE
 
-Today, a single task edit kicks off a `linear-sync` / `notion-sync` edge function
-that **scans the user's entire `tasks` table** server-side. The first wave only
-debounced repeat invocations on the client; it did not change the server.
+`linear-sync` and `notion-sync` now accept
+`targets: { task_ids, project_ids, force_overwrite_task_ids }`. The client
+collects affected ids per integration on every CRUD mutation and sends a
+targeted push instead of a full-table scan. Manual "Sync all" still scans
+(omit `targets`). Out-of-scope tasks are unlinked rather than pushed.
 
-- [ ] Add an optional `targets: { task_ids?: string[]; project_ids?: string[] }`
-  payload to both `linear-sync` and `notion-sync`. When present, the push pass
-  iterates only those rows.
-- [ ] When `targets` is provided and a task is no longer in scope (no Linear/
-  Notion field, no integration project, no `external_source` of that integration,
-  no existing link), unlink it (delete the `*_object_links` row) and skip — never
-  push.
-- [ ] Have `CueInSyncRuntimeBridge.triggerImmediatePush(forTask:)` collect the
-  changed task IDs into a small per-integration set, debounce 600ms, then call
-  the edge function with that set as `targets`.
-- [ ] Keep the existing `action: "full"` behavior for the manual "Sync all" UI.
+## Phase 4 — Conflict detection + resolution UI  ✅ MVP DONE
 
-## Phase 4 — Conflict detection + resolution UI
+3-way conflict detection landed for Linear + Notion task push paths:
+- Linear `pushTasks` (existing-link update path) reads the issue's current
+  `updatedAt` from Linear and, if it advanced past `link.linear_last_edited_time`
+  while the local task also advanced past `link.cuein_updated_at`, emits a
+  `SyncConflict` and skips the push.
+- Notion `pushTasks` (two-way path) does the same with a `GET /pages/{id}`
+  peek before the `PATCH`.
+- The client (`TasksStore.taskConflicts`) ingests the server's `conflicts`
+  array, shows a banner pinned at the top of `TasksView`, and presents a
+  resolution sheet with two actions: **Keep mine** (force-overwrites, server
+  bypasses the conflict check via `force_overwrite_task_ids`) or **Use Linear /
+  Use Notion** (pulls remote, drops local edit).
 
-Decision: **3-way diff with field-level merge**, surfaced as a sheet. (Same
-pattern Things, Linear's own merge UI, and most modern sync apps use; familiar
-and avoids data loss.)
-
-- [ ] In `*_object_links`, add `last_seen_remote_version` (or store the last
-  observed `notion_last_edited_time` / Linear `updatedAt`). Already partially
-  present.
-- [ ] Server detects conflict during push: if `link.cuein_updated_at` advanced
-  *and* the remote `notion_last_edited_time` / Linear `updatedAt` advanced since
-  `link.last_synced_at`, do **not** push. Return a `conflict` descriptor in the
-  response: `{ task_id, local, remote, base }`.
-- [ ] Client persists conflict on `TaskItem.conflictState` (new field), shows a
-  banner in the row, and blocks further pushes for that task until resolved.
-- [ ] Merge sheet: 3 columns (Yours / Theirs / Last synced) per field. Sensible
-  defaults pre-selected: status & dates → newer timestamp wins; tags → union;
-  title/notes → user picks.
+Follow-ups (not in MVP):
+- [ ] Project conflict detection (currently tasks only).
+- [ ] Field-level merge sheet (3 columns: Yours / Theirs / Last synced) for
+  power users who want to keep Linear's title but their own notes. The current
+  Keep-Mine / Use-Theirs UX matches what most sync apps ship and was the
+  decision rationale; revisit if telemetry shows users want more granularity.
+- [ ] Surface conflict marker on the individual `TaskItemRow` (currently only
+  the global banner indicates conflicts).
+- [ ] Persist `taskConflicts` across app launches if it isn't already implicit
+  via the next sync re-emitting them.
 
 ## Phase 5 — Live sync without polling spam
 

@@ -4,6 +4,7 @@ struct TasksView: View {
     @Bindable private var store: TasksStore
     @State private var activeSheet: TasksSheet?
     @State private var knownTodayTaskIDs: Set<UUID> = []
+    @State private var showsTasksSettings = false
 
     @MainActor init() {
         self.store = .shared
@@ -19,10 +20,18 @@ struct TasksView: View {
             onCreateProject: presentCreateProject,
             onPoolMove: showPoolActionToast,
             onDeleteTask: deleteTaskWithUndo,
+            onOpenSettings: { showsTasksSettings = true },
             routeDestination: destination
         )
         .background(CueInColors.background.ignoresSafeArea())
         .cueInPreferredColorScheme()
+        .safeAreaInset(edge: .top, spacing: 0) {
+            // Pinned banner — only renders when integration sync surfaced a
+            // 3-way conflict that needs the user's call. No-op otherwise.
+            SyncConflictBanner()
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+        }
         .onAppear {
             knownTodayTaskIDs = store.todayTaskIDSet
         }
@@ -30,6 +39,12 @@ struct TasksView: View {
             handleTodayPoolIDsChanged(newIDs)
         }
         .sheet(item: $activeSheet, content: sheetContent)
+        .sheet(isPresented: $showsTasksSettings) {
+            TasksModuleSettingsView()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(CueInSheetPresentation.cornerRadius)
+        }
     }
 
     @ViewBuilder
@@ -57,12 +72,13 @@ struct TasksView: View {
                 onEditField: presentEditField,
                 onDeleteField: deleteField
             )
-        case .projects:
+        case .projects(let source):
             TaskProjectsPage(
                 store: store,
                 onCreateProject: presentCreateProject,
                 onEditProject: presentEditProject,
-                onDeleteProject: deleteProject
+                onDeleteProject: deleteProject,
+                initialSourceFilter: source ?? .all
             )
         case .field(let id):
             FieldDetailView(fieldID: id, store: store)

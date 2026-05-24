@@ -10,6 +10,38 @@ import {
 
 type SyncAction = "full" | "push" | "pull";
 
+/// When the iOS app pushes a single edited task, it sends the task's id (and
+/// optionally its project id) in `targets`. The push pass then iterates only
+/// those rows instead of scanning the user's whole `tasks` table. Manual "Sync
+/// all" omits `targets`, falling back to the legacy full-scan behavior. Pulls
+/// always scan the connected workspace; targets is irrelevant there.
+type SyncTargets = {
+  task_ids?: string[];
+  project_ids?: string[];
+  /// Tasks the client explicitly resolved as "Keep mine" — server skips the
+  /// conflict check and pushes anyway, even if Linear changed since last sync.
+  force_overwrite_task_ids?: string[];
+};
+
+/// Returned to the client when the server detects a 3-way conflict (both sides
+/// changed since the last successful sync). The push for that record is
+/// skipped; the client surfaces a banner + resolution UI.
+type SyncConflict = {
+  kind: "task" | "project";
+  cuein_id: string;
+  source: "linear";
+  remote_updated_at: string;
+  local_updated_at: string;
+  link_remote_updated_at: string | null;
+  remote_snapshot?: Record<string, unknown>;
+};
+
+function nonEmpty(ids: string[] | undefined): string[] | undefined {
+  if (!ids || ids.length === 0) return undefined;
+  // De-dupe defensively; clients sometimes resend ids during retry.
+  return Array.from(new Set(ids));
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -23,8 +55,13 @@ Deno.serve(async (req) => {
     const user = await requireUser(req, admin);
     userId = user.id;
 
-    const { action = "full" } = await req.json().catch(() => ({})) as { action?: SyncAction };
+    const body = await req.json().catch(() => ({})) as { action?: SyncAction; targets?: SyncTargets };
+    const action: SyncAction = body.action ?? "full";
     if (!["full", "push", "pull"].includes(action)) return json({ error: "Invalid sync action" }, 400);
+    const taskTargets = nonEmpty(body.targets?.task_ids);
+    const projectTargets = nonEmpty(body.targets?.project_ids);
+    const forceOverwriteTaskIDs = new Set(nonEmpty(body.targets?.force_overwrite_task_ids) ?? []);
+    const conflicts: SyncConflict[] = [];
 
     const { data: connection, error: connectionError } = await admin
       .from("linear_connections")
@@ -74,8 +111,8 @@ Deno.serve(async (req) => {
       counters.tasks_pulled = await pullTasks(admin, token, userId, connection, debugLog);
     }
     if (action === "full" || action === "push") {
-      counters.projects_pushed = await pushProjects(admin, token, userId, connection, fallbackTeamId, debugLog);
-      counters.tasks_pushed = await pushTasks(admin, token, userId, connection, fallbackTeamId, debugLog);
+      counters.projects_pushed = await pushProjects(admin, token, userId, connection, fallbackTeamId, debugLog, projectTargets);
+      counters.tasks_pushed = await pushTasks(admin, token, userId, connection, fallbackTeamId, debugLog, taskTargets, forceOverwriteTaskIDs, conflicts);
     }
 
     const now = new Date().toISOString();
@@ -90,7 +127,7 @@ Deno.serve(async (req) => {
       finished_at: now,
     }).eq("id", runId);
 
-    return json({ ok: true, ...counters, last_synced_at: now }, 200);
+    return json({ ok: true, ...counters, conflicts, last_synced_at: now }, 200);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     if (runId) {
@@ -369,16 +406,26 @@ async function pullTasks(admin: any, token: string, userId: string, connection: 
   return changed;
 }
 
-async function pushProjects(admin: any, token: string, userId: string, connection: any, fallbackTeamId: string, debugLog: string[]) {
+async function pushProjects(
+  admin: any,
+  token: string,
+  userId: string,
+  connection: any,
+  fallbackTeamId: string,
+  debugLog: string[],
+  projectTargets?: string[],
+) {
   const linearFieldId = await ensureLinearField(admin, userId);
   let changed = 0;
 
   // Handle deleted projects
-  const { data: deletedProjects } = await admin
+  let deletedQuery = admin
     .from("projects")
     .select("*")
     .eq("user_id", userId)
     .not("deleted_at", "is", null);
+  if (projectTargets) deletedQuery = deletedQuery.in("id", projectTargets);
+  const { data: deletedProjects } = await deletedQuery;
 
   for (const project of deletedProjects ?? []) {
     const { data: link } = await admin
@@ -412,11 +459,13 @@ async function pushProjects(admin: any, token: string, userId: string, connectio
   }
 
   // Handle active projects
-  const { data: projects } = await admin
+  let activeQuery = admin
     .from("projects")
     .select("*")
     .eq("user_id", userId)
     .is("deleted_at", null);
+  if (projectTargets) activeQuery = activeQuery.in("id", projectTargets);
+  const { data: projects } = await activeQuery;
 
   for (const project of projects ?? []) {
     const { data: link } = await admin
@@ -478,6 +527,16 @@ async function pushProjects(admin: any, token: string, userId: string, connectio
       const res = await linearRequest<{ projectCreate: { success: boolean; project: { id: string; updatedAt: string } } }>(token, mutation, { input });
       if (res.projectCreate?.success) {
         const linearProject = res.projectCreate.project;
+        // Same loop-prevention pattern as pushTasks: capture trigger-bumped
+        // updated_at and persist it to link.cuein_updated_at atomically.
+        const { data: bumped } = await admin
+          .from("projects")
+          .update({ external_source: "linear" })
+          .eq("id", project.id)
+          .select("updated_at")
+          .single();
+        const cueInUpdatedAt = bumped?.updated_at ?? project.updated_at;
+
         await admin.from("linear_object_links").upsert({
           user_id: userId,
           connection_id: connection.id,
@@ -485,15 +544,10 @@ async function pushProjects(admin: any, token: string, userId: string, connectio
           cuein_object_id: project.id,
           linear_id: linearProject.id,
           linear_last_edited_time: linearProject.updatedAt,
-          cuein_updated_at: project.updated_at,
+          cuein_updated_at: cueInUpdatedAt,
           sync_direction: "two_way",
           last_synced_at: new Date().toISOString(),
         }, { onConflict: "user_id,object_kind,cuein_object_id" }).throwOnError();
-        
-        await admin.from("projects").update({
-          external_source: "linear",
-          updated_at: new Date().toISOString(),
-        }).eq("id", project.id);
 
         changed++;
       }
@@ -519,16 +573,13 @@ async function pushProjects(admin: any, token: string, userId: string, connectio
       const res = await linearRequest<{ projectUpdate: { success: boolean; project: { id: string; updatedAt: string } } }>(token, mutation, { id: link.linear_id, input });
       if (res.projectUpdate?.success) {
         const linearProject = res.projectUpdate.project;
+        // Existing-link update: do NOT touch the projects row at all (same
+        // reasoning as pushTasks update path — avoids the trigger re-push loop).
         await admin.from("linear_object_links").update({
           linear_last_edited_time: linearProject.updatedAt,
           cuein_updated_at: project.updated_at,
           last_synced_at: new Date().toISOString(),
         }).eq("id", link.id).throwOnError();
-        
-        await admin.from("projects").update({
-          external_source: "linear",
-          updated_at: new Date().toISOString(),
-        }).eq("id", project.id);
 
         changed++;
       }
@@ -538,17 +589,29 @@ async function pushProjects(admin: any, token: string, userId: string, connectio
   return changed;
 }
 
-async function pushTasks(admin: any, token: string, userId: string, connection: any, fallbackTeamId: string, debugLog: string[]) {
+async function pushTasks(
+  admin: any,
+  token: string,
+  userId: string,
+  connection: any,
+  fallbackTeamId: string,
+  debugLog: string[],
+  taskTargets?: string[],
+  forceOverwriteTaskIDs: Set<string> = new Set(),
+  conflicts: SyncConflict[] = [],
+) {
   const linearFieldId = await ensureLinearField(admin, userId);
   let changed = 0;
   const teamStatesCache = new Map<string, Array<{ id: string; name: string; type: string }>>();
 
   // Handle deleted tasks
-  const { data: deletedTasks } = await admin
+  let deletedQuery = admin
     .from("tasks")
     .select("*")
     .eq("user_id", userId)
     .not("deleted_at", "is", null);
+  if (taskTargets) deletedQuery = deletedQuery.in("id", taskTargets);
+  const { data: deletedTasks } = await deletedQuery;
 
   for (const task of deletedTasks ?? []) {
     const { data: link } = await admin
@@ -589,11 +652,13 @@ async function pushTasks(admin: any, token: string, userId: string, connection: 
   }
 
   // Handle active tasks
-  const { data: tasks } = await admin
+  let activeTasksQuery = admin
     .from("tasks")
     .select("*")
     .eq("user_id", userId)
     .is("deleted_at", null);
+  if (taskTargets) activeTasksQuery = activeTasksQuery.in("id", taskTargets);
+  const { data: tasks } = await activeTasksQuery;
 
   for (const task of tasks ?? []) {
     const { data: link } = await admin
@@ -734,6 +799,36 @@ async function pushTasks(admin: any, token: string, userId: string, connection: 
         changed++;
       }
     } else {
+      // 3-way conflict check: both sides changed since the last successful sync.
+      // We're already in the update path because task.updated_at > link.cuein_updated_at
+      // (CueIn-side change). If Linear's current updatedAt also moved past
+      // link.linear_last_edited_time, the user (or a teammate) edited the
+      // issue inside Linear since we last pulled — pushing now would clobber it.
+      const linkRemoteAt = link.linear_last_edited_time
+        ? new Date(link.linear_last_edited_time).getTime()
+        : 0;
+      const remoteAt = issueDetails?.updatedAt
+        ? new Date(issueDetails.updatedAt).getTime()
+        : 0;
+      if (remoteAt > linkRemoteAt && !forceOverwriteTaskIDs.has(task.id)) {
+        conflicts.push({
+          kind: "task",
+          cuein_id: task.id,
+          source: "linear",
+          remote_updated_at: issueDetails!.updatedAt,
+          local_updated_at: task.updated_at,
+          link_remote_updated_at: link.linear_last_edited_time ?? null,
+          remote_snapshot: {
+            title: issueDetails!.title,
+            notes: issueDetails!.description,
+            due_date: issueDetails!.dueDate,
+            priority: priorityFromLinear(issueDetails!.priority ?? 3),
+            status: statusFromLinear(issueDetails!.stateType),
+          },
+        });
+        continue;
+      }
+
       // Update issue in Linear
       const mutation = `
         mutation($id: String!, $input: IssueUpdateInput!) {
@@ -835,10 +930,26 @@ async function getCachedWorkflowStates(token: string, teamId: string, cache: Map
   return states;
 }
 
-async function getIssueDetails(token: string, issueId: string): Promise<{ teamId: string; stateId: string; stateType: string } | null> {
+type IssueDetails = {
+  teamId: string;
+  stateId: string;
+  stateType: string;
+  updatedAt: string;
+  title: string;
+  description: string;
+  dueDate: string | null;
+  priority: number | null;
+};
+
+async function getIssueDetails(token: string, issueId: string): Promise<IssueDetails | null> {
   const query = `
     query($id: String!) {
       issue(id: $id) {
+        title
+        description
+        updatedAt
+        dueDate
+        priority
         team {
           id
         }
@@ -850,11 +961,17 @@ async function getIssueDetails(token: string, issueId: string): Promise<{ teamId
     }
   `;
   try {
-    const res = await linearRequest<{ issue: { team: { id: string }; state: { id: string; type: string } } }>(token, query, { id: issueId });
+    const res = await linearRequest<{ issue: { title: string; description: string; updatedAt: string; dueDate: string | null; priority: number | null; team: { id: string }; state: { id: string; type: string } } }>(token, query, { id: issueId });
+    if (!res.issue) return null;
     return {
-      teamId: res.issue?.team?.id,
-      stateId: res.issue?.state?.id,
-      stateType: res.issue?.state?.type,
+      teamId: res.issue.team?.id,
+      stateId: res.issue.state?.id,
+      stateType: res.issue.state?.type,
+      updatedAt: res.issue.updatedAt,
+      title: res.issue.title ?? "",
+      description: res.issue.description ?? "",
+      dueDate: res.issue.dueDate,
+      priority: res.issue.priority,
     };
   } catch {
     return null;

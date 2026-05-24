@@ -30,8 +30,17 @@ Deno.serve(async (req) => {
   try {
     const user = await requireUser(req, admin);
 
-    const { action = "full" } = await req.json().catch(() => ({})) as { action?: SyncAction };
+    const body = await req.json().catch(() => ({})) as {
+      action?: SyncAction;
+      targets?: { task_ids?: string[]; project_ids?: string[]; force_overwrite_task_ids?: string[] };
+    };
+    const action: SyncAction = body.action ?? "full";
     if (!["full", "push", "pull"].includes(action)) return json({ error: "Invalid sync action" }, 400);
+    const dedupe = (ids?: string[]) => (ids && ids.length > 0 ? Array.from(new Set(ids)) : undefined);
+    const taskTargets = dedupe(body.targets?.task_ids);
+    const projectTargets = dedupe(body.targets?.project_ids);
+    const forceOverwriteTaskIDs = new Set(dedupe(body.targets?.force_overwrite_task_ids) ?? []);
+    const conflicts: NotionSyncConflict[] = [];
 
     const { data: connection, error: connectionError } = await admin
       .from("notion_connections")
@@ -68,8 +77,8 @@ Deno.serve(async (req) => {
       counters.tasks_pulled += await pullSharedPageTasks(admin, token, user.id, connection, debugLog);
     }
     if (action === "full" || action === "push") {
-      counters.projects_pushed = await pushProjects(admin, token, user.id, connection, debugLog);
-      counters.tasks_pushed = await pushTasks(admin, token, user.id, connection, debugLog);
+      counters.projects_pushed = await pushProjects(admin, token, user.id, connection, debugLog, projectTargets);
+      counters.tasks_pushed = await pushTasks(admin, token, user.id, connection, debugLog, taskTargets, forceOverwriteTaskIDs, conflicts);
     }
 
     const now = new Date().toISOString();
@@ -84,7 +93,7 @@ Deno.serve(async (req) => {
       debug_log: debugLog,
     }).eq("id", runId);
 
-    return json({ ok: true, ...counters, last_synced_at: now }, 200);
+    return json({ ok: true, ...counters, conflicts, last_synced_at: now }, 200);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     if (runId) {
@@ -709,7 +718,7 @@ async function softDeleteMissingExternalTasksForProject(
   return missing.length;
 }
 
-async function pushProjects(admin: any, token: string, userId: string, connection: any, debugLog: string[] = []) {
+async function pushProjects(admin: any, token: string, userId: string, connection: any, debugLog: string[] = [], projectTargets?: string[]) {
   if (!connection.projects_database_id) return 0;
   const notionFieldId = await notionFieldIdForUser(userId);
   const managedProjectsAvailable = await isDatabaseValid(token, connection.projects_database_id);
@@ -721,11 +730,13 @@ async function pushProjects(admin: any, token: string, userId: string, connectio
   }
   let changed = 0;
 
-  const { data: deletedProjects, error: deletedProjectsError } = await admin
+  let deletedProjectsQuery = admin
     .from("projects")
     .select("*")
     .eq("user_id", userId)
     .not("deleted_at", "is", null);
+  if (projectTargets) deletedProjectsQuery = deletedProjectsQuery.in("id", projectTargets);
+  const { data: deletedProjects, error: deletedProjectsError } = await deletedProjectsQuery;
   if (deletedProjectsError) throw new Error(deletedProjectsError.message);
 
   for (const project of deletedProjects ?? []) {
@@ -747,11 +758,13 @@ async function pushProjects(admin: any, token: string, userId: string, connectio
     }
   }
 
-  const { data: projects, error } = await admin
+  let activeProjectsQuery = admin
     .from("projects")
     .select("*")
     .eq("user_id", userId)
     .is("deleted_at", null);
+  if (projectTargets) activeProjectsQuery = activeProjectsQuery.in("id", projectTargets);
+  const { data: projects, error } = await activeProjectsQuery;
   if (error) throw new Error(error.message);
   for (const project of projects ?? []) {
     const link = await linkForObject(admin, userId, "project", project.id);
@@ -820,17 +833,38 @@ async function pushProjects(admin: any, token: string, userId: string, connectio
   return changed;
 }
 
-async function pushTasks(admin: any, token: string, userId: string, connection: any, debugLog: string[] = []) {
+type NotionSyncConflict = {
+  kind: "task" | "project";
+  cuein_id: string;
+  source: "notion";
+  remote_updated_at: string;
+  local_updated_at: string;
+  link_remote_updated_at: string | null;
+  remote_snapshot?: Record<string, unknown>;
+};
+
+async function pushTasks(
+  admin: any,
+  token: string,
+  userId: string,
+  connection: any,
+  debugLog: string[] = [],
+  taskTargets?: string[],
+  forceOverwriteTaskIDs: Set<string> = new Set(),
+  conflicts: NotionSyncConflict[] = [],
+) {
   const writeTarget = taskWriteTarget(connection);
   if (!writeTarget?.databaseId) return 0;
   let changed = 0;
   const notionFieldId = await notionFieldIdForUser(userId);
 
-  const { data: deletedTasks, error: deletedTasksError } = await admin
+  let deletedTasksQuery = admin
     .from("tasks")
     .select("*")
     .eq("user_id", userId)
     .not("deleted_at", "is", null);
+  if (taskTargets) deletedTasksQuery = deletedTasksQuery.in("id", taskTargets);
+  const { data: deletedTasks, error: deletedTasksError } = await deletedTasksQuery;
   if (deletedTasksError) throw new Error(deletedTasksError.message);
 
   for (const task of deletedTasks ?? []) {
@@ -855,11 +889,13 @@ async function pushTasks(admin: any, token: string, userId: string, connection: 
     }
   }
 
-  const { data: tasks, error } = await admin
+  let activeTasksQuery = admin
     .from("tasks")
     .select("*")
     .eq("user_id", userId)
     .is("deleted_at", null);
+  if (taskTargets) activeTasksQuery = activeTasksQuery.in("id", taskTargets);
+  const { data: tasks, error } = await activeTasksQuery;
   if (error) throw new Error(error.message);
   for (const task of tasks ?? []) {
     const link = await linkForObject(admin, userId, "task", task.id);
@@ -932,6 +968,42 @@ async function pushTasks(admin: any, token: string, userId: string, connection: 
           }
         } else {
           try {
+            // 3-way conflict check: peek the page first; if Notion's
+            // last_edited_time advanced past the link's recorded value, both
+            // sides changed since last sync. Skip the PATCH and surface the
+            // conflict to the client unless force-overwrite was requested.
+            let conflictDetected = false;
+            if (!forceOverwriteTaskIDs.has(task.id)) {
+              try {
+                const remotePage = await notionRequest<any>(token, `/pages/${link.notion_page_id}`, { method: "GET" });
+                const remoteEditedAt = remotePage?.last_edited_time
+                  ? new Date(remotePage.last_edited_time).getTime()
+                  : 0;
+                const linkRemoteAt = link.notion_last_edited_time
+                  ? new Date(link.notion_last_edited_time).getTime()
+                  : 0;
+                if (remoteEditedAt > linkRemoteAt) {
+                  conflicts.push({
+                    kind: "task",
+                    cuein_id: task.id,
+                    source: "notion",
+                    remote_updated_at: remotePage.last_edited_time,
+                    local_updated_at: task.updated_at,
+                    link_remote_updated_at: link.notion_last_edited_time ?? null,
+                    remote_snapshot: {
+                      title: firstTitleProperty(remotePage.properties ?? {}),
+                      properties: remotePage.properties ?? {},
+                    },
+                  });
+                  conflictDetected = true;
+                }
+              } catch {
+                // If the peek fails (e.g. transient 5xx), fall through to the
+                // PATCH; failures there have their own archived/404 handling.
+              }
+            }
+            if (conflictDetected) continue;
+
             const projectLink = task.project_id ? await linkForObject(admin, userId, "project", task.project_id) : null;
             const linkedTarget = await taskWriteTargetForLinkedPage(token, connection, link.notion_page_id);
             const properties = await taskPropertiesForTarget(token, task, projectLink?.notion_page_id ?? null, linkedTarget);
