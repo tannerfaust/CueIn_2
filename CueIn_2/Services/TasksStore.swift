@@ -97,6 +97,28 @@ final class TasksStore {
         return "circle.dashed"
     }
 
+    func isNotionTask(_ task: TaskItem) -> Bool {
+        if task.isNotionImported { return true }
+        if let projectID = task.projectID, let proj = project(projectID), proj.isNotionImported { return true }
+        if let fieldID = task.fieldID, let f = field(fieldID), f.name.localizedCaseInsensitiveCompare("notion") == .orderedSame { return true }
+        if let fieldID = task.fieldID, let userID = SupabaseAuthStore.shared.session?.user.id {
+            let notionFieldID = UUID.cueInDeterministicID(userID: userID, key: "field:notion")
+            if fieldID == notionFieldID { return true }
+        }
+        return false
+    }
+
+    func isLinearTask(_ task: TaskItem) -> Bool {
+        if task.isLinearImported { return true }
+        if let projectID = task.projectID, let proj = project(projectID), proj.isLinearImported { return true }
+        if let fieldID = task.fieldID, let f = field(fieldID), f.name.localizedCaseInsensitiveCompare("linear") == .orderedSame { return true }
+        if let fieldID = task.fieldID, let userID = SupabaseAuthStore.shared.session?.user.id {
+            let linearFieldID = UUID.cueInDeterministicID(userID: userID, key: "field:linear")
+            if fieldID == linearFieldID { return true }
+        }
+        return false
+    }
+
     // MARK: - Smart views (AI / planner entry points)
 
     /// Not placed on any day — captured for later planning.
@@ -161,7 +183,8 @@ final class TasksStore {
     func addTask(_ task: TaskItem) {
         AppLogger.shared.log("TasksStore: Adding task '\(task.title)'", category: .database)
         tasks.append(task)
-        recordSyncSnapshot()
+        recordChanged(task: task)
+        CueInSyncRuntimeBridge.shared.triggerImmediatePush(forTask: task)
     }
 
     func restoreTask(_ task: TaskItem, listKey: String? = nil) {
@@ -174,7 +197,7 @@ final class TasksStore {
             order.insert(task.id, at: 0)
             taskListOrder[listKey] = order
         }
-        recordSyncSnapshot()
+        recordChanged(task: task)
     }
 
     func updateTask(_ task: TaskItem) {
@@ -183,7 +206,8 @@ final class TasksStore {
         var next = task
         next.updatedAt = Date()
         tasks[i] = next
-        recordSyncSnapshot()
+        recordChanged(task: next)
+        CueInSyncRuntimeBridge.shared.triggerImmediatePush(forTask: next)
     }
 
     /// Presents the Tasks-tab FAB undo affordance after a swipe (or checkbox popover) marks a task complete.
@@ -220,6 +244,7 @@ final class TasksStore {
         AppLogger.shared.log("TasksStore: Requesting deletion of task ID \(id) ('\(deletedTask?.title ?? "unknown")')", category: .database)
         if let deletedTask, deletedTask.isNotionImported {
             archiveImportedTaskLocally(deletedTask)
+            CueInSyncRuntimeBridge.shared.triggerImmediatePush(forTask: deletedTask)
             return
         }
         tasks.removeAll { $0.id == id }
@@ -231,8 +256,8 @@ final class TasksStore {
         }
         if let deletedTask {
             CueInSyncRuntimeBridge.shared.recordDeletedTask(deletedTask)
+            CueInSyncRuntimeBridge.shared.triggerImmediatePush(forTask: deletedTask)
         }
-        recordSyncSnapshot()
     }
 
     private func archiveImportedTaskLocally(_ task: TaskItem) {
@@ -246,7 +271,7 @@ final class TasksStore {
         if pendingCompleteUndoSnapshot?.id == task.id {
             clearCompleteUndo()
         }
-        recordSyncSnapshot()
+        recordChanged(task: tasks[index])
     }
 
     // MARK: - Task list ordering (drag to reorder)
@@ -300,7 +325,8 @@ final class TasksStore {
         AppLogger.shared.log("TasksStore: Setting task '\(tasks[i].title)' priority to \(priority.rawValue)", category: .database)
         tasks[i].priority = priority
         tasks[i].updatedAt = Date()
-        recordSyncSnapshot()
+        recordChanged(task: tasks[i])
+        CueInSyncRuntimeBridge.shared.triggerImmediatePush(forTask: tasks[i])
     }
 
     func setTaskStatus(id: UUID, status: TaskStatus) {
@@ -328,7 +354,8 @@ final class TasksStore {
             tasks[i].status = .archived
         }
         tasks[i].updatedAt = Date()
-        recordSyncSnapshot()
+        recordChanged(task: tasks[i])
+        CueInSyncRuntimeBridge.shared.triggerImmediatePush(forTask: tasks[i])
     }
 
     func toggleComplete(_ id: UUID) {
@@ -343,7 +370,8 @@ final class TasksStore {
             tasks[i].completedAt = Date()
         }
         tasks[i].updatedAt = Date()
-        recordSyncSnapshot()
+        recordChanged(task: tasks[i])
+        CueInSyncRuntimeBridge.shared.triggerImmediatePush(forTask: tasks[i])
     }
 
     /// Sets completion without toggling (used when Today execution timeline updates a queued row).
@@ -359,7 +387,8 @@ final class TasksStore {
             tasks[i].completedAt = nil
         }
         tasks[i].updatedAt = Date()
-        recordSyncSnapshot()
+        recordChanged(task: tasks[i])
+        CueInSyncRuntimeBridge.shared.triggerImmediatePush(forTask: tasks[i])
     }
 
     func scheduleTask(_ id: UUID, on date: Date?) {
@@ -370,7 +399,8 @@ final class TasksStore {
             ? (tasks[i].isCompleted ? .completed : .inbox)
             : (tasks[i].isCompleted ? .completed : .scheduled)
         tasks[i].updatedAt = Date()
-        recordSyncSnapshot()
+        recordChanged(task: tasks[i])
+        CueInSyncRuntimeBridge.shared.triggerImmediatePush(forTask: tasks[i])
     }
 
     /// Today to-do row status menu — keeps tasks coherent with the execution pool.
@@ -402,7 +432,8 @@ final class TasksStore {
             tasks[i].status = .archived
         }
         tasks[i].updatedAt = Date()
-        recordSyncSnapshot()
+        recordChanged(task: tasks[i])
+        CueInSyncRuntimeBridge.shared.triggerImmediatePush(forTask: tasks[i])
     }
 
     func toggleTodayTodoSubtask(taskID: UUID, subtaskID: UUID) {
@@ -411,7 +442,8 @@ final class TasksStore {
         AppLogger.shared.log("TasksStore: Toggling Today subtask '\(tasks[ti].subtasks[si].title)' in '\(tasks[ti].title)'", category: .database)
         tasks[ti].subtasks[si].isCompleted.toggle()
         tasks[ti].updatedAt = Date()
-        recordSyncSnapshot()
+        recordChanged(task: tasks[ti])
+        CueInSyncRuntimeBridge.shared.triggerImmediatePush(forTask: tasks[ti])
     }
 
     // MARK: - Field CRUD
@@ -419,14 +451,18 @@ final class TasksStore {
     func addField(_ f: Field) {
         AppLogger.shared.log("TasksStore: Adding field '\(f.name)'", category: .database)
         fields.append(f)
-        recordSyncSnapshot()
+        recordChanged(field: f)
+        CueInSyncRuntimeBridge.shared.triggerImmediatePush(forField: f)
     }
 
     func updateField(_ f: Field) {
         guard let i = fields.firstIndex(where: { $0.id == f.id }) else { return }
         AppLogger.shared.log("TasksStore: Updating field '\(f.name)'", category: .database)
-        fields[i] = f
-        recordSyncSnapshot()
+        var next = f
+        next.updatedAt = Date()
+        fields[i] = next
+        recordChanged(field: next)
+        CueInSyncRuntimeBridge.shared.triggerImmediatePush(forField: next)
     }
 
     /// Removes the field, its projects, and clears `fieldID` on any orphaned tasks.
@@ -437,19 +473,30 @@ final class TasksStore {
         let projIDs = deletedProjects.map(\.id)
         projects.removeAll { $0.fieldID == id }
         fields.removeAll { $0.id == id }
+        let now = Date()
+        var orphanedTasks: [TaskItem] = []
         for i in tasks.indices {
-            if tasks[i].fieldID == id { tasks[i].fieldID = nil }
+            var changed = false
+            if tasks[i].fieldID == id { tasks[i].fieldID = nil; changed = true }
             if let pid = tasks[i].projectID, projIDs.contains(pid) {
                 tasks[i].projectID = nil
+                changed = true
+            }
+            if changed {
+                tasks[i].updatedAt = now
+                orphanedTasks.append(tasks[i])
             }
         }
         if let deletedField {
             CueInSyncRuntimeBridge.shared.recordDeletedField(deletedField)
+            CueInSyncRuntimeBridge.shared.triggerImmediatePush(forField: deletedField)
         }
         for project in deletedProjects {
             CueInSyncRuntimeBridge.shared.recordDeletedProject(project)
         }
-        recordSyncSnapshot()
+        for task in orphanedTasks {
+            CueInSyncRuntimeBridge.shared.recordChangedTask(task)
+        }
     }
 
     // MARK: - Project CRUD
@@ -457,14 +504,18 @@ final class TasksStore {
     func addProject(_ p: Project) {
         AppLogger.shared.log("TasksStore: Adding project '\(p.name)'", category: .database)
         projects.append(p)
-        recordSyncSnapshot()
+        recordChanged(project: p)
+        CueInSyncRuntimeBridge.shared.triggerImmediatePush(forProject: p)
     }
 
     func updateProject(_ p: Project) {
         guard let i = projects.firstIndex(where: { $0.id == p.id }) else { return }
         AppLogger.shared.log("TasksStore: Updating project '\(p.name)'", category: .database)
-        projects[i] = p
-        recordSyncSnapshot()
+        var next = p
+        next.updatedAt = Date()
+        projects[i] = next
+        recordChanged(project: next)
+        CueInSyncRuntimeBridge.shared.triggerImmediatePush(forProject: next)
     }
 
     /// Removes the project and clears `projectID` on its tasks (tasks stay on the field).
@@ -472,13 +523,20 @@ final class TasksStore {
         let deletedProject = projects.first { $0.id == id }
         AppLogger.shared.log("TasksStore: Deleting project ID: \(id) ('\(deletedProject?.name ?? "unknown")')", category: .database)
         projects.removeAll { $0.id == id }
+        let now = Date()
+        var orphanedTasks: [TaskItem] = []
         for i in tasks.indices where tasks[i].projectID == id {
             tasks[i].projectID = nil
+            tasks[i].updatedAt = now
+            orphanedTasks.append(tasks[i])
         }
         if let deletedProject {
             CueInSyncRuntimeBridge.shared.recordDeletedProject(deletedProject)
+            CueInSyncRuntimeBridge.shared.triggerImmediatePush(forProject: deletedProject)
         }
-        recordSyncSnapshot()
+        for task in orphanedTasks {
+            CueInSyncRuntimeBridge.shared.recordChangedTask(task)
+        }
     }
 
     // MARK: - Progress helpers
@@ -734,7 +792,9 @@ final class TasksStore {
         projects = seed.projects
         tasks = seed.tasks
         taskListOrder = [:]
-        recordSyncSnapshot()
+        if !suppressSyncRecording {
+            CueInSyncRuntimeBridge.shared.recordWorkspaceSnapshot()
+        }
     }
 
     /// Clears fields, projects, tasks, and manual list ordering.
@@ -752,21 +812,41 @@ final class TasksStore {
         projects = []
         tasks = []
         taskListOrder = [:]
-        recordSyncSnapshot()
     }
 
+    /// Applies a server-pulled snapshot to memory. Preserves user-only state that
+    /// isn't synced yet (currently `taskListOrder`) so a remote pull doesn't lose
+    /// drag-reordering on the device that hasn't pushed it.
     func replaceFromSync(fields syncedFields: [Field], projects syncedProjects: [Project], tasks syncedTasks: [TaskItem]) {
         UserDefaults.standard.set(true, forKey: CueInAppDataKeys.gimmickDemoRemoved)
         suppressSyncRecording = true
         fields = syncedFields
         projects = syncedProjects
         tasks = syncedTasks
-        taskListOrder = [:]
+        let validIDs = Set(syncedTasks.map(\.id))
+        for key in Array(taskListOrder.keys) {
+            taskListOrder[key] = taskListOrder[key]?.filter { validIDs.contains($0) }
+            if taskListOrder[key]?.isEmpty == true {
+                taskListOrder.removeValue(forKey: key)
+            }
+        }
         suppressSyncRecording = false
     }
 
-    private func recordSyncSnapshot() {
+    // MARK: - Sync recording helpers
+
+    private func recordChanged(task: TaskItem) {
         guard !suppressSyncRecording else { return }
-        CueInSyncRuntimeBridge.shared.recordTasksSnapshot()
+        CueInSyncRuntimeBridge.shared.recordChangedTask(task)
+    }
+
+    private func recordChanged(project: Project) {
+        guard !suppressSyncRecording else { return }
+        CueInSyncRuntimeBridge.shared.recordChangedProject(project)
+    }
+
+    private func recordChanged(field: Field) {
+        guard !suppressSyncRecording else { return }
+        CueInSyncRuntimeBridge.shared.recordChangedField(field)
     }
 }

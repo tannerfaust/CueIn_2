@@ -23,6 +23,7 @@ final class CueInSyncEngine {
     private var scheduledSyncTask: Task<Void, Never>?
     private var isSyncInFlight = false
     private var needsSyncAfterCurrent = false
+    private var needsOverwritePendingAfterCurrent = false
 
     var state: CueInSyncState = .idle
 
@@ -91,9 +92,23 @@ final class CueInSyncEngine {
         await syncNow(overwritePendingRemoteRecords: true)
     }
 
+    func hasPendingMutations() -> Bool {
+        guard let repository else { return false }
+        do {
+            return try !repository.pendingMutations().isEmpty
+        } catch {
+            AppLogger.shared.error(error, message: "hasPendingMutations() probe failed")
+            return false
+        }
+    }
+
+
     private func syncNow(overwritePendingRemoteRecords: Bool) async {
         if isSyncInFlight {
             AppLogger.shared.log("Sync is already in-flight; queueing subsequent sync run", category: .network)
+            if overwritePendingRemoteRecords {
+                needsOverwritePendingAfterCurrent = true
+            }
             needsSyncAfterCurrent = true
             return
         }
@@ -102,9 +117,11 @@ final class CueInSyncEngine {
             isSyncInFlight = false
             if needsSyncAfterCurrent {
                 needsSyncAfterCurrent = false
-                AppLogger.shared.log("Executing queued subsequent sync run", category: .network)
+                let overwrite = needsOverwritePendingAfterCurrent
+                needsOverwritePendingAfterCurrent = false
+                AppLogger.shared.log("Executing queued subsequent sync run. Overwrite: \(overwrite)", category: .network)
                 Task { @MainActor in
-                    await self.syncNow()
+                    await self.syncNow(overwritePendingRemoteRecords: overwrite)
                 }
             }
         }
@@ -364,8 +381,10 @@ final class CueInSyncEngine {
         AppLogger.shared.log("Pulled \(records.count) records for table '\(table.rawValue)'", category: .network)
         for record in records {
             if !overwritePendingRemoteRecords,
-               record.deletedAt == nil,
                try repository.hasPendingMutation(table: table, recordID: record.id) {
+                // Local pending mutation always wins until pushed — including against
+                // remote tombstones, otherwise a server-side soft-delete from another
+                // device clobbers an offline local edit.
                 AppLogger.shared.log("Skipping record ID \(record.id) on table '\(table.rawValue)' because of local pending unsynced mutation", category: .database)
                 continue
             }
@@ -378,6 +397,10 @@ final class CueInSyncEngine {
 
     private func applyCachedWorkspace(repository: LocalSyncRepository, userID: UUID) throws {
         AppLogger.shared.log("Applying local sync records to memory stores", category: .database)
+        CueInSyncRuntimeBridge.shared.isApplyingSyncPayload = true
+        defer {
+            CueInSyncRuntimeBridge.shared.isApplyingSyncPayload = false
+        }
         let fields = try repository.records(FieldDTO.self, table: .fields, userID: userID)
             .filter { $0.deletedAt == nil }
             .map(\.domainModel)

@@ -11,7 +11,7 @@ extension FieldDTO {
             colorHex: Int64(field.colorHex),
             isArchived: field.isArchived,
             createdAt: field.createdAt,
-            updatedAt: field.createdAt,
+            updatedAt: field.updatedAt,
             deletedAt: deletedAt,
             syncVersion: syncVersion
         )
@@ -25,6 +25,7 @@ extension FieldDTO {
             iconName: iconName,
             colorHex: UInt(colorHex),
             createdAt: createdAt,
+            updatedAt: updatedAt,
             isArchived: isArchived
         )
     }
@@ -44,7 +45,7 @@ extension ProjectDTO {
             colorHexOverride: project.colorHexOverride.map(Int64.init),
             externalSource: project.externalSource,
             createdAt: project.createdAt,
-            updatedAt: project.createdAt,
+            updatedAt: project.updatedAt,
             deletedAt: deletedAt,
             syncVersion: syncVersion
         )
@@ -62,7 +63,8 @@ extension ProjectDTO {
             targetDate: targetDate,
             colorHexOverride: colorHexOverride.map(UInt.init),
             externalSource: externalSource,
-            createdAt: createdAt
+            createdAt: createdAt,
+            updatedAt: updatedAt
         )
     }
 }

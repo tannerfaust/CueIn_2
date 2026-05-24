@@ -52,6 +52,9 @@ struct Project: Identifiable, Codable, Hashable {
     var colorHexOverride: UInt?
     var externalSource: String?
     var createdAt: Date
+    /// Bumped whenever the user edits the project. Required for cross-device pulls
+    /// to advance the per-table sync cursor; do not derive from `createdAt`.
+    var updatedAt: Date
 
     init(
         id: UUID = UUID(),
@@ -63,7 +66,8 @@ struct Project: Identifiable, Codable, Hashable {
         targetDate: Date? = nil,
         colorHexOverride: UInt? = nil,
         externalSource: String? = nil,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        updatedAt: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -75,6 +79,22 @@ struct Project: Identifiable, Codable, Hashable {
         self.colorHexOverride = colorHexOverride
         self.externalSource = externalSource
         self.createdAt = createdAt
+        self.updatedAt = updatedAt ?? createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(UUID.self, forKey: .id)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.summary = try c.decode(String.self, forKey: .summary)
+        self.iconName = try c.decode(String.self, forKey: .iconName)
+        self.fieldID = try c.decode(UUID.self, forKey: .fieldID)
+        self.status = try c.decode(Status.self, forKey: .status)
+        self.targetDate = try c.decodeIfPresent(Date.self, forKey: .targetDate)
+        self.colorHexOverride = try c.decodeIfPresent(UInt.self, forKey: .colorHexOverride)
+        self.externalSource = try c.decodeIfPresent(String.self, forKey: .externalSource)
+        self.createdAt = try c.decode(Date.self, forKey: .createdAt)
+        self.updatedAt = (try? c.decode(Date.self, forKey: .updatedAt)) ?? self.createdAt
     }
 }
 
@@ -87,6 +107,14 @@ extension Project {
 
     var isNotionImported: Bool {
         externalSource?.localizedCaseInsensitiveCompare("notion") == .orderedSame
+    }
+
+    var isLinearImported: Bool {
+        externalSource?.localizedCaseInsensitiveCompare("linear") == .orderedSame
+    }
+
+    var isExternal: Bool {
+        externalSource != nil
     }
 }
 

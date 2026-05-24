@@ -12,6 +12,9 @@ struct Field: Identifiable, Codable, Hashable {
     var iconName: String
     var colorHex: UInt
     var createdAt: Date
+    /// Bumped whenever the user edits the field. Required for cross-device pulls
+    /// to advance the per-table sync cursor; do not derive from `createdAt`.
+    var updatedAt: Date
     var isArchived: Bool
 
     init(
@@ -21,6 +24,7 @@ struct Field: Identifiable, Codable, Hashable {
         iconName: String = "square.grid.2x2.fill",
         colorHex: UInt = 0x8E8E93,
         createdAt: Date = Date(),
+        updatedAt: Date? = nil,
         isArchived: Bool = false
     ) {
         self.id = id
@@ -29,7 +33,20 @@ struct Field: Identifiable, Codable, Hashable {
         self.iconName = iconName
         self.colorHex = colorHex
         self.createdAt = createdAt
+        self.updatedAt = updatedAt ?? createdAt
         self.isArchived = isArchived
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(UUID.self, forKey: .id)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.summary = try c.decode(String.self, forKey: .summary)
+        self.iconName = try c.decode(String.self, forKey: .iconName)
+        self.colorHex = try c.decode(UInt.self, forKey: .colorHex)
+        self.createdAt = try c.decode(Date.self, forKey: .createdAt)
+        self.updatedAt = (try? c.decode(Date.self, forKey: .updatedAt)) ?? self.createdAt
+        self.isArchived = try c.decode(Bool.self, forKey: .isArchived)
     }
 
     var color: Color { Color(hex: colorHex) }

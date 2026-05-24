@@ -26,8 +26,10 @@ Deno.serve(async (req) => {
 
   const admin = adminClient();
   let runId: string | null = null;
+  const debugLog: string[] = [];
   try {
     const user = await requireUser(req, admin);
+
     const { action = "full" } = await req.json().catch(() => ({})) as { action?: SyncAction };
     if (!["full", "push", "pull"].includes(action)) return json({ error: "Invalid sync action" }, 400);
 
@@ -51,6 +53,8 @@ Deno.serve(async (req) => {
     runId = run.id;
 
     const token = await decryptToken(connection.encrypted_access_token, connection.token_nonce);
+    await ensureExternalTaskTarget(admin, token, user.id, connection, debugLog);
+
     const counters = {
       projects_pushed: 0,
       projects_pulled: 0,
@@ -59,13 +63,13 @@ Deno.serve(async (req) => {
     };
 
     if (action === "full" || action === "pull") {
-      counters.projects_pulled = await pullProjects(admin, token, user.id, connection);
-      counters.tasks_pulled = await pullTasks(admin, token, user.id, connection);
-      counters.tasks_pulled += await pullSharedPageTasks(admin, token, user.id, connection);
+      counters.projects_pulled = await pullProjects(admin, token, user.id, connection, debugLog);
+      counters.tasks_pulled = await pullTasks(admin, token, user.id, connection, debugLog);
+      counters.tasks_pulled += await pullSharedPageTasks(admin, token, user.id, connection, debugLog);
     }
     if (action === "full" || action === "push") {
-      counters.projects_pushed = await pushProjects(admin, token, user.id, connection);
-      counters.tasks_pushed = await pushTasks(admin, token, user.id, connection);
+      counters.projects_pushed = await pushProjects(admin, token, user.id, connection, debugLog);
+      counters.tasks_pushed = await pushTasks(admin, token, user.id, connection, debugLog);
     }
 
     const now = new Date().toISOString();
@@ -77,6 +81,7 @@ Deno.serve(async (req) => {
       ...counters,
       status: "succeeded",
       finished_at: now,
+      debug_log: debugLog,
     }).eq("id", runId);
 
     return json({ ok: true, ...counters, last_synced_at: now }, 200);
@@ -87,6 +92,7 @@ Deno.serve(async (req) => {
         status: "failed",
         error: message,
         finished_at: new Date().toISOString(),
+        debug_log: debugLog,
       }).eq("id", runId);
     }
     if (error instanceof Response) return error;
@@ -94,22 +100,115 @@ Deno.serve(async (req) => {
   }
 });
 
-async function pullProjects(admin: any, token: string, userId: string, connection: any) {
-  const pages = await queryDatabase(token, connection.projects_database_id);
-  let changed = 0;
+async function pullProjects(admin: any, token: string, userId: string, connection: any, debugLog: string[] = []) {
+  if (!connection.projects_database_id) {
+    debugLog.push("pullProjects: No projects database ID configured");
+    return 0;
+  }
+  const pages = await safeQueryDatabase(admin, token, connection, "projects_database_id", debugLog);
+  if (!pages) return 0;
+  debugLog.push(`pullProjects: Notion database query returned ${pages.length} pages`);
+
+  const pageIds = pages.map((p) => p.id);
+  const pageIdSet = new Set(pageIds);
+
+  const { data: allLinks, error: allLinksError } = await admin
+    .from("notion_object_links")
+    .select("*")
+    .eq("connection_id", connection.id)
+    .eq("object_kind", "project")
+    .eq("sync_direction", "two_way");
+  if (allLinksError) throw new Error(allLinksError.message);
+
+  debugLog.push(`pullProjects: Existing project links in DB = ${allLinks.length}`);
+
+  const projectsToSoftDelete: string[] = [];
+  const projectLinksToDelete: string[] = [];
+
+  const missingLinks = allLinks.filter((l: any) => !pageIdSet.has(l.notion_page_id));
+  for (const link of missingLinks) {
+    projectLinksToDelete.push(link.id);
+    projectsToSoftDelete.push(link.cuein_object_id);
+  }
+
+  if (projectsToSoftDelete.length > 0) {
+    const now = new Date().toISOString();
+    await admin.from("projects").update({ deleted_at: now, updated_at: now }).in("id", projectsToSoftDelete);
+  }
+  if (projectLinksToDelete.length > 0) {
+    await admin.from("notion_object_links").delete().in("id", projectLinksToDelete);
+  }
+
+  if (pages.length === 0) return 0;
+
+  const { data: links, error: linksError } = await admin
+    .from("notion_object_links")
+    .select("*")
+    .eq("connection_id", connection.id)
+    .eq("object_kind", "project")
+    .in("notion_page_id", pageIds);
+  if (linksError) throw new Error(linksError.message);
+
+  const linkMap = new Map<string, any>(links.map((l: any) => [l.notion_page_id, l]));
+  const projectIdsToFetch: string[] = [];
+  const projectInfoMap = new Map<string, { page: any; cueInID: string | null; existingLink: any }>();
+
   for (const page of pages) {
     const cueInID = firstRichText(page.properties?.["CueIn ID"]);
-    const existingLink = await linkForPage(admin, connection.id, "project", page.id);
+    const existingLink = linkMap.get(page.id);
+    const projectId = cueInID || existingLink?.cuein_object_id;
+    if (projectId) {
+      projectIdsToFetch.push(projectId);
+    }
+    projectInfoMap.set(page.id, { page, cueInID, existingLink });
+  }
+
+  let existingMap = new Map<string, any>();
+  if (projectIdsToFetch.length > 0) {
+    const { data: existingProjects, error: projectsError } = await admin
+      .from("projects")
+      .select("*")
+      .eq("user_id", userId)
+      .in("id", projectIdsToFetch);
+    if (projectsError) throw new Error(projectsError.message);
+    existingMap = new Map(existingProjects.map((p: any) => [p.id, p]));
+  }
+
+  const projectsToUpsert: any[] = [];
+  const linksToUpsert: any[] = [];
+  let changed = 0;
+  const fieldId = await ensureNotionField(admin, userId);
+
+  for (const page of pages) {
+    const { cueInID, existingLink } = projectInfoMap.get(page.id)!;
     const projectId = cueInID || existingLink?.cuein_object_id || crypto.randomUUID();
-    const existing = await one(admin.from("projects").select("*").eq("user_id", userId).eq("id", projectId));
+    const existing = existingMap.get(projectId);
     const notionEdited = new Date(page.last_edited_time);
+
+    const isLinkMissing = !existingLink;
+
+    if (existingLink && notionEdited.getTime() <= new Date(existingLink.notion_last_edited_time).getTime()) {
+      continue;
+    }
     if (existing && existing.updated_at && new Date(existing.updated_at) > notionEdited) {
+      if (isLinkMissing) {
+        linksToUpsert.push({
+          user_id: userId,
+          connection_id: connection.id,
+          object_kind: "project",
+          cuein_object_id: projectId,
+          notion_page_id: page.id,
+          notion_last_edited_time: page.last_edited_time,
+          cuein_updated_at: notionEdited.toISOString(),
+          sync_direction: "two_way",
+          last_synced_at: new Date().toISOString(),
+        });
+      }
       continue;
     }
 
-    const fieldId = await ensureNotionField(admin, userId);
     const status = projectStatusFromNotion(selectName(page.properties?.Status));
-    const syncUpdatedAt = new Date().toISOString();
+    const syncUpdatedAt = notionEdited.toISOString();
     const row = {
       id: projectId,
       user_id: userId,
@@ -121,37 +220,182 @@ async function pullProjects(admin: any, token: string, userId: string, connectio
       icon_name: "folder.fill",
       updated_at: syncUpdatedAt,
     };
-    await admin.from("projects").upsert(row, { onConflict: "id" }).throwOnError();
-    await upsertLink(admin, userId, connection.id, "project", projectId, page.id, page.last_edited_time, row.updated_at);
+
+    projectsToUpsert.push(row);
+    linksToUpsert.push({
+      user_id: userId,
+      connection_id: connection.id,
+      object_kind: "project",
+      cuein_object_id: projectId,
+      notion_page_id: page.id,
+      notion_last_edited_time: page.last_edited_time,
+      cuein_updated_at: syncUpdatedAt,
+      sync_direction: "two_way",
+      last_synced_at: new Date().toISOString(),
+    });
     changed += 1;
+  }
+
+  if (projectsToUpsert.length > 0) {
+    await admin.from("projects").upsert(projectsToUpsert, { onConflict: "id" }).throwOnError();
+  }
+  if (linksToUpsert.length > 0) {
+    await admin.from("notion_object_links").upsert(linksToUpsert, { onConflict: "user_id,object_kind,cuein_object_id" }).throwOnError();
   }
   return changed;
 }
 
-async function pullTasks(admin: any, token: string, userId: string, connection: any) {
-  const pages = await queryDatabase(token, connection.tasks_database_id);
-  let changed = 0;
+async function pullTasks(admin: any, token: string, userId: string, connection: any, debugLog: string[] = []) {
+  if (!connection.tasks_database_id) {
+    debugLog.push("pullTasks: No tasks database ID configured");
+    return 0;
+  }
+  const pages = await safeQueryDatabase(admin, token, connection, "tasks_database_id", debugLog);
+  if (!pages) return 0;
+  debugLog.push(`pullTasks: Notion database query returned ${pages.length} pages`);
+
+  const pageIds = pages.map((p) => p.id);
+  const pageIdSet = new Set(pageIds);
+  const { data: allLinks, error: allLinksError } = await admin
+    .from("notion_object_links")
+    .select("*")
+    .eq("connection_id", connection.id)
+    .eq("object_kind", "task")
+    .eq("sync_direction", "two_way");
+  if (allLinksError) throw new Error(allLinksError.message);
+
+  debugLog.push(`pullTasks: Existing two_way task links in DB = ${allLinks.length}`);
+
+  const tasksToSoftDelete: string[] = [];
+  const taskLinksToDelete: string[] = [];
+
+  const missingLinks = allLinks.filter((l: any) => !pageIdSet.has(l.notion_page_id));
+  for (const link of missingLinks) {
+    taskLinksToDelete.push(link.id);
+    tasksToSoftDelete.push(link.cuein_object_id);
+  }
+
+  if (tasksToSoftDelete.length > 0) {
+    const now = new Date().toISOString();
+    await admin.from("tasks").update({ deleted_at: now, updated_at: now }).in("id", tasksToSoftDelete);
+  }
+  if (taskLinksToDelete.length > 0) {
+    await admin.from("notion_object_links").delete().in("id", taskLinksToDelete);
+  }
+
+  if (pages.length === 0) return 0;
+
+  const { data: links, error: linksError } = await admin
+    .from("notion_object_links")
+    .select("*")
+    .eq("connection_id", connection.id)
+    .eq("object_kind", "task")
+    .in("notion_page_id", pageIds);
+  if (linksError) throw new Error(linksError.message);
+
+  const linkMap = new Map<string, any>(links.map((l: any) => [l.notion_page_id, l]));
+  const taskIdsToFetch: string[] = [];
+  const taskInfoMap = new Map<string, { page: any; cueInID: string | null; existingLink: any }>();
+
   for (const page of pages) {
     const cueInID = firstRichText(page.properties?.["CueIn ID"]);
-    const existingLink = await linkForPage(admin, connection.id, "task", page.id);
+    const existingLink = linkMap.get(page.id);
+    const taskId = cueInID || existingLink?.cuein_object_id;
+    if (taskId) {
+      taskIdsToFetch.push(taskId);
+    }
+    taskInfoMap.set(page.id, { page, cueInID, existingLink });
+  }
+
+  let existingMap = new Map<string, any>();
+  if (taskIdsToFetch.length > 0) {
+    const { data: existingTasks, error: tasksError } = await admin
+      .from("tasks")
+      .select("*")
+      .eq("user_id", userId)
+      .in("id", taskIdsToFetch);
+    if (tasksError) throw new Error(tasksError.message);
+    existingMap = new Map(existingTasks.map((t: any) => [t.id, t]));
+  }
+
+  const projectPageIdsToFetch = new Set<string>();
+  for (const page of pages) {
+    const projectPageId = page.properties?.Project?.relation?.[0]?.id ?? null;
+    if (projectPageId) {
+      projectPageIdsToFetch.add(projectPageId);
+    }
+  }
+
+  let projectLinkMap = new Map<string, any>();
+  if (projectPageIdsToFetch.size > 0) {
+    const { data: projectLinks, error: projLinksError } = await admin
+      .from("notion_object_links")
+      .select("*")
+      .eq("connection_id", connection.id)
+      .eq("object_kind", "project")
+      .in("notion_page_id", Array.from(projectPageIdsToFetch));
+    if (projLinksError) throw new Error(projLinksError.message);
+    projectLinkMap = new Map(projectLinks.map((l: any) => [l.notion_page_id, l]));
+  }
+
+  const projectIdsToFetchForField = Array.from(projectLinkMap.values()).map((l) => l.cuein_object_id);
+  let projectMap = new Map<string, any>();
+  if (projectIdsToFetchForField.length > 0) {
+    const { data: projects, error: projectsError } = await admin
+      .from("projects")
+      .select("id, field_id")
+      .eq("user_id", userId)
+      .in("id", projectIdsToFetchForField);
+    if (projectsError) throw new Error(projectsError.message);
+    projectMap = new Map(projects.map((p: any) => [p.id, p]));
+  }
+
+  const tasksToUpsert: any[] = [];
+  const linksToUpsert: any[] = [];
+  let changed = 0;
+  const fallbackFieldId = await ensureNotionField(admin, userId);
+
+  for (const page of pages) {
+    const { cueInID, existingLink } = taskInfoMap.get(page.id)!;
     const taskId = cueInID || existingLink?.cuein_object_id || crypto.randomUUID();
-    const existing = await one(admin.from("tasks").select("*").eq("user_id", userId).eq("id", taskId));
+    const existing = existingMap.get(taskId);
     const notionEdited = new Date(page.last_edited_time);
+
+    const isLinkMissing = !existingLink;
+
+    if (existingLink && notionEdited.getTime() <= new Date(existingLink.notion_last_edited_time).getTime()) {
+      continue;
+    }
     if (existing && existing.updated_at && new Date(existing.updated_at) > notionEdited) {
+      if (isLinkMissing) {
+        linksToUpsert.push({
+          user_id: userId,
+          connection_id: connection.id,
+          object_kind: "task",
+          cuein_object_id: taskId,
+          notion_page_id: page.id,
+          notion_last_edited_time: page.last_edited_time,
+          cuein_updated_at: notionEdited.toISOString(),
+          sync_direction: "two_way",
+          last_synced_at: new Date().toISOString(),
+        });
+      }
       continue;
     }
 
     const projectPageId = page.properties?.Project?.relation?.[0]?.id ?? null;
-    const projectLink = projectPageId ? await linkForPage(admin, connection.id, "project", projectPageId) : null;
+    const projectLink = projectPageId ? projectLinkMap.get(projectPageId) : null;
     const projectId = projectLink?.cuein_object_id ?? null;
-    const project = projectId ? await one(admin.from("projects").select("field_id").eq("user_id", userId).eq("id", projectId)) : null;
+    const project = projectId ? projectMap.get(projectId) : null;
+
     const status = taskStatusFromNotion(statusOrSelectName(page.properties?.Status));
     const completedAt = status === "completed" ? isoDate(dateStart(page.properties?.["Completed Date"]) ?? page.last_edited_time) : null;
-    const syncUpdatedAt = new Date().toISOString();
+    const syncUpdatedAt = notionEdited.toISOString();
+
     const row = {
       id: taskId,
       user_id: userId,
-      field_id: project?.field_id ?? await ensureNotionField(admin, userId),
+      field_id: project?.field_id ?? fallbackFieldId,
       project_id: projectId,
       title: firstTitle(page.properties?.Name) || "Untitled Notion task",
       notes: firstRichText(page.properties?.Notes),
@@ -167,141 +411,560 @@ async function pullTasks(admin: any, token: string, userId: string, connection: 
       external_source: existing?.external_source ?? null,
       updated_at: syncUpdatedAt,
     };
-    await admin.from("tasks").upsert(row, { onConflict: "id" }).throwOnError();
-    await upsertLink(admin, userId, connection.id, "task", taskId, page.id, page.last_edited_time, row.updated_at);
+
+    tasksToUpsert.push(row);
+    linksToUpsert.push({
+      user_id: userId,
+      connection_id: connection.id,
+      object_kind: "task",
+      cuein_object_id: taskId,
+      notion_page_id: page.id,
+      notion_last_edited_time: page.last_edited_time,
+      cuein_updated_at: syncUpdatedAt,
+      sync_direction: "two_way",
+      last_synced_at: new Date().toISOString(),
+    });
     changed += 1;
+  }
+
+  if (tasksToUpsert.length > 0) {
+    await admin.from("tasks").upsert(tasksToUpsert, { onConflict: "id" }).throwOnError();
+  }
+  if (linksToUpsert.length > 0) {
+    await admin.from("notion_object_links").upsert(linksToUpsert, { onConflict: "user_id,object_kind,cuein_object_id" }).throwOnError();
   }
   return changed;
 }
 
-async function pullSharedPageTasks(admin: any, token: string, userId: string, connection: any) {
-  if (!connection.notion_parent_page_id) return 0;
+async function pullSharedPageTasks(admin: any, token: string, userId: string, connection: any, debugLog: string[] = []) {
+  if (!connection.notion_parent_page_id) {
+    debugLog.push("pullSharedPageTasks: No notion parent page ID configured");
+    return 0;
+  }
   const sources = await discoverSharedTaskSources(token, connection.notion_parent_page_id, new Set([
     connection.projects_database_id,
     connection.tasks_database_id,
   ].filter(Boolean)));
+  debugLog.push(`pullSharedPageTasks: Crawler found ${sources.databases.length} databases and ${sources.pages.length} inline pages`);
 
   let changed = 0;
   for (const source of sources.databases) {
     const projectId = await ensureExternalNotionProject(admin, userId, source.id, source.title);
     const project = await one(admin.from("projects").select("field_id").eq("user_id", userId).eq("id", projectId));
     const pages = await queryDatabase(token, source.id);
-    for (const page of pages) {
-      changed += await pullExternalTaskPage(admin, userId, connection, page, {
-        projectId,
-        fieldId: project?.field_id ?? await ensureNotionField(admin, userId),
-        sourceTitle: source.title,
-      });
-    }
+    const activePageIds = new Set(pages.map((page: any) => page.id));
+    debugLog.push(`pullSharedPageTasks: Database ${source.id} (${source.title}) query returned ${pages.length} pages`);
+    changed += await pullExternalTaskPagesBatch(admin, userId, connection, pages, {
+      projectId,
+      fieldId: project?.field_id ?? await ensureNotionField(admin, userId),
+      sourceTitle: source.title,
+    });
+    changed += await softDeleteMissingExternalTasksForProject(admin, userId, connection, projectId, activePageIds, debugLog);
+    changed += await softDeleteMissingTwoWayTasksForDatabase(admin, token, userId, connection, source.id, activePageIds, debugLog);
   }
 
-  for (const page of sources.pages) {
-    changed += await pullExternalTaskPage(admin, userId, connection, page, {
-      projectId: null,
-      fieldId: await ensureNotionField(admin, userId),
-      sourceTitle: "Shared Notion pages",
+  changed += await pullExternalTaskPagesBatch(admin, userId, connection, sources.pages, {
+    projectId: null,
+    fieldId: await ensureNotionField(admin, userId),
+    sourceTitle: "Shared Notion pages",
+  });
+
+  changed += await reconcileArchivedExternalTasks(admin, token, userId, connection, debugLog);
+  return changed;
+}
+
+async function pullExternalTaskPagesBatch(
+  admin: any,
+  userId: string,
+  connection: any,
+  pages: any[],
+  context: { projectId: string | null; fieldId: string; sourceTitle: string },
+) {
+  if (pages.length === 0) return 0;
+
+  const pageIds = pages.map((p) => p.id);
+  const { data: links, error: linksError } = await admin
+    .from("notion_object_links")
+    .select("*")
+    .eq("connection_id", connection.id)
+    .eq("object_kind", "task")
+    .in("notion_page_id", pageIds);
+  if (linksError) throw new Error(linksError.message);
+
+  const linkMap = new Map<string, any>(links.map((l: any) => [l.notion_page_id, l]));
+  const taskIdsToFetch: string[] = [];
+  const taskInfoMap = new Map<string, { page: any; existingLink: any; cueInID: string | null }>();
+
+  for (const page of pages) {
+    const existingLink = linkMap.get(page.id);
+    const properties = page.properties ?? {};
+    const cueInID = firstRichText(firstProperty(properties, ["CueIn ID", "CueInID", "CueIn"]));
+    const taskId = cueInID || existingLink?.cuein_object_id;
+    if (taskId) {
+      taskIdsToFetch.push(taskId);
+    }
+    taskInfoMap.set(page.id, { page, existingLink, cueInID });
+  }
+
+  let existingMap = new Map<string, any>();
+  if (taskIdsToFetch.length > 0) {
+    const { data: existingTasks, error: tasksError } = await admin
+      .from("tasks")
+      .select("*")
+      .eq("user_id", userId)
+      .in("id", taskIdsToFetch);
+    if (tasksError) throw new Error(tasksError.message);
+    existingMap = new Map(existingTasks.map((t: any) => [t.id, t]));
+  }
+
+  const tasksToUpsert: any[] = [];
+  const linksToUpsert: any[] = [];
+  let changed = 0;
+
+  for (const page of pages) {
+    const { existingLink, cueInID } = taskInfoMap.get(page.id)!;
+    const taskId = cueInID || existingLink?.cuein_object_id || await deterministicUUID(`${connection.id}:notion-page:${page.id}`);
+    const existing = existingMap.get(taskId);
+    const notionEdited = new Date(page.last_edited_time);
+    const syncDirection = cueInID || existingLink?.sync_direction === "two_way" ? "two_way" : "pull_only";
+
+    const isLinkMissing = !existingLink;
+
+    if (existingLink && notionEdited.getTime() <= new Date(existingLink.notion_last_edited_time).getTime()) {
+      continue;
+    }
+    if (existing && existing.updated_at && new Date(existing.updated_at) > notionEdited) {
+      if (isLinkMissing) {
+        linksToUpsert.push({
+          user_id: userId,
+          connection_id: connection.id,
+          object_kind: "task",
+          cuein_object_id: taskId,
+          notion_page_id: page.id,
+          notion_last_edited_time: page.last_edited_time,
+          cuein_updated_at: notionEdited.toISOString(),
+          sync_direction: syncDirection,
+          last_synced_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    const properties = page.properties ?? {};
+    const status = taskStatusFromNotion(statusOrSelectName(firstProperty(properties, ["Status", "State", "Stage"])));
+    const completedAt = status === "completed"
+      ? isoDate(dateStart(firstProperty(properties, ["Completed Date", "Done Date", "Completed"])) ?? page.last_edited_time)
+      : null;
+
+    const row = {
+      id: taskId,
+      user_id: userId,
+      field_id: context.fieldId,
+      project_id: context.projectId,
+      title: firstTitleProperty(properties) || pageTitle(page) || "Untitled Notion task",
+      notes: firstRichText(firstProperty(properties, ["Notes", "Description", "Details"])) || "",
+      tags: multiSelectNames(firstProperty(properties, ["Tags", "Labels", "Tag"])),
+      priority: taskPriorityFromNotion(selectName(firstProperty(properties, ["Priority", "Urgency"]))),
+      scheduled_date: isoDate(dateStart(firstProperty(properties, ["Scheduled Date", "Start", "Do Date", "When"]))),
+      due_date: isoDate(dateStart(firstProperty(properties, ["Due Date", "Deadline", "Date"]))),
+      status,
+      completed_at: completedAt,
+      recurrence: "none",
+      subtasks: [],
+      saves_to_archive: true,
+      external_source: syncDirection === "two_way" ? existing?.external_source ?? null : "notion",
+      updated_at: notionEdited.toISOString(),
+    };
+
+    tasksToUpsert.push(row);
+    linksToUpsert.push({
+      user_id: userId,
+      connection_id: connection.id,
+      object_kind: "task",
+      cuein_object_id: taskId,
+      notion_page_id: page.id,
+      notion_last_edited_time: page.last_edited_time,
+      cuein_updated_at: row.updated_at,
+      sync_direction: syncDirection,
+      last_synced_at: new Date().toISOString(),
     });
+    changed += 1;
+  }
+
+  if (tasksToUpsert.length > 0) {
+    await admin.from("tasks").upsert(tasksToUpsert, { onConflict: "id" }).throwOnError();
+  }
+  if (linksToUpsert.length > 0) {
+    await admin.from("notion_object_links").upsert(linksToUpsert, { onConflict: "user_id,object_kind,cuein_object_id" }).throwOnError();
   }
   return changed;
 }
 
-async function pullExternalTaskPage(
+async function reconcileArchivedExternalTasks(
+  admin: any,
+  token: string,
+  userId: string,
+  connection: any,
+  debugLog: string[] = [],
+) {
+  const { data: links, error } = await admin
+    .from("notion_object_links")
+    .select("id, cuein_object_id, notion_page_id")
+    .eq("connection_id", connection.id)
+    .eq("object_kind", "task")
+    .eq("sync_direction", "pull_only");
+  if (error) throw new Error(error.message);
+
+  const archived: any[] = [];
+  for (const link of links ?? []) {
+    try {
+      const page = await notionRequest<any>(token, `/pages/${link.notion_page_id}`, { method: "GET" });
+      if (page.archived || page.in_trash) {
+        archived.push(link);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message.includes("404") || message.includes("object_not_found") || message.includes("restricted_resource")) {
+        archived.push(link);
+      } else {
+        debugLog.push(`pullSharedPageTasks: Could not verify page ${link.notion_page_id}: ${message}`);
+      }
+    }
+  }
+
+  if (archived.length === 0) return 0;
+
+  const now = new Date().toISOString();
+  const taskIds = archived.map((link: any) => link.cuein_object_id);
+  const linkIds = archived.map((link: any) => link.id);
+  debugLog.push(`pullSharedPageTasks: Soft-deleting ${archived.length} archived or inaccessible pull-only Notion tasks`);
+
+  await admin
+    .from("tasks")
+    .update({ deleted_at: now, updated_at: now })
+    .eq("user_id", userId)
+    .eq("external_source", "notion")
+    .in("id", taskIds)
+    .throwOnError();
+
+  await admin
+    .from("notion_object_links")
+    .delete()
+    .in("id", linkIds)
+    .throwOnError();
+
+  return archived.length;
+}
+
+async function softDeleteMissingExternalTasksForProject(
   admin: any,
   userId: string,
   connection: any,
-  page: any,
-  context: { projectId: string | null; fieldId: string; sourceTitle: string },
+  projectId: string,
+  activePageIds: Set<string>,
+  debugLog: string[] = [],
 ) {
-  const existingLink = await linkForPage(admin, connection.id, "task", page.id);
-  const taskId = existingLink?.cuein_object_id || crypto.randomUUID();
-  const existing = await one(admin.from("tasks").select("*").eq("user_id", userId).eq("id", taskId));
-  const notionEdited = new Date(page.last_edited_time);
-  if (existing && existing.updated_at && new Date(existing.updated_at) > notionEdited) {
-    return 0;
-  }
+  const { data: tasks, error: tasksError } = await admin
+    .from("tasks")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("external_source", "notion")
+    .eq("project_id", projectId)
+    .is("deleted_at", null);
+  if (tasksError) throw new Error(tasksError.message);
+  if (!tasks || tasks.length === 0) return 0;
 
-  const properties = page.properties ?? {};
-  const status = taskStatusFromNotion(statusOrSelectName(firstProperty(properties, ["Status", "State", "Stage"])));
-  const completedAt = status === "completed"
-    ? isoDate(dateStart(firstProperty(properties, ["Completed Date", "Done Date", "Completed"])) ?? page.last_edited_time)
-    : null;
-  const row = {
-    id: taskId,
-    user_id: userId,
-    field_id: context.fieldId,
-    project_id: context.projectId,
-    title: firstTitleProperty(properties) || pageTitle(page) || "Untitled Notion task",
-    notes: firstRichText(firstProperty(properties, ["Notes", "Description", "Details"])) || "",
-    tags: multiSelectNames(firstProperty(properties, ["Tags", "Labels", "Tag"])),
-    priority: taskPriorityFromNotion(selectName(firstProperty(properties, ["Priority", "Urgency"]))),
-    scheduled_date: isoDate(dateStart(firstProperty(properties, ["Scheduled Date", "Start", "Do Date", "When"]))),
-    due_date: isoDate(dateStart(firstProperty(properties, ["Due Date", "Deadline", "Date"]))),
-    status,
-    completed_at: completedAt,
-    recurrence: "none",
-    subtasks: [],
-    saves_to_archive: true,
-    external_source: "notion",
-    updated_at: new Date().toISOString(),
-  };
-  await admin.from("tasks").upsert(row, { onConflict: "id" }).throwOnError();
-  await upsertLink(admin, userId, connection.id, "task", taskId, page.id, page.last_edited_time, row.updated_at, "pull_only");
-  return 1;
+  const taskIds = tasks.map((task: any) => task.id);
+  const { data: links, error: linksError } = await admin
+    .from("notion_object_links")
+    .select("id, cuein_object_id, notion_page_id")
+    .eq("connection_id", connection.id)
+    .eq("object_kind", "task")
+    .eq("sync_direction", "pull_only")
+    .in("cuein_object_id", taskIds);
+  if (linksError) throw new Error(linksError.message);
+
+  const missing = (links ?? []).filter((link: any) => !activePageIds.has(link.notion_page_id));
+  if (missing.length === 0) return 0;
+
+  const now = new Date().toISOString();
+  const missingTaskIds = missing.map((link: any) => link.cuein_object_id);
+  const missingLinkIds = missing.map((link: any) => link.id);
+  debugLog.push(`pullSharedPageTasks: Soft-deleting ${missing.length} Notion tasks removed from source project ${projectId}`);
+
+  await admin
+    .from("tasks")
+    .update({ deleted_at: now, updated_at: now })
+    .eq("user_id", userId)
+    .eq("external_source", "notion")
+    .in("id", missingTaskIds)
+    .throwOnError();
+
+  await admin
+    .from("notion_object_links")
+    .delete()
+    .in("id", missingLinkIds)
+    .throwOnError();
+
+  return missing.length;
 }
 
-async function pushProjects(admin: any, token: string, userId: string, connection: any) {
+async function pushProjects(admin: any, token: string, userId: string, connection: any, debugLog: string[] = []) {
+  if (!connection.projects_database_id) return 0;
+  const notionFieldId = await notionFieldIdForUser(userId);
+  const managedProjectsAvailable = await isDatabaseValid(token, connection.projects_database_id);
+  if (!managedProjectsAvailable) {
+    debugLog.push(`pushProjects: Managed projects database is inaccessible; clearing ${connection.projects_database_id}`);
+    await clearConnectionDatabase(admin, connection, "projects_database_id");
+    connection.projects_database_id = null;
+    return 0;
+  }
+  let changed = 0;
+
+  const { data: deletedProjects, error: deletedProjectsError } = await admin
+    .from("projects")
+    .select("*")
+    .eq("user_id", userId)
+    .not("deleted_at", "is", null);
+  if (deletedProjectsError) throw new Error(deletedProjectsError.message);
+
+  for (const project of deletedProjects ?? []) {
+    const link = await linkForObject(admin, userId, "project", project.id);
+    if (link) {
+      if (link.sync_direction === "two_way" && project.external_source !== "notion") {
+        try {
+          debugLog.push(`pushProjects: Archiving deleted project page ${link.notion_page_id} in Notion`);
+          await notionRequest<any>(token, `/pages/${link.notion_page_id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ archived: true }),
+          });
+        } catch (e: any) {
+          debugLog.push(`pushProjects: Failed to archive page ${link.notion_page_id} in Notion: ${e.message}`);
+        }
+      }
+      await admin.from("notion_object_links").delete().eq("id", link.id);
+      changed += 1;
+    }
+  }
+
   const { data: projects, error } = await admin
     .from("projects")
     .select("*")
     .eq("user_id", userId)
     .is("deleted_at", null);
   if (error) throw new Error(error.message);
-  let changed = 0;
   for (const project of projects ?? []) {
     const link = await linkForObject(admin, userId, "project", project.id);
-    if (link?.notion_last_edited_time && new Date(link.notion_last_edited_time) > new Date(project.updated_at)) {
-      continue;
-    }
-    const properties = projectProperties(project);
-    const page = link
-      ? await notionRequest<any>(token, `/pages/${link.notion_page_id}`, { method: "PATCH", body: JSON.stringify({ properties }) })
-      : await notionRequest<any>(token, "/pages", {
+    const shouldPush = project.external_source !== "notion" && project.field_id === notionFieldId;
+    if (!link) {
+      if (project.external_source === "notion") {
+        continue;
+      }
+      if (!shouldPush) {
+        continue;
+      }
+      const properties = projectProperties(project);
+      const page = await notionRequest<any>(token, "/pages", {
         method: "POST",
         body: JSON.stringify({ parent: { database_id: connection.projects_database_id }, properties }),
       });
-    await upsertLink(admin, userId, connection.id, "project", project.id, page.id, page.last_edited_time, project.updated_at);
-    changed += 1;
+      await upsertLink(admin, userId, connection.id, "project", project.id, page.id, page.last_edited_time, project.updated_at, "two_way");
+      changed += 1;
+    } else {
+      if (project.external_source === "notion") {
+        if (link.sync_direction !== "pull_only") {
+          await upsertLink(admin, userId, connection.id, "project", project.id, link.notion_page_id, link.notion_last_edited_time, project.updated_at, "pull_only");
+          changed += 1;
+        }
+        continue;
+      }
+      if (link.sync_direction === "two_way" && !shouldPush) {
+        debugLog.push(`pushProjects: Project ${project.id} moved out of Notion scope; removing sync link without deleting Notion page`);
+        await admin.from("notion_object_links").delete().eq("id", link.id);
+        changed += 1;
+        continue;
+      }
+      if (new Date(project.updated_at).getTime() > new Date(link.cuein_updated_at).getTime()) {
+        try {
+          const properties = projectProperties(project);
+          const page = await notionRequest<any>(token, `/pages/${link.notion_page_id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ properties }),
+          });
+          await upsertLink(admin, userId, connection.id, "project", project.id, page.id, page.last_edited_time, project.updated_at, "two_way");
+          changed += 1;
+        } catch (e: any) {
+          const errMsg = e.message || "";
+          if (
+            errMsg.includes("archived") ||
+            errMsg.includes("404") ||
+            errMsg.includes("object_not_found") ||
+            errMsg.includes("validation_error")
+          ) {
+            console.warn(`Project page ${link.notion_page_id} is archived or deleted on Notion. Deleting local link and soft-deleting project ${project.id}.`, errMsg);
+            await admin
+              .from("notion_object_links")
+              .delete()
+              .eq("user_id", userId)
+              .eq("object_kind", "project")
+              .eq("cuein_object_id", project.id);
+            const now = new Date().toISOString();
+            await admin.from("projects").update({ deleted_at: now, updated_at: now }).eq("id", project.id);
+          } else {
+            throw e;
+          }
+        }
+      }
+    }
   }
   return changed;
 }
 
-async function pushTasks(admin: any, token: string, userId: string, connection: any) {
+async function pushTasks(admin: any, token: string, userId: string, connection: any, debugLog: string[] = []) {
+  const writeTarget = taskWriteTarget(connection);
+  if (!writeTarget?.databaseId) return 0;
+  let changed = 0;
+  const notionFieldId = await notionFieldIdForUser(userId);
+
+  const { data: deletedTasks, error: deletedTasksError } = await admin
+    .from("tasks")
+    .select("*")
+    .eq("user_id", userId)
+    .not("deleted_at", "is", null);
+  if (deletedTasksError) throw new Error(deletedTasksError.message);
+
+  for (const task of deletedTasks ?? []) {
+    const link = await linkForObject(admin, userId, "task", task.id);
+    if (link) {
+      const eligibility = await taskNotionEligibility(admin, userId, task, notionFieldId);
+      if (link.sync_direction === "two_way" && task.external_source !== "notion" && eligibility.shouldPush) {
+        try {
+          debugLog.push(`pushTasks: Archiving deleted task page ${link.notion_page_id} in Notion`);
+          await notionRequest<any>(token, `/pages/${link.notion_page_id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ archived: true }),
+          });
+        } catch (e: any) {
+          debugLog.push(`pushTasks: Failed to archive page ${link.notion_page_id} in Notion: ${e.message}`);
+        }
+      } else if (link.sync_direction === "two_way" && task.external_source !== "notion") {
+        debugLog.push(`pushTasks: Deleted task ${task.id} is outside Notion scope; removing sync link without archiving Notion page`);
+      }
+      await admin.from("notion_object_links").delete().eq("id", link.id);
+      changed += 1;
+    }
+  }
+
   const { data: tasks, error } = await admin
     .from("tasks")
     .select("*")
     .eq("user_id", userId)
     .is("deleted_at", null);
   if (error) throw new Error(error.message);
-  let changed = 0;
   for (const task of tasks ?? []) {
     const link = await linkForObject(admin, userId, "task", task.id);
-    if (link?.sync_direction === "pull_only") {
-      await pushExternalTaskStatus(token, task, link);
-      continue;
-    }
-    if (link?.notion_last_edited_time && new Date(link.notion_last_edited_time) > new Date(task.updated_at)) {
-      continue;
-    }
-    const projectLink = task.project_id ? await linkForObject(admin, userId, "project", task.project_id) : null;
-    const properties = taskProperties(task, projectLink?.notion_page_id ?? null);
-    const page = link
-      ? await notionRequest<any>(token, `/pages/${link.notion_page_id}`, { method: "PATCH", body: JSON.stringify({ properties }) })
-      : await notionRequest<any>(token, "/pages", {
+    const eligibility = await taskNotionEligibility(admin, userId, task, notionFieldId);
+    if (!link) {
+      if (task.external_source === "notion") {
+        continue;
+      }
+      if (!eligibility.shouldPush) {
+        continue;
+      }
+      const projectLink = task.project_id ? await linkForObject(admin, userId, "project", task.project_id) : null;
+      const properties = await taskPropertiesForTarget(token, task, projectLink?.notion_page_id ?? null, writeTarget);
+      const page = await notionRequest<any>(token, "/pages", {
         method: "POST",
-        body: JSON.stringify({ parent: { database_id: connection.tasks_database_id }, properties }),
+        body: JSON.stringify({ parent: { database_id: writeTarget.databaseId }, properties }),
       });
-    await upsertLink(admin, userId, connection.id, "task", task.id, page.id, page.last_edited_time, task.updated_at);
-    changed += 1;
+      await upsertLink(admin, userId, connection.id, "task", task.id, page.id, page.last_edited_time, task.updated_at, "two_way");
+      changed += 1;
+    } else {
+      if (task.external_source === "notion" && link.sync_direction !== "pull_only") {
+        await upsertLink(admin, userId, connection.id, "task", task.id, link.notion_page_id, link.notion_last_edited_time, task.updated_at, "pull_only");
+        changed += 1;
+        continue;
+      }
+      if (link.sync_direction === "two_way" && task.external_source !== "notion" && !eligibility.shouldPush) {
+        debugLog.push(`pushTasks: Task ${task.id} moved out of Notion scope; removing sync link without deleting Notion page`);
+        await admin.from("notion_object_links").delete().eq("id", link.id);
+        changed += 1;
+        continue;
+      }
+      if (new Date(task.updated_at).getTime() > new Date(link.cuein_updated_at).getTime()) {
+        if (link.sync_direction === "pull_only") {
+          try {
+            const statusUpdated = await pushExternalTaskStatus(token, task, link);
+            if (statusUpdated) {
+              await upsertLink(
+                admin,
+                userId,
+                connection.id,
+                "task",
+                task.id,
+                link.notion_page_id,
+                link.notion_last_edited_time,
+                task.updated_at,
+                "pull_only",
+              );
+              changed += 1;
+            }
+          } catch (e: any) {
+            const errMsg = e.message || "";
+            if (
+              errMsg.includes("archived") ||
+              errMsg.includes("404") ||
+              errMsg.includes("object_not_found") ||
+              errMsg.includes("validation_error")
+            ) {
+              console.warn(`Task page ${link.notion_page_id} is archived or deleted on Notion (pull_only). Deleting local link and soft-deleting task ${task.id}.`, errMsg);
+              await admin
+                .from("notion_object_links")
+                .delete()
+                .eq("user_id", userId)
+                .eq("object_kind", "task")
+                .eq("cuein_object_id", task.id);
+              const now = new Date().toISOString();
+              await admin.from("tasks").update({ deleted_at: now, updated_at: now }).eq("id", task.id);
+            } else {
+              throw e;
+            }
+          }
+        } else {
+          try {
+            const projectLink = task.project_id ? await linkForObject(admin, userId, "project", task.project_id) : null;
+            const linkedTarget = await taskWriteTargetForLinkedPage(token, connection, link.notion_page_id);
+            const properties = await taskPropertiesForTarget(token, task, projectLink?.notion_page_id ?? null, linkedTarget);
+            const page = await notionRequest<any>(token, `/pages/${link.notion_page_id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ properties }),
+            });
+            await upsertLink(admin, userId, connection.id, "task", task.id, page.id, page.last_edited_time, task.updated_at, "two_way");
+            changed += 1;
+          } catch (e: any) {
+            const errMsg = e.message || "";
+            if (
+              errMsg.includes("archived") ||
+              errMsg.includes("404") ||
+              errMsg.includes("object_not_found") ||
+              errMsg.includes("validation_error")
+            ) {
+              console.warn(`Task page ${link.notion_page_id} is archived or deleted on Notion. Deleting local link and soft-deleting task ${task.id}.`, errMsg);
+              await admin
+                .from("notion_object_links")
+                .delete()
+                .eq("user_id", userId)
+                .eq("object_kind", "task")
+                .eq("cuein_object_id", task.id);
+              const now = new Date().toISOString();
+              await admin.from("tasks").update({ deleted_at: now, updated_at: now }).eq("id", task.id);
+            } else {
+              throw e;
+            }
+          }
+        }
+      }
+    }
   }
   return changed;
 }
@@ -340,7 +1003,7 @@ async function externalStatusValue(token: string, databaseId: string, propertyNa
 }
 
 async function queryDatabase(token: string, databaseId: string) {
-  const results = [];
+  const results: any[] = [];
   let start_cursor: string | undefined;
   do {
     const body: Record<string, unknown> = { page_size: 100 };
@@ -355,6 +1018,53 @@ async function queryDatabase(token: string, databaseId: string) {
   return results;
 }
 
+async function safeQueryDatabase(
+  admin: any,
+  token: string,
+  connection: any,
+  column: "projects_database_id" | "tasks_database_id" | "external_tasks_database_id",
+  debugLog: string[] = [],
+) {
+  const databaseId = connection[column];
+  if (!databaseId) return null;
+  try {
+    return await queryDatabase(token, databaseId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isNotionInaccessibleError(message)) {
+      debugLog.push(`safeQueryDatabase: ${column} ${databaseId} is inaccessible; clearing stale ID`);
+      await clearConnectionDatabase(admin, connection, column);
+      connection[column] = null;
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function clearConnectionDatabase(
+  admin: any,
+  connection: any,
+  column: "projects_database_id" | "tasks_database_id" | "external_tasks_database_id",
+) {
+  const payload: Record<string, any> = { [column]: null };
+  if (column === "external_tasks_database_id") {
+    payload.external_tasks_database_title = null;
+    payload.external_tasks_property_map = null;
+  }
+  await admin
+    .from("notion_connections")
+    .update(payload)
+    .eq("id", connection.id)
+    .throwOnError();
+}
+
+function isNotionInaccessibleError(message: string) {
+  return message.includes("Notion 404") ||
+    message.includes("object_not_found") ||
+    message.includes("restricted_resource") ||
+    message.includes("Could not find database");
+}
+
 async function discoverSharedTaskSources(token: string, parentPageId: string, managedDatabaseIds: Set<string>) {
   const databases: Array<{ id: string; title: string }> = [];
   const pages: any[] = [];
@@ -363,59 +1073,78 @@ async function discoverSharedTaskSources(token: string, parentPageId: string, ma
 
   const addDatabase = (id: string | null | undefined, title: string | null | undefined) => {
     if (!id || managedDatabaseIds.has(id) || databaseIds.has(id)) return;
+    const cleanTitle = (title || "").trim();
+    if (cleanTitle === "CueIn Tasks" || cleanTitle === "CueIn Projects") {
+      console.log(`discoverSharedTaskSources: Ignoring CueIn managed database: ${cleanTitle} (${id})`);
+      return;
+    }
     databaseIds.add(id);
     databases.push({ id, title: title || "Notion database" });
   };
 
   const addPage = (page: any) => {
     if (!page?.id || pageIds.has(page.id) || page.id === parentPageId) return;
-    const parentDatabaseId = page.parent?.type === "database_id" ? page.parent.database_id : null;
-    if (parentDatabaseId && managedDatabaseIds.has(parentDatabaseId)) return;
     pageIds.add(page.id);
     pages.push(page);
   };
 
+  // Crawl depth 2 under parentPageId
   const queue: Array<{ id: string; depth: number }> = [{ id: parentPageId, depth: 0 }];
   const visited = new Set<string>();
 
   while (queue.length) {
     const current = queue.shift()!;
-    if (visited.has(current.id) || current.depth > 3) continue;
+    if (visited.has(current.id) || current.depth > 1) continue;
     visited.add(current.id);
 
-    const children = await listBlockChildren(token, current.id);
-    for (const block of children) {
-      if (block.type === "child_database" && block.id && !managedDatabaseIds.has(block.id)) {
-        addDatabase(block.id, block.child_database?.title);
-      } else if (block.type === "child_page" && block.id) {
-        if (current.depth > 0) {
+    try {
+      const children = await listBlockChildren(token, current.id);
+      for (const block of children) {
+        if (block.archived) continue;
+        if (block.type === "child_database" && block.id && !managedDatabaseIds.has(block.id)) {
+          addDatabase(block.id, block.child_database?.title);
+        } else if (block.type === "child_page" && block.id) {
           addPage({
             id: block.id,
             object: "page",
             last_edited_time: block.last_edited_time,
+            parent: { type: "page_id", page_id: current.id },
             properties: {
               title: { title: [{ type: "text", text: { content: block.child_page?.title || "" }, plain_text: block.child_page?.title || "" }] },
             },
           });
+          if (current.depth < 1) {
+            queue.push({ id: block.id, depth: current.depth + 1 });
+          }
         }
-        queue.push({ id: block.id, depth: current.depth + 1 });
       }
+    } catch (e) {
+      console.error(`Failed to list block children for ${current.id}:`, e);
     }
   }
 
-  for (const database of await searchNotionObjects(token, "database")) {
-    addDatabase(database.id, notionTitleText(database.title));
+  try {
+    for (const database of await searchNotionObjects(token, "database")) {
+      addDatabase(database.id, notionTitleText(database.title));
+    }
+  } catch (error) {
+    console.error("Failed to search Notion databases:", error);
   }
 
-  for (const page of await searchNotionObjects(token, "page")) {
-    addPage(page);
+  try {
+    for (const page of await searchNotionObjects(token, "page")) {
+      const parentDatabaseId = page.parent?.type === "database_id" ? page.parent.database_id : null;
+      if (!parentDatabaseId) addPage(page);
+    }
+  } catch (error) {
+    console.error("Failed to search Notion pages:", error);
   }
 
   return { databases, pages };
 }
 
 async function searchNotionObjects(token: string, objectType: "database" | "page") {
-  const results = [];
+  const results: any[] = [];
   let start_cursor: string | undefined;
   do {
     const body: Record<string, unknown> = {
@@ -428,13 +1157,13 @@ async function searchNotionObjects(token: string, objectType: "database" | "page
       body: JSON.stringify(body),
     });
     results.push(...(response.results ?? []));
-    start_cursor = response.has_more ? response.next_cursor : undefined;
+    start_cursor = response.has_more && results.length < 300 ? response.next_cursor : undefined;
   } while (start_cursor);
   return results;
 }
 
 async function listBlockChildren(token: string, blockId: string) {
-  const results = [];
+  const results: any[] = [];
   let start_cursor: string | undefined;
   do {
     const query = new URLSearchParams({ page_size: "100" });
@@ -444,6 +1173,287 @@ async function listBlockChildren(token: string, blockId: string) {
     start_cursor = response.has_more ? response.next_cursor : undefined;
   } while (start_cursor);
   return results;
+}
+
+async function ensureExternalTaskTarget(
+  admin: any,
+  token: string,
+  userId: string,
+  connection: any,
+  debugLog: string[] = [],
+) {
+  if (connection.external_tasks_database_id && connection.external_tasks_property_map) {
+    const database = await notionRequest<any>(token, `/databases/${connection.external_tasks_database_id}`, { method: "GET" }).catch(() => null);
+    if (database?.properties) {
+      const propertyMap = buildTaskPropertyMap(database.properties);
+      await ensureCueInIDProperty(token, connection.external_tasks_database_id, database.properties, propertyMap).catch((error) => {
+        debugLog.push(`ensureExternalTaskTarget: Could not add CueIn ID to ${connection.external_tasks_database_title ?? connection.external_tasks_database_id}: ${error instanceof Error ? error.message : String(error)}`);
+      });
+      const updated = await notionRequest<any>(token, `/databases/${connection.external_tasks_database_id}`, { method: "GET" }).catch(() => database);
+      const refreshedMap = buildTaskPropertyMap(updated.properties ?? database.properties);
+      await admin
+        .from("notion_connections")
+        .update({ external_tasks_property_map: refreshedMap })
+        .eq("id", connection.id)
+        .eq("user_id", userId)
+        .throwOnError();
+      connection.external_tasks_property_map = refreshedMap;
+      return;
+    }
+    debugLog.push(`ensureExternalTaskTarget: External task database is inaccessible; clearing ${connection.external_tasks_database_id}`);
+    await clearConnectionDatabase(admin, connection, "external_tasks_database_id");
+    connection.external_tasks_database_id = null;
+    connection.external_tasks_database_title = null;
+    connection.external_tasks_property_map = null;
+  }
+  if (!connection.notion_parent_page_id) return;
+
+  const sources = await discoverSharedTaskSources(token, connection.notion_parent_page_id, new Set([
+    connection.projects_database_id,
+    connection.tasks_database_id,
+  ].filter(Boolean)));
+
+  const candidates: Array<{ id: string; title: string; propertyMap: any; score: number }> = [];
+  for (const source of sources.databases) {
+    const database = await notionRequest<any>(token, `/databases/${source.id}`, { method: "GET" }).catch(() => null);
+    if (!database?.properties) continue;
+    const propertyMap = buildTaskPropertyMap(database.properties);
+    const score = taskDatabaseScore(source.title, database.properties, propertyMap);
+    if (score < 12) continue;
+
+    await ensureCueInIDProperty(token, source.id, database.properties, propertyMap).catch((error) => {
+      debugLog.push(`ensureExternalTaskTarget: Could not add CueIn ID to ${source.title}: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    const updated = await notionRequest<any>(token, `/databases/${source.id}`, { method: "GET" }).catch(() => database);
+    candidates.push({
+      id: source.id,
+      title: source.title,
+      propertyMap: buildTaskPropertyMap(updated.properties ?? database.properties),
+      score,
+    });
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  const target = candidates[0] ?? null;
+  if (!target) return;
+
+  await admin
+    .from("notion_connections")
+    .update({
+      external_tasks_database_id: target.id,
+      external_tasks_database_title: target.title,
+      external_tasks_property_map: target.propertyMap,
+    })
+    .eq("id", connection.id)
+    .eq("user_id", userId)
+    .throwOnError();
+
+  connection.external_tasks_database_id = target.id;
+  connection.external_tasks_database_title = target.title;
+  connection.external_tasks_property_map = target.propertyMap;
+  debugLog.push(`ensureExternalTaskTarget: Using external task database ${target.title} (${target.id})`);
+}
+
+async function isDatabaseValid(token: string, databaseId: string | null | undefined) {
+  if (!databaseId) return false;
+  try {
+    const database = await notionRequest<any>(token, `/databases/${databaseId}`, { method: "GET" });
+    return Boolean(database && !database.archived);
+  } catch {
+    return false;
+  }
+}
+
+function taskWriteTarget(connection: any) {
+  if (connection.external_tasks_database_id && connection.external_tasks_property_map) {
+    return {
+      databaseId: connection.external_tasks_database_id,
+      propertyMap: connection.external_tasks_property_map,
+      isManaged: false,
+    };
+  }
+  return connection.tasks_database_id
+    ? { databaseId: connection.tasks_database_id, propertyMap: null, isManaged: true }
+    : null;
+}
+
+async function taskWriteTargetForLinkedPage(token: string, connection: any, notionPageId: string) {
+  const page = await notionRequest<any>(token, `/pages/${notionPageId}`, { method: "GET" });
+  const parentDatabaseId = page.parent?.type === "database_id" ? page.parent.database_id : null;
+  if (
+    parentDatabaseId &&
+    parentDatabaseId === connection.external_tasks_database_id &&
+    connection.external_tasks_property_map
+  ) {
+    return {
+      databaseId: connection.external_tasks_database_id,
+      propertyMap: connection.external_tasks_property_map,
+      isManaged: false,
+    };
+  }
+  return { databaseId: connection.tasks_database_id, propertyMap: null, isManaged: true };
+}
+
+async function taskPropertiesForTarget(token: string, task: any, projectPageId: string | null, target: any) {
+  if (!target || target.isManaged || !target.propertyMap) {
+    return taskProperties(task, projectPageId);
+  }
+
+  const database = await notionRequest<any>(token, `/databases/${target.databaseId}`, { method: "GET" });
+  const map = buildTaskPropertyMap(database.properties ?? {});
+  const properties: Record<string, any> = {};
+
+  setMappedProperty(properties, map.title, titleProperty(task.title));
+  setMappedProperty(properties, map.notes, richTextProperty(task.notes));
+  setMappedProperty(properties, map.status, await mappedStatusProperty(token, target.databaseId, map, task.status));
+  setMappedProperty(properties, map.priority, await mappedPriorityProperty(token, target.databaseId, map, task.priority));
+  setMappedProperty(properties, map.tags, multiSelectProperty(task.tags));
+  setMappedProperty(properties, map.scheduledDate, dateProperty(task.scheduled_date));
+  setMappedProperty(properties, map.dueDate, dateProperty(task.due_date));
+  setMappedProperty(properties, map.completedDate, dateProperty(task.completed_at));
+  setMappedProperty(properties, map.cueInID, richTextProperty(task.id));
+  return properties;
+}
+
+function setMappedProperty(properties: Record<string, any>, name: string | null | undefined, value: any) {
+  if (name && value !== null && value !== undefined) properties[name] = value;
+}
+
+async function mappedStatusProperty(token: string, databaseId: string, map: any, cueInStatus: string) {
+  if (!map.status) return null;
+  const status = await externalStatusValue(token, databaseId, map.status, cueInStatus);
+  if (!status) return null;
+  return map.statusType === "status" ? { status: { name: status } } : selectProperty(status);
+}
+
+async function mappedPriorityProperty(token: string, databaseId: string, map: any, cueInPriority: string) {
+  if (!map.priority) return null;
+  const database = await notionRequest<any>(token, `/databases/${databaseId}`, { method: "GET" });
+  const property = database.properties?.[map.priority];
+  const options = property?.status?.options ?? property?.select?.options ?? [];
+  const optionNames = options.map((option: any) => option?.name).filter(Boolean);
+  const priority = bestPriorityOption(cueInPriority, optionNames);
+  if (!priority) return null;
+  return map.priorityType === "status" ? { status: { name: priority } } : selectProperty(priority);
+}
+
+function buildTaskPropertyMap(properties: Record<string, any>) {
+  const title = firstPropertyNameByType(properties, "title");
+  const notes = firstNamedPropertyName(properties, ["Notes", "Description", "Details", "Summary"], ["rich_text"]);
+  const status = firstPropertyName(properties, ["Status", "State", "Stage"], ["status", "select"]);
+  const dueDate = firstNamedPropertyName(properties, ["Due Date", "Due", "Deadline", "Date"], ["date"]);
+  const scheduledDate = firstNamedPropertyName(properties, ["Scheduled Date", "Scheduled", "Start", "Do Date", "When"], ["date"]);
+  const completedDate = firstNamedPropertyName(properties, ["Completed Date", "Done Date", "Completed", "Completed on"], ["date"]);
+  const priority = firstPropertyName(properties, ["Priority", "Urgency"], ["select", "status"]);
+  const tags = firstNamedPropertyName(properties, ["Tags", "Labels", "Tag"], ["multi_select"]);
+  const cueInID = firstNamedPropertyName(properties, ["CueIn ID", "CueInID", "CueIn"], ["rich_text"]);
+  return {
+    title,
+    notes,
+    status,
+    statusType: status ? properties[status]?.type : null,
+    dueDate,
+    scheduledDate,
+    completedDate,
+    priority,
+    priorityType: priority ? properties[priority]?.type : null,
+    tags,
+    cueInID,
+  };
+}
+
+function taskDatabaseScore(title: string, properties: Record<string, any>, map: any) {
+  let score = 0;
+  const normalizedTitle = title.toLowerCase();
+  if (/\btasks?\b|\btodo\b|\bto dos?\b/.test(normalizedTitle)) score += 14;
+  if (map.title) score += 4;
+  if (map.status) score += 4;
+  if (map.dueDate || map.scheduledDate) score += 2;
+  if (map.notes) score += 2;
+  if (map.priority) score += 1;
+  if (Object.keys(properties ?? {}).length >= 3) score += 1;
+  return score;
+}
+
+async function ensureCueInIDProperty(token: string, databaseId: string, properties: Record<string, any>, map: any) {
+  if (map.cueInID) return;
+  await notionRequest<any>(token, `/databases/${databaseId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties: { "CueIn ID": { rich_text: {} } } }),
+  });
+}
+
+function firstPropertyNameByType(properties: Record<string, any>, type: string) {
+  return Object.entries(properties ?? {}).find(([, property]) => property?.type === type)?.[0] ?? null;
+}
+
+function firstPropertyName(properties: Record<string, any>, names: string[], types: string[]) {
+  for (const name of names) {
+    const match = Object.keys(properties ?? {}).find((key) => key.toLowerCase() === name.toLowerCase());
+    if (match && types.includes(properties[match]?.type)) return match;
+  }
+  return Object.entries(properties ?? {}).find(([, property]) => types.includes(property?.type))?.[0] ?? null;
+}
+
+function firstNamedPropertyName(properties: Record<string, any>, names: string[], types: string[]) {
+  for (const name of names) {
+    const match = Object.keys(properties ?? {}).find((key) => key.toLowerCase() === name.toLowerCase());
+    if (match && types.includes(properties[match]?.type)) return match;
+  }
+  return null;
+}
+
+async function softDeleteMissingTwoWayTasksForDatabase(
+  admin: any,
+  token: string,
+  userId: string,
+  connection: any,
+  databaseId: string,
+  activePageIds: Set<string>,
+  debugLog: string[] = [],
+) {
+  const { data: links, error } = await admin
+    .from("notion_object_links")
+    .select("id, cuein_object_id, notion_page_id")
+    .eq("connection_id", connection.id)
+    .eq("object_kind", "task")
+    .eq("sync_direction", "two_way");
+  if (error) throw new Error(error.message);
+
+  const missing: any[] = [];
+  for (const link of links ?? []) {
+    if (activePageIds.has(link.notion_page_id)) continue;
+    try {
+      const page = await notionRequest<any>(token, `/pages/${link.notion_page_id}`, { method: "GET" });
+      const parentDatabaseId = page.parent?.type === "database_id" ? page.parent.database_id : null;
+      if (page.archived || page.in_trash || parentDatabaseId === databaseId) {
+        missing.push(link);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message.includes("404") || message.includes("object_not_found") || message.includes("restricted_resource")) {
+        missing.push(link);
+      }
+    }
+  }
+
+  if (missing.length === 0) return 0;
+
+  const now = new Date().toISOString();
+  debugLog.push(`pullSharedPageTasks: Soft-deleting ${missing.length} two-way tasks removed from external database ${databaseId}`);
+  await admin
+    .from("tasks")
+    .update({ deleted_at: now, updated_at: now })
+    .eq("user_id", userId)
+    .in("id", missing.map((link: any) => link.cuein_object_id))
+    .throwOnError();
+  await admin
+    .from("notion_object_links")
+    .delete()
+    .in("id", missing.map((link: any) => link.id))
+    .throwOnError();
+
+  return missing.length;
 }
 
 function projectProperties(project: any) {
@@ -474,7 +1484,7 @@ function taskProperties(task: any, projectPageId: string | null) {
 }
 
 async function ensureNotionField(admin: any, userId: string) {
-  const deterministicId = await deterministicUUID(`${userId}:field:notion`);
+  const deterministicId = await notionFieldIdForUser(userId);
   const existing = await one(admin.from("fields").select("id").eq("user_id", userId).eq("id", deterministicId));
   if (existing) return existing.id;
   await admin.from("fields").upsert({
@@ -486,6 +1496,38 @@ async function ensureNotionField(admin: any, userId: string) {
     color_hex: 9342609,
   }, { onConflict: "id" }).throwOnError();
   return deterministicId;
+}
+
+async function notionFieldIdForUser(userId: string) {
+  return await deterministicUUID(`${userId}:field:notion`);
+}
+
+async function taskNotionEligibility(admin: any, userId: string, task: any, notionFieldId: string) {
+  if (task.external_source === "notion") {
+    return { shouldPush: false, reason: "notion-import" };
+  }
+  if (task.field_id === notionFieldId) {
+    return { shouldPush: true, reason: "notion-field" };
+  }
+  if (!task.project_id) {
+    return { shouldPush: false, reason: "inbox" };
+  }
+
+  const project = await one(admin
+    .from("projects")
+    .select("id, field_id, external_source, deleted_at")
+    .eq("user_id", userId)
+    .eq("id", task.project_id));
+  if (!project || project.deleted_at) {
+    return { shouldPush: false, reason: "missing-project" };
+  }
+  if (project.external_source === "notion") {
+    return { shouldPush: true, reason: "notion-project" };
+  }
+  if (project.field_id === notionFieldId) {
+    return { shouldPush: true, reason: "project-in-notion-field" };
+  }
+  return { shouldPush: false, reason: "non-notion-project" };
 }
 
 async function ensureExternalNotionProject(admin: any, userId: string, sourceId: string, sourceTitle: string) {
@@ -550,6 +1592,47 @@ async function upsertLink(
   cueInUpdatedAt: string,
   syncDirection = "two_way",
 ) {
+  // Mark the row as Notion-owned IF needed, capturing the bumped updated_at so
+  // link.cuein_updated_at matches exactly. The previous implementation set
+  // tasks.updated_at = now() *after* upserting the link with cuein_updated_at =
+  // cueInUpdatedAt (the pre-bump value), causing a re-push loop on every sync.
+  let resolvedCueInUpdatedAt = cueInUpdatedAt;
+  if (kind === "task") {
+    const { data: row } = await admin
+      .from("tasks")
+      .select("external_source, updated_at")
+      .eq("id", cueInObjectId)
+      .maybeSingle();
+    if (row && row.external_source !== "notion") {
+      const { data: bumped } = await admin
+        .from("tasks")
+        .update({ external_source: "notion" })
+        .eq("id", cueInObjectId)
+        .select("updated_at")
+        .single();
+      if (bumped?.updated_at) resolvedCueInUpdatedAt = bumped.updated_at;
+    } else if (row?.updated_at) {
+      resolvedCueInUpdatedAt = row.updated_at;
+    }
+  } else if (kind === "project") {
+    const { data: row } = await admin
+      .from("projects")
+      .select("external_source, updated_at")
+      .eq("id", cueInObjectId)
+      .maybeSingle();
+    if (row && row.external_source !== "notion") {
+      const { data: bumped } = await admin
+        .from("projects")
+        .update({ external_source: "notion" })
+        .eq("id", cueInObjectId)
+        .select("updated_at")
+        .single();
+      if (bumped?.updated_at) resolvedCueInUpdatedAt = bumped.updated_at;
+    } else if (row?.updated_at) {
+      resolvedCueInUpdatedAt = row.updated_at;
+    }
+  }
+
   await admin.from("notion_object_links").upsert({
     user_id: userId,
     connection_id: connectionId,
@@ -557,7 +1640,7 @@ async function upsertLink(
     cuein_object_id: cueInObjectId,
     notion_page_id: notionPageId,
     notion_last_edited_time: notionLastEditedTime,
-    cuein_updated_at: cueInUpdatedAt,
+    cuein_updated_at: resolvedCueInUpdatedAt,
     sync_direction: syncDirection,
     last_synced_at: new Date().toISOString(),
   }, { onConflict: "user_id,object_kind,cuein_object_id" }).throwOnError();
@@ -698,5 +1781,26 @@ function taskPriorityFromNotion(value: string | null) {
     case "High": return "high";
     case "Urgent": return "urgent";
     default: return "normal";
+  }
+}
+
+function bestPriorityOption(cueInPriority: string, optionNames: string[]) {
+  const normalized = new Map(optionNames.map((name) => [normalizeStatusName(name), name]));
+  const candidates = priorityCandidates(cueInPriority);
+  for (const candidate of candidates) {
+    const match = normalized.get(normalizeStatusName(candidate));
+    if (match) return match;
+  }
+  return null;
+}
+
+function priorityCandidates(cueInPriority: string) {
+  switch (cueInPriority) {
+    case "urgent":
+      return ["Urgent", "Critical", "P0", "Highest", "High"];
+    case "high":
+      return ["High", "Important", "P1", "Medium"];
+    default:
+      return ["Normal", "Medium", "Low", "None"];
   }
 }
