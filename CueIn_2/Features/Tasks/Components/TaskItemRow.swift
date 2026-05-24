@@ -112,11 +112,13 @@ struct TaskItemRow: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if task.isNotionImported {
+            let isNotion = store.isNotionTask(task)
+            let isLinear = store.isLinearTask(task)
+            if isNotion || isLinear {
                 HStack(spacing: 3) {
-                    Text("N")
+                    Text(isNotion ? "N" : "L")
                         .font(.system(size: 8, weight: .black))
-                    Image(systemName: "lock.fill")
+                    Image(systemName: task.externalSource == nil ? "arrow.triangle.2.circlepath" : "lock.fill")
                         .font(.system(size: 7, weight: .bold))
                 }
                 .foregroundStyle(CueInColors.textPrimary)
@@ -127,7 +129,7 @@ struct TaskItemRow: View {
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
                         .stroke(CueInColors.divider.opacity(0.5), lineWidth: 0.7)
                 )
-                .accessibilityLabel("Imported from Notion")
+                .accessibilityLabel(isNotion ? "Notion Task" : "Linear Task")
             }
 
             if task.isOverdue {

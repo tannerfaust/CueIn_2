@@ -6,6 +6,9 @@ returns trigger
 language plpgsql
 as $$
 begin
+    if current_user in ('service_role', 'postgres', 'supabase_admin') then
+        return new;
+    end if;
     if old.deleted_at is not null and new.deleted_at is null then
         new.deleted_at = old.deleted_at;
     end if;

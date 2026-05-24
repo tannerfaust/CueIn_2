@@ -105,6 +105,14 @@ struct TaskItem: Identifiable, Codable, Hashable {
         externalSource?.localizedCaseInsensitiveCompare("notion") == .orderedSame
     }
 
+    var isLinearImported: Bool {
+        externalSource?.localizedCaseInsensitiveCompare("linear") == .orderedSame
+    }
+
+    var isExternal: Bool {
+        externalSource != nil
+    }
+
     /// Minutes to reflect this task on a plan — estimate or a conservative fallback.
     var plannedMinutes: Int {
         if let m = estimatedMinutes { return m }

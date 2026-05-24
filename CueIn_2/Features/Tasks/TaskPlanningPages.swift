@@ -406,7 +406,23 @@ struct TaskProjectsPage: View {
     let onCreateProject: (UUID?) -> Void
     let onEditProject: (UUID) -> Void
     let onDeleteProject: (UUID) -> Void
-    @State private var sourceFilter: ProjectSourceFilter = .all
+    var initialSourceFilter: ProjectSourceFilter = .all
+    @State private var sourceFilter: ProjectSourceFilter
+
+    init(
+        store: TasksStore,
+        onCreateProject: @escaping (UUID?) -> Void,
+        onEditProject: @escaping (UUID) -> Void,
+        onDeleteProject: @escaping (UUID) -> Void,
+        initialSourceFilter: ProjectSourceFilter = .all
+    ) {
+        self.store = store
+        self.onCreateProject = onCreateProject
+        self.onEditProject = onEditProject
+        self.onDeleteProject = onDeleteProject
+        self.initialSourceFilter = initialSourceFilter
+        _sourceFilter = State(initialValue: initialSourceFilter)
+    }
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -422,7 +438,7 @@ struct TaskProjectsPage: View {
                     Spacer(minLength: 0)
                 }
 
-                if hasNotionProjects {
+                if hasExternalProjects, initialSourceFilter == .all {
                     Picker("Project source", selection: $sourceFilter) {
                         ForEach(ProjectSourceFilter.allCases) { filter in
                             Text(filter.title).tag(filter)
@@ -464,22 +480,24 @@ struct TaskProjectsPage: View {
             .padding(.bottom, CueInLayout.scrollBottomInset)
         }
         .background(CueInColors.background.ignoresSafeArea())
-        .navigationTitle("Projects")
+        .navigationTitle(navigationTitle)
         .cueInNavigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
-                Menu {
-                    Button {
-                        onCreateProject(nil)
+            if initialSourceFilter != .notion && initialSourceFilter != .linear {
+                ToolbarItem(placement: CueInToolbarPlacement.topBarTrailing) {
+                    Menu {
+                        Button {
+                            onCreateProject(nil)
+                        } label: {
+                            Label("New project", systemImage: "folder.badge.plus")
+                        }
                     } label: {
-                        Label("New project", systemImage: "folder.badge.plus")
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundStyle(CueInColors.textPrimary)
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(CueInColors.textPrimary)
+                    .accessibilityLabel("Projects menu")
                 }
-                .accessibilityLabel("Projects menu")
             }
         }
     }
@@ -489,34 +507,29 @@ struct TaskProjectsPage: View {
         case .all:
             return store.projects
         case .cueIn:
-            return store.projects.filter { !$0.isNotionImported }
+            return store.projects.filter { !$0.isExternal }
         case .notion:
             return store.projects.filter(\.isNotionImported)
+        case .linear:
+            return store.projects.filter(\.isLinearImported)
         }
     }
 
-    private var hasNotionProjects: Bool {
-        store.projects.contains(where: \.isNotionImported)
+    private var hasExternalProjects: Bool {
+        store.projects.contains(where: \.isExternal)
     }
-}
 
-private enum ProjectSourceFilter: String, CaseIterable, Identifiable {
-    case all
-    case cueIn
-    case notion
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .all: return "All"
-        case .cueIn: return "CueIn"
-        case .notion: return "Notion"
+    private var navigationTitle: String {
+        switch initialSourceFilter {
+        case .notion: return "Notion projects"
+        case .linear: return "Linear projects"
+        case .cueIn: return "CueIn projects"
+        case .all: return "Projects"
         }
     }
 }
 
-private struct ProjectDashboardCard: View {
+struct ProjectDashboardCard: View {
     let project: Project
     let store: TasksStore
 

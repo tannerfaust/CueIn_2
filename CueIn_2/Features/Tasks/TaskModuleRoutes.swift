@@ -5,9 +5,28 @@ enum TasksRoute: Hashable {
     case collection(TaskCollectionKind)
     case priority
     case initiatives
-    case projects
+    case projects(ProjectSourceFilter?)
     case field(UUID)
     case project(UUID)
+}
+
+/// Filters the project library (Plan vs Notion/Linear sidebar entry).
+enum ProjectSourceFilter: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case all
+    case cueIn
+    case notion
+    case linear
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "All"
+        case .cueIn: return "CueIn"
+        case .notion: return "Notion"
+        case .linear: return "Linear"
+        }
+    }
 }
 
 enum TasksWorklistKind: Hashable, Identifiable {
@@ -19,6 +38,9 @@ enum TasksWorklistKind: Hashable, Identifiable {
     case habits
     case rituals
     case notionTasks
+    case notionProjects
+    case linearTasks
+    case linearProjects
     case field(UUID)
     case project(UUID)
 
@@ -32,6 +54,9 @@ enum TasksWorklistKind: Hashable, Identifiable {
         case .habits: return "habits"
         case .rituals: return "rituals"
         case .notionTasks: return "notion:tasks"
+        case .notionProjects: return "notion:projects"
+        case .linearTasks: return "linear:tasks"
+        case .linearProjects: return "linear:projects"
         case .field(let id): return "field:\(id.uuidString)"
         case .project(let id): return "project:\(id.uuidString)"
         }

@@ -1,4 +1,4 @@
-import { adminClient, corsHeaders, json, requireUser } from "../_shared/notion.ts";
+import { adminClient, corsHeaders, json, requireUser } from "../_shared/linear.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -7,16 +7,14 @@ Deno.serve(async (req) => {
   try {
     const admin = adminClient();
     const user = await requireUser(req, admin);
-    const { data, error } = await admin
-      .from("notion_connections")
-      .select("id, workspace_id, workspace_name, projects_database_id, tasks_database_id, external_tasks_database_id, external_tasks_database_title, external_tasks_property_map, status, last_synced_at")
+    const now = new Date().toISOString();
+    const { error } = await admin
+      .from("linear_connections")
+      .update({ status: "disconnected", disconnected_at: now })
       .eq("user_id", user.id)
-      .eq("status", "active")
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .eq("status", "active");
     if (error) return json({ error: error.message }, 500);
-    return json({ connection: data }, 200);
+    return json({ ok: true }, 200);
   } catch (error) {
     if (error instanceof Response) return error;
     return json({ error: error instanceof Error ? error.message : "Unknown error" }, 500);

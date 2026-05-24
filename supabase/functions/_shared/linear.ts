@@ -1,9 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// CueIn's iOS client is the only legitimate caller. We still allow OPTIONS to
-// keep Supabase's preflight machinery happy. `INTEGRATION_ALLOWED_ORIGINS` is
-// a comma-separated env override for staging/dev (e.g. localhost previews);
-// when unset we lock down to the production marketing/dashboard origins.
+// See _shared/notion.ts for the rationale; same allow-list is reused here so
+// the two providers can't drift out of sync security-wise.
 const allowedOriginsList = (Deno.env.get("INTEGRATION_ALLOWED_ORIGINS") ?? "https://cuein.app,https://www.cuein.app,https://app.cuein.app")
   .split(",")
   .map((value) => value.trim())
@@ -20,17 +18,12 @@ export function corsHeadersFor(req: Request): Record<string, string> {
   };
 }
 
-// Back-compat: legacy callers still import `corsHeaders` directly. Native
-// iOS callers don't send an `Origin`, so the strictest allowed origin is
-// returned instead of `*`. Browser callers must use `corsHeadersFor(req)`.
 export const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": allowedOriginsList[0] ?? "",
   "Vary": "Origin",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-
-export const notionVersion = "2022-06-28";
 
 export function json(body: unknown, status: number) {
   return new Response(JSON.stringify(body), {
@@ -39,10 +32,6 @@ export function json(body: unknown, status: number) {
   });
 }
 
-/// Best-effort per-user, per-provider lock backed by `integration_sync_locks`.
-/// `try_acquire_integration_sync_lock` steals locks older than its TTL so a
-/// crashed function call cannot wedge subsequent runs. The caller MUST call
-/// the returned `release()` from a `finally` block.
 export async function acquireIntegrationLock(
   admin: ReturnType<typeof adminClient>,
   userId: string,
@@ -53,8 +42,6 @@ export async function acquireIntegrationLock(
     p_provider: provider,
   });
   if (error) {
-    // Don't fail the sync if the lock infrastructure isn't reachable —
-    // degrade to no-lock, which is the pre-012 behaviour.
     console.warn(`acquireIntegrationLock(${provider}) RPC failed: ${error.message}`);
     return { acquired: true, release: async () => {} };
   }
@@ -97,57 +84,45 @@ export async function requireUser(req: Request, admin: ReturnType<typeof adminCl
   return data.user;
 }
 
-export async function notionRequest<T>(
+export async function linearRequest<T>(
   token: string,
-  path: string,
-  init: RequestInit = {},
+  query: string,
+  variables?: Record<string, unknown>,
 ): Promise<T> {
-  const maxAttempts = 3;
-  let lastError: unknown = null;
-
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15_000);
-    try {
-      const response = await fetch(`https://api.notion.com/v1${path}`, {
-        ...init,
-        signal: controller.signal,
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "Notion-Version": notionVersion,
-          ...(init.headers ?? {}),
-        },
-      });
-      const body = await response.text();
-      if (!response.ok) {
-        const retryAfter = Number(response.headers.get("Retry-After") ?? "0");
-        if ((response.status === 429 || response.status >= 500) && attempt < maxAttempts - 1) {
-          await sleep(Math.max(retryAfter * 1000, 750 * (attempt + 1)));
-          continue;
-        }
-        throw new Error(`Notion ${response.status}: ${body}`);
-      }
-      return body ? JSON.parse(body) as T : {} as T;
-    } catch (error) {
-      lastError = error;
-      if (attempt >= maxAttempts - 1 || !(error instanceof DOMException && error.name === "AbortError")) {
-        break;
-      }
-      await sleep(750 * (attempt + 1));
-    } finally {
-      clearTimeout(timeout);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch("https://api.linear.app/graphql", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query, variables }),
+    });
+    const bodyText = await response.text();
+    if (!response.ok) {
+      throw new Error(`Linear API returned status ${response.status}: ${bodyText}`);
     }
+    let body;
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      throw new Error(`Linear API returned invalid JSON: ${bodyText}`);
+    }
+    if (body.errors && body.errors.length > 0) {
+      throw new Error(`Linear GraphQL error: ${body.errors[0].message}`);
+    }
+    return body.data as T;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Linear request timed out");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  if (lastError instanceof DOMException && lastError.name === "AbortError") {
-    throw new Error(`Notion request timed out: ${path}`);
-  }
-  throw lastError instanceof Error ? lastError : new Error(`Notion request failed: ${path}`);
-}
-
-function sleep(milliseconds: number) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export async function encryptToken(token: string) {
@@ -172,9 +147,9 @@ export async function decryptToken(encryptedAccessToken: string, tokenNonce: str
 }
 
 async function tokenKey() {
-  const secret = Deno.env.get("NOTION_TOKEN_ENCRYPTION_KEY");
+  const secret = Deno.env.get("LINEAR_TOKEN_ENCRYPTION_KEY") || Deno.env.get("NOTION_TOKEN_ENCRYPTION_KEY");
   if (!secret || secret.trim().length < 16) {
-    throw new Error("NOTION_TOKEN_ENCRYPTION_KEY must be configured");
+    throw new Error("LINEAR_TOKEN_ENCRYPTION_KEY must be configured (fallback to NOTION_TOKEN_ENCRYPTION_KEY failed)");
   }
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
   return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
@@ -190,47 +165,4 @@ export function decodeBase64(value: string) {
 
 export function isoDate(value?: string | null) {
   return value ? new Date(value).toISOString() : null;
-}
-
-export function titleProperty(title: string) {
-  return { title: [{ type: "text", text: { content: title } }] };
-}
-
-export function richTextProperty(value?: string | null) {
-  const content = (value ?? "").slice(0, 1900);
-  return { rich_text: content ? [{ type: "text", text: { content } }] : [] };
-}
-
-export function selectProperty(value?: string | null) {
-  return value ? { select: { name: value } } : { select: null };
-}
-
-export function dateProperty(value?: string | null) {
-  return value ? { date: { start: value } } : { date: null };
-}
-
-export function multiSelectProperty(values?: string[] | null) {
-  return { multi_select: (values ?? []).map((name) => ({ name: String(name).slice(0, 100) })) };
-}
-
-export function firstTitle(property: any) {
-  return property?.title?.map((part: any) => part?.plain_text ?? "").join("") ?? "";
-}
-
-export function firstRichText(property: any) {
-  return property?.rich_text?.map((part: any) => part?.plain_text ?? "").join("") ?? "";
-}
-
-export function selectName(property: any) {
-  return property?.select?.name ?? null;
-}
-
-export function dateStart(property: any) {
-  return property?.date?.start ?? null;
-}
-
-export function multiSelectNames(property: any) {
-  return Array.isArray(property?.multi_select)
-    ? property.multi_select.map((item: any) => item?.name).filter(Boolean)
-    : [];
 }

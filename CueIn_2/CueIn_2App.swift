@@ -35,11 +35,16 @@ struct CueIn_2App: App {
                     if SupabaseAuthStore.shared.isSignedIn {
                         CueInSyncEngine.shared.loadCachedWorkspaceForCurrentUser()
                         await CueInSyncEngine.shared.syncNow()
+                        await NotionIntegrationStore.shared.syncIfDue()
+                        await LinearIntegrationStore.shared.syncIfDue()
                     }
                 }
                 .onOpenURL { url in
                     Task {
                         if await NotionIntegrationStore.shared.handleIncomingURL(url) {
+                            return
+                        }
+                        if await LinearIntegrationStore.shared.handleIncomingURL(url) {
                             return
                         }
                         await SupabaseAuthStore.shared.handleIncomingURL(url)
@@ -49,6 +54,8 @@ struct CueIn_2App: App {
                     guard newPhase == .active, SupabaseAuthStore.shared.isSignedIn else { return }
                     Task {
                         await CueInSyncEngine.shared.syncNow()
+                        await NotionIntegrationStore.shared.syncIfDue()
+                        await LinearIntegrationStore.shared.syncIfDue()
                     }
                 }
         }

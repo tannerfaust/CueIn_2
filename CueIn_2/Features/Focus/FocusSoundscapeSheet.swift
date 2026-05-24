@@ -5,6 +5,8 @@ import SwiftUI
 /// Sliding sheet with the same Sounds experience as the dedicated Focus tab.
 struct FocusSoundscapeSheet: View {
     var accent: Color = CueInColors.accentRoutine
+    /// When true, starting playback from the sheet dismisses back to focus mode.
+    var dismissWhenPlaybackStarts: Bool = true
     let onDismiss: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -12,7 +14,11 @@ struct FocusSoundscapeSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: false) {
-                FocusSoundscapePanel(accent: accent)
+                FocusSoundscapePanel(
+                    accent: accent,
+                    playAndDismissOnSelection: dismissWhenPlaybackStarts,
+                    onRequestDismiss: dismissSheet
+                )
                     .padding(.vertical, CueInSpacing.lg)
                     .padding(.bottom, CueInSpacing.md)
             }

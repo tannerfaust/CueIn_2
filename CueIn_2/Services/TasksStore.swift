@@ -37,8 +37,44 @@ final class TasksStore {
     /// changed since the last successful sync). Resolved by either pushing
     /// "keep mine" with a force-overwrite flag or pulling the remote version.
     /// Cleared automatically once the server stops returning the conflict for
-    /// a given task id on a subsequent push.
-    var taskConflicts: [UUID: TaskConflict] = [:]
+    /// a given task id on a subsequent push. Persisted to UserDefaults so the
+    /// banner survives app relaunches — otherwise a user who closes the app
+    /// before resolving silently loses the warning.
+    var taskConflicts: [UUID: TaskConflict] = TasksStore.loadPersistedConflicts() {
+        didSet { TasksStore.persistConflicts(taskConflicts) }
+    }
+
+    private static let conflictsDefaultsKey = "cuein.tasksstore.taskConflicts.v1"
+
+    private static func loadPersistedConflicts() -> [UUID: TaskConflict] {
+        guard let data = UserDefaults.standard.data(forKey: conflictsDefaultsKey) else { return [:] }
+        do {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let array = try decoder.decode([TaskConflict].self, from: data)
+            return Dictionary(uniqueKeysWithValues: array.map { ($0.cueInID, $0) })
+        } catch {
+            AppLogger.shared.error(error, message: "Failed to decode persisted task conflicts; resetting")
+            UserDefaults.standard.removeObject(forKey: conflictsDefaultsKey)
+            return [:]
+        }
+    }
+
+    private static func persistConflicts(_ conflicts: [UUID: TaskConflict]) {
+        if conflicts.isEmpty {
+            UserDefaults.standard.removeObject(forKey: conflictsDefaultsKey)
+            return
+        }
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let array = Array(conflicts.values)
+            let data = try encoder.encode(array)
+            UserDefaults.standard.set(data, forKey: conflictsDefaultsKey)
+        } catch {
+            AppLogger.shared.error(error, message: "Failed to persist task conflicts; banner will not survive relaunch")
+        }
+    }
 
     /// `true` when at least one task currently has an unresolved sync conflict.
     /// Drives the banner in `TasksView`.

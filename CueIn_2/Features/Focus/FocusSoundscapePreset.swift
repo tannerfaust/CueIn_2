@@ -62,4 +62,7 @@ enum FocusSoundscapePreset: String, CaseIterable, Identifiable, Codable, Sendabl
     static var pickerOrder: [FocusSoundscapePreset] {
         allCases
     }
+
+    /// Brand mark for the Sounds feature (toolbar, focus card, Hub).
+    static let moduleSystemImage = "waveform.circle.fill"
 }

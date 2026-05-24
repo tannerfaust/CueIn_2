@@ -209,7 +209,18 @@ final class NotionIntegrationStore {
                 )
             }
             TasksStore.shared.applyServerConflicts(mapped, source: .notion)
-            await CueInSyncEngine.shared.syncNow()
+            // The edge function already wrote the touched rows to Supabase as
+            // part of push. We only need a follow-up cloud pull when the run
+            // actually changed remote rows the client hasn't seen yet — i.e.
+            // a pull happened, conflicts were emitted, or push completion
+            // bumped link metadata. In the common debounced-push case where
+            // nothing changed, skip the extra round-trip entirely.
+            let pulled = (result.tasksPulled ?? 0) + (result.projectsPulled ?? 0)
+            let pushed = (result.tasksPushed ?? 0) + (result.projectsPushed ?? 0)
+            let hasConflicts = !(result.conflicts?.isEmpty ?? true)
+            if pulled > 0 || pushed > 0 || hasConflicts {
+                await CueInSyncEngine.shared.syncNow()
+            }
             state = currentConnectedState(lastSyncedAt: result.lastSyncedAt)
         } catch {
             state = .failed(error.localizedDescription)

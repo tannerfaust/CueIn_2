@@ -58,7 +58,7 @@ struct QuickCaptureSheet: View {
         self.presentationMode = presentationMode
         self.autoExpandWhenTyping = autoExpandWhenTyping
         self.onComposingActiveChanged = onComposingActiveChanged
-        _fieldID = State(initialValue: resolvedFields.first?.id)
+        _fieldID = State(initialValue: nil)
         _dueOption = State(initialValue: captureDefaultsToToday ? .today : .noDate)
     }
 
@@ -236,6 +236,12 @@ struct QuickCaptureSheet: View {
 
                 // Initiative
                 Menu {
+                    Button {
+                        fieldID = nil
+                        projectID = nil
+                        selectHaptic.toggle()
+                    } label: { Label("Inbox", systemImage: "tray.fill") }
+
                     ForEach(fields) { f in
                         Button {
                             if fieldID != f.id { projectID = nil }
@@ -344,8 +350,8 @@ struct QuickCaptureSheet: View {
     }
 
     private var projectOptions: [Project] {
-        guard let fieldID else { return projects }
-        return projectsByFieldID[fieldID] ?? []
+        let options = fieldID.map { projectsByFieldID[$0] ?? [] } ?? projects
+        return options.filter { !$0.isNotionImported }
     }
 
     private func projectColor(_ project: Project) -> Color {

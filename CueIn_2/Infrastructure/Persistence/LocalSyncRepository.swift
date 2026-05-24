@@ -35,13 +35,18 @@ final class LocalSyncRepository {
             predicate: #Predicate { $0.localKey == localKey }
         )
 
+        var hasChanged = true
         if let existing = try modelContext.fetch(descriptor).first {
-            existing.userID = record.userID
-            existing.payloadData = payload
-            existing.createdAt = record.createdAt
-            existing.updatedAt = record.updatedAt
-            existing.deletedAt = record.deletedAt
-            existing.syncVersion = record.syncVersion
+            if existing.payloadData == payload && existing.userID == record.userID && existing.deletedAt == record.deletedAt {
+                hasChanged = false
+            } else {
+                existing.userID = record.userID
+                existing.payloadData = payload
+                existing.createdAt = record.createdAt
+                existing.updatedAt = record.updatedAt
+                existing.deletedAt = record.deletedAt
+                existing.syncVersion = record.syncVersion
+            }
         } else {
             modelContext.insert(
                 LocalSyncRecord(
@@ -57,7 +62,7 @@ final class LocalSyncRepository {
             )
         }
 
-        if enqueueMutation {
+        if enqueueMutation && hasChanged {
             try upsertPendingMutation(
                 tableName: table.rawValue,
                 recordID: record.id,
@@ -72,8 +77,20 @@ final class LocalSyncRepository {
         let descriptor = FetchDescriptor<LocalSyncRecord>(
             predicate: #Predicate { $0.tableName == tableName && $0.userID == userID }
         )
-        return try modelContext.fetch(descriptor)
-            .compactMap { try? decoder.decode(Record.self, from: $0.payloadData) }
+        return try modelContext.fetch(descriptor).compactMap { row in
+            do {
+                return try decoder.decode(Record.self, from: row.payloadData)
+            } catch {
+                // A corrupt cached payload (e.g. schema drift across an
+                // upgrade) shouldn't take the whole sync down. Log it once
+                // and skip; the next remote pull will overwrite the row.
+                AppLogger.shared.error(
+                    error,
+                    message: "Failed to decode cached \(Record.self) row id=\(row.recordID) on table=\(tableName); skipping"
+                )
+                return nil
+            }
+        }
     }
 
     func pendingMutations() throws -> [LocalSyncMutation] {

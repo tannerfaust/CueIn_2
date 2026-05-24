@@ -1,0 +1,111 @@
+-- CueIn Linear integration backend schema.
+-- Tokens are encrypted by Edge Functions before they are stored here.
+
+create table if not exists public.linear_oauth_states (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references auth.users(id) on delete cascade,
+    state text not null unique,
+    redirect_uri text not null,
+    created_at timestamptz not null default now(),
+    expires_at timestamptz not null default (now() + interval '10 minutes'),
+    consumed_at timestamptz
+);
+
+create table if not exists public.linear_connections (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references auth.users(id) on delete cascade,
+    workspace_id text not null,
+    workspace_name text,
+    owner_user_id text,
+    encrypted_access_token text not null,
+    token_nonce text not null,
+    status text not null default 'active' check (status in ('active', 'disconnected', 'error')),
+    last_error text,
+    last_synced_at timestamptz,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    disconnected_at timestamptz,
+    sync_version bigint not null default 1,
+    unique (user_id, workspace_id)
+);
+
+create table if not exists public.linear_object_links (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references auth.users(id) on delete cascade,
+    connection_id uuid not null references public.linear_connections(id) on delete cascade,
+    object_kind text not null check (object_kind in ('project', 'task')),
+    cuein_object_id uuid not null,
+    linear_id text not null,
+    linear_last_edited_time timestamptz,
+    cuein_updated_at timestamptz,
+    sync_direction text not null default 'two_way' check (sync_direction in ('two_way', 'pull_only')),
+    last_synced_at timestamptz not null default now(),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    sync_version bigint not null default 1,
+    unique (user_id, object_kind, cuein_object_id),
+    unique (connection_id, object_kind, linear_id)
+);
+
+create table if not exists public.linear_sync_runs (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references auth.users(id) on delete cascade,
+    connection_id uuid references public.linear_connections(id) on delete set null,
+    action text not null,
+    status text not null check (status in ('running', 'succeeded', 'failed')),
+    projects_pushed integer not null default 0,
+    projects_pulled integer not null default 0,
+    tasks_pushed integer not null default 0,
+    tasks_pulled integer not null default 0,
+    error text,
+    created_at timestamptz not null default now(),
+    finished_at timestamptz
+);
+
+create index if not exists linear_connections_user_status_idx
+    on public.linear_connections(user_id, status);
+create index if not exists linear_oauth_states_user_state_idx
+    on public.linear_oauth_states(user_id, state);
+create index if not exists linear_object_links_user_kind_idx
+    on public.linear_object_links(user_id, object_kind);
+create index if not exists linear_sync_runs_user_created_idx
+    on public.linear_sync_runs(user_id, created_at desc);
+
+alter table public.linear_oauth_states enable row level security;
+alter table public.linear_connections enable row level security;
+alter table public.linear_object_links enable row level security;
+alter table public.linear_sync_runs enable row level security;
+
+drop policy if exists "Linear OAuth states are user-owned" on public.linear_oauth_states;
+create policy "Linear OAuth states are user-owned" on public.linear_oauth_states
+    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "Linear connections are user-owned" on public.linear_connections;
+create policy "Linear connections are user-owned" on public.linear_connections
+    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "Linear object links are user-owned" on public.linear_object_links;
+create policy "Linear object links are user-owned" on public.linear_object_links
+    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "Linear sync runs are user-owned" on public.linear_sync_runs;
+create policy "Linear sync runs are user-owned" on public.linear_sync_runs
+    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop trigger if exists touch_linear_connections_sync_metadata on public.linear_connections;
+create trigger touch_linear_connections_sync_metadata before update on public.linear_connections
+    for each row execute function public.touch_sync_metadata();
+
+drop trigger if exists touch_linear_object_links_sync_metadata on public.linear_object_links;
+create trigger touch_linear_object_links_sync_metadata before update on public.linear_object_links
+    for each row execute function public.touch_sync_metadata();
+
+grant select, insert, update, delete on table public.linear_oauth_states to authenticated;
+grant select, insert, update, delete on table public.linear_connections to authenticated;
+grant select, insert, update, delete on table public.linear_object_links to authenticated;
+grant select, insert on table public.linear_sync_runs to authenticated;
+
+grant select, insert, update, delete on table public.linear_oauth_states to service_role;
+grant select, insert, update, delete on table public.linear_connections to service_role;
+grant select, insert, update, delete on table public.linear_object_links to service_role;
+grant select, insert, update, delete on table public.linear_sync_runs to service_role;

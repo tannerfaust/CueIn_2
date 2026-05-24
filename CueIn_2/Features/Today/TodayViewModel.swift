@@ -2933,27 +2933,137 @@ final class TodayViewModel {
         injectScheduleBlocksIntoTimeline()
     }
 
-    /// Jump the live formula run to an upcoming block now (finishes the active block and any
-    /// earlier upcoming blocks without completing their tasks, then reflows the tail from now).
+    /// Whether focus mode can offer “start now” for this block.
+    @MainActor
+    func canStartFormulaBlockNow(blockID: UUID) -> Bool {
+        guard dayEngineMode == .formulaBased, isFormulaRunLive else { return false }
+        guard formulaSchedulePausedAt == nil else { return false }
+        guard let block = blocks.first(where: { $0.id == blockID }) else { return false }
+        guard block.state == .upcoming else { return false }
+        return !isFixedTimeScheduleBlock(block)
+    }
+
+    /// When another block is running, returns copy for a confirmation dialog; otherwise `nil` (start immediately).
+    @MainActor
+    func formulaBlockStartPrompt(for blockID: UUID) -> FormulaBlockStartPrompt? {
+        guard canStartFormulaBlockNow(blockID: blockID) else { return nil }
+        guard
+            let activeIndex = blocks.firstIndex(where: { $0.state == .active }),
+            let targetIndex = blocks.firstIndex(where: { $0.id == blockID }),
+            activeIndex != targetIndex
+        else { return nil }
+
+        let low = min(activeIndex, targetIndex)
+        let high = max(activeIndex, targetIndex)
+        let betweenTitles = blocks[(low + 1)..<high].map(\.title)
+
+        return FormulaBlockStartPrompt(
+            targetBlockID: blockID,
+            targetTitle: blocks[targetIndex].title,
+            priorBlockID: blocks[activeIndex].id,
+            priorTitle: blocks[activeIndex].title,
+            betweenBlockTitles: betweenTitles
+        )
+    }
+
+    @MainActor
+    func applyFormulaBlockStart(blockID: UUID, strategy: FormulaBlockStartStrategy) {
+        switch strategy {
+        case .finishPriorAndStart:
+            startFormulaBlockNowFinishingPrior(blockID: blockID)
+        case .startNowDeferActiveAfter:
+            startFormulaBlockNowDeferringActiveAfter(blockID: blockID)
+        }
+    }
+
+    /// Jump the live formula run to an upcoming block (finishes any running / in-between blocks first).
     @MainActor
     func startFormulaBlockNow(blockID: UUID) {
-        guard dayEngineMode == .formulaBased, isFormulaRunLive else { return }
-        guard formulaSchedulePausedAt == nil else { return }
+        if formulaBlockStartPrompt(for: blockID) != nil {
+            applyFormulaBlockStart(blockID: blockID, strategy: .finishPriorAndStart)
+        } else {
+            activateFormulaBlockNow(blockID: blockID)
+        }
+    }
+
+    @MainActor
+    private func startFormulaBlockNowFinishingPrior(blockID: UUID) {
+        guard canStartFormulaBlockNow(blockID: blockID) else { return }
         guard let targetIndex = blocks.firstIndex(where: { $0.id == blockID }) else { return }
-        guard blocks[targetIndex].state == .upcoming else { return }
-        guard !isFixedTimeScheduleBlock(blocks[targetIndex]) else { return }
 
         let now = Date()
         currentTime = now
 
         if let activeIndex = blocks.firstIndex(where: { $0.state == .active }) {
-            guard activeIndex < targetIndex else { return }
-            blocks[activeIndex].state = .completed
-            for index in (activeIndex + 1)..<targetIndex where blocks[index].state == .upcoming {
-                blocks[index].state = .completed
+            if activeIndex < targetIndex {
+                blocks[activeIndex].state = .completed
+                for index in (activeIndex + 1)..<targetIndex where blocks[index].state == .upcoming {
+                    blocks[index].state = .completed
+                }
+            } else if activeIndex > targetIndex {
+                for index in (targetIndex + 1)...activeIndex where blocks[index].state != .completed && blocks[index].state != .skipped {
+                    blocks[index].state = .completed
+                }
             }
         }
 
+        assignActiveFormulaBlock(at: targetIndex, runStart: now)
+        finalizeFormulaBlockStart()
+    }
+
+    @MainActor
+    private func startFormulaBlockNowDeferringActiveAfter(blockID: UUID) {
+        guard canStartFormulaBlockNow(blockID: blockID) else { return }
+        guard
+            let activeIndex = blocks.firstIndex(where: { $0.state == .active }),
+            let targetIndex = blocks.firstIndex(where: { $0.id == blockID })
+        else {
+            activateFormulaBlockNow(blockID: blockID)
+            return
+        }
+
+        let now = Date()
+        currentTime = now
+
+        var activeBlock = blocks[activeIndex]
+        activeBlock.state = .upcoming
+
+        let low = min(activeIndex, targetIndex)
+        let high = max(activeIndex, targetIndex)
+        let between = Array(blocks[(low + 1)..<high])
+        let prefix = Array(blocks[..<low])
+        let suffix = high + 1 < blocks.count ? Array(blocks[(high + 1)...]) : []
+        let targetBlock = blocks[targetIndex]
+
+        let candidate = prefix + [targetBlock, activeBlock] + between + suffix
+        if let violation = clockAnchoredFixedTimeOrderViolation(in: candidate) {
+            showClockAnchoredFixedTimeOrderViolationToast(
+                laterListedFirst: violation.laterListedFirst,
+                earlierListedSecond: violation.earlierListedSecond
+            )
+            return
+        }
+
+        blocks = candidate
+        guard let newTargetIndex = blocks.firstIndex(where: { $0.id == blockID }) else { return }
+
+        assignActiveFormulaBlock(at: newTargetIndex, runStart: now)
+        finalizeFormulaBlockStart()
+    }
+
+    @MainActor
+    private func activateFormulaBlockNow(blockID: UUID) {
+        guard canStartFormulaBlockNow(blockID: blockID) else { return }
+        guard let targetIndex = blocks.firstIndex(where: { $0.id == blockID }) else { return }
+
+        let now = Date()
+        currentTime = now
+        assignActiveFormulaBlock(at: targetIndex, runStart: now)
+        finalizeFormulaBlockStart()
+    }
+
+    @MainActor
+    private func assignActiveFormulaBlock(at targetIndex: Int, runStart: Date) {
         for index in blocks.indices {
             if blocks[index].state == .completed || blocks[index].state == .skipped { continue }
             blocks[index].state = index == targetIndex ? .active : .upcoming
@@ -2967,10 +3077,13 @@ final class TodayViewModel {
 
         reflowFormulaBlocksAroundFixedTimes(
             plannedBlockIndices: Array(remaining),
-            runStart: now,
-            targetEnd: effectiveFormulaTargetEnd(from: now)
+            runStart: runStart,
+            targetEnd: effectiveFormulaTargetEnd(from: runStart)
         )
+    }
 
+    @MainActor
+    private func finalizeFormulaBlockStart() {
         injectScheduleBlocksIntoTimeline()
         persistCurrentBlocks()
         deriveBlockStates()

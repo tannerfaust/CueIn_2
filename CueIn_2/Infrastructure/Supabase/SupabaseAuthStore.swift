@@ -14,6 +14,8 @@ final class SupabaseAuthStore {
 
     private let client: SupabaseClient
     private let tokenStore: KeychainTokenStore
+    private var activeRefreshTask: Task<Void, Never>?
+    private var lastRefreshFailedAt: Date?
 
     var session: SupabaseAuthSession?
     var isWorking = false
@@ -156,13 +158,29 @@ final class SupabaseAuthStore {
 
     func refreshIfNeeded() async {
         guard let current = session, current.isExpired else { return }
-        AppLogger.shared.log("Token expired; attempting refresh", category: .system)
-        await perform {
-            let newSession = try await self.client.refreshSession(current)
-            self.save(newSession)
-            AppLogger.shared.log("Token refresh succeeded", category: .system)
-            await CueInSyncEngine.shared.syncNow()
+        if let lastFailed = lastRefreshFailedAt, Date().timeIntervalSince(lastFailed) < 15 {
+            return
         }
+        if let existingTask = activeRefreshTask {
+            await existingTask.value
+            return
+        }
+        let task = Task {
+            AppLogger.shared.log("Token expired; attempting refresh", category: .system)
+            await perform {
+                do {
+                    let newSession = try await self.client.refreshSession(current)
+                    self.save(newSession)
+                    AppLogger.shared.log("Token refresh succeeded", category: .system)
+                } catch {
+                    self.lastRefreshFailedAt = Date()
+                    throw error
+                }
+            }
+        }
+        activeRefreshTask = task
+        await task.value
+        activeRefreshTask = nil
     }
 
     func validateStoredSession() async {

@@ -5,6 +5,9 @@ import SwiftUI
 struct FocusSoundscapePanel: View {
     @Bindable private var store = FocusSoundscapeStore.shared
     var accent: Color = CueInColors.accentRoutine
+    /// When true, choosing a preset (not Off) starts playback and calls ``onRequestDismiss``.
+    var playAndDismissOnSelection: Bool = false
+    var onRequestDismiss: (() -> Void)? = nil
     @State private var volumeSlider: Double = 0.35
 
     private let presetColumns = [
@@ -53,9 +56,9 @@ struct FocusSoundscapePanel: View {
                 }
 
                 Button {
-                    store.togglePlayback()
+                    handleMainPlayAction()
                 } label: {
-                    Label(store.isPlaying ? "Stop" : "Play", systemImage: store.isPlaying ? "stop.fill" : "play.fill")
+                    Label(store.isPlaying ? "Pause" : "Play", systemImage: store.isPlaying ? "pause.fill" : "play.fill")
                         .font(CueInTypography.bodyMedium)
                         .frame(maxWidth: .infinity)
                         .frame(height: 50)
@@ -85,7 +88,7 @@ struct FocusSoundscapePanel: View {
     private func presetButton(_ preset: FocusSoundscapePreset) -> some View {
         let selected = store.preset == preset
         return Button {
-            store.selectPreset(preset)
+            handlePresetSelection(preset)
         } label: {
             VStack(alignment: .leading, spacing: CueInSpacing.md) {
                 HStack {
@@ -171,6 +174,21 @@ struct FocusSoundscapePanel: View {
     private var playbackState: String {
         if store.preset == .off { return "No audio selected" }
         return store.isPlaying ? "Playing" : "Ready"
+    }
+
+    private func handlePresetSelection(_ preset: FocusSoundscapePreset) {
+        store.selectPreset(preset)
+        guard playAndDismissOnSelection, preset != .off else { return }
+        store.startPlayback()
+        onRequestDismiss?()
+    }
+
+    private func handleMainPlayAction() {
+        guard store.preset != .off else { return }
+        let wasPlaying = store.isPlaying
+        store.togglePlayback()
+        guard playAndDismissOnSelection, !wasPlaying, store.isPlaying else { return }
+        onRequestDismiss?()
     }
 
     private func presetShortLabel(for preset: FocusSoundscapePreset) -> String {

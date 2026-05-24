@@ -430,7 +430,14 @@ final class CueInSyncEngine {
     }
 
     private func applyCachedScheduleRecords(repository: LocalSyncRepository, userID: UUID) {
-        guard let formulaLibrary = try? repository.records(ScheduleRecordDTO.self, table: .scheduleRecords, userID: userID)
+        let records: [ScheduleRecordDTO]
+        do {
+            records = try repository.records(ScheduleRecordDTO.self, table: .scheduleRecords, userID: userID)
+        } catch {
+            AppLogger.shared.error(error, message: "Failed to load cached schedule records")
+            return
+        }
+        guard let formulaLibrary = records
             .filter({ $0.deletedAt == nil && $0.kind == Self.formulaLibraryRecordKind })
             .sorted(by: { $0.updatedAt > $1.updatedAt })
             .first
@@ -442,7 +449,14 @@ final class CueInSyncEngine {
     }
 
     private func applyCachedLayoutSettings(repository: LocalSyncRepository, userID: UUID) {
-        guard let layout = try? repository.records(AppLayoutSettingDTO.self, table: .appLayoutSettings, userID: userID)
+        let records: [AppLayoutSettingDTO]
+        do {
+            records = try repository.records(AppLayoutSettingDTO.self, table: .appLayoutSettings, userID: userID)
+        } catch {
+            AppLogger.shared.error(error, message: "Failed to load cached app layout settings")
+            return
+        }
+        guard let layout = records
             .filter({ $0.deletedAt == nil && $0.key == AppTab.storageKey })
             .sorted(by: { $0.updatedAt > $1.updatedAt })
             .first,

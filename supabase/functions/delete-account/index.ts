@@ -38,6 +38,10 @@ Deno.serve(async (req) => {
 
   const userId = data.user.id;
   const cleanupSteps: Array<[string, PromiseLike<{ error: { message: string } | null }>]> = [
+    ["linear_sync_runs", admin.from("linear_sync_runs").delete().eq("user_id", userId)],
+    ["linear_object_links", admin.from("linear_object_links").delete().eq("user_id", userId)],
+    ["linear_connections", admin.from("linear_connections").delete().eq("user_id", userId)],
+    ["linear_oauth_states", admin.from("linear_oauth_states").delete().eq("user_id", userId)],
     ["notion_sync_runs", admin.from("notion_sync_runs").delete().eq("user_id", userId)],
     ["notion_object_links", admin.from("notion_object_links").delete().eq("user_id", userId)],
     ["notion_connections", admin.from("notion_connections").delete().eq("user_id", userId)],

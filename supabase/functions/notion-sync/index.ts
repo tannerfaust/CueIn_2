@@ -1,4 +1,5 @@
 import {
+  acquireIntegrationLock,
   adminClient,
   corsHeaders,
   dateProperty,
@@ -26,9 +27,18 @@ Deno.serve(async (req) => {
 
   const admin = adminClient();
   let runId: string | null = null;
+  let releaseLock: (() => Promise<void>) | null = null;
   const debugLog: string[] = [];
   try {
     const user = await requireUser(req, admin);
+
+    // Serialize concurrent runs (rapid client retry, scheduled poll + user
+    // click) so they can't double-write the same Notion page.
+    const lock = await acquireIntegrationLock(admin, user.id, "notion");
+    if (!lock.acquired) {
+      return json({ ok: true, projects_pushed: 0, projects_pulled: 0, tasks_pushed: 0, tasks_pulled: 0, conflicts: [], skipped: "another_sync_in_progress" }, 200);
+    }
+    releaseLock = lock.release;
 
     const body = await req.json().catch(() => ({})) as {
       action?: SyncAction;
@@ -106,6 +116,10 @@ Deno.serve(async (req) => {
     }
     if (error instanceof Response) return error;
     return json({ error: message }, 500);
+  } finally {
+    if (releaseLock) {
+      try { await releaseLock(); } catch (_) { /* logged inside release */ }
+    }
   }
 });
 

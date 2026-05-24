@@ -210,7 +210,15 @@ final class LinearIntegrationStore {
                 )
             }
             TasksStore.shared.applyServerConflicts(mapped, source: .linear)
-            await CueInSyncEngine.shared.syncNow()
+            // Skip the trailing cloud pull when the run touched nothing — the
+            // common debounced-push case where Linear was already in sync.
+            // See NotionIntegrationStore for the matching rationale.
+            let pulled = (result.tasksPulled ?? 0) + (result.projectsPulled ?? 0)
+            let pushed = (result.tasksPushed ?? 0) + (result.projectsPushed ?? 0)
+            let hasConflicts = !(result.conflicts?.isEmpty ?? true)
+            if pulled > 0 || pushed > 0 || hasConflicts {
+                await CueInSyncEngine.shared.syncNow()
+            }
             state = currentConnectedState(lastSyncedAt: result.lastSyncedAt)
         } catch {
             state = .failed(error.localizedDescription)

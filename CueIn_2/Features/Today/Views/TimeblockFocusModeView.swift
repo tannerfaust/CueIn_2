@@ -25,6 +25,7 @@ struct TimeblockFocusModeView: View {
     @State private var showSettingsSheet = false
     @State private var showAddTaskSheet = false
     @State private var showSoundscapeSheet = false
+    @State private var startBlockPrompt: FormulaBlockStartPrompt?
     @Environment(\.dismiss) private var dismiss
 
     init(
@@ -78,13 +79,6 @@ struct TimeblockFocusModeView: View {
                         close()
                     }
                     .foregroundStyle(CueInColors.textPrimary)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    FocusSoundscapeToolbarButton(
-                        store: soundStore,
-                        accent: focusedBlockAccent,
-                        onOpenSounds: { showSoundscapeSheet = true }
-                    )
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     focusOverflowMenu
@@ -148,6 +142,32 @@ struct TimeblockFocusModeView: View {
         .onChange(of: focusBlocks.map(\.id)) { _, ids in
             guard !ids.contains(focusedBlockID), let fallback = ids.first else { return }
             focusedBlockID = fallback
+        }
+        .confirmationDialog(
+            startBlockPrompt?.dialogTitle ?? "Start block",
+            isPresented: Binding(
+                get: { startBlockPrompt != nil },
+                set: { isPresented in
+                    if !isPresented { startBlockPrompt = nil }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let prompt = startBlockPrompt {
+                Button(prompt.finishPriorLabel) {
+                    applyStartBlockChoice(prompt, strategy: .finishPriorAndStart)
+                }
+                Button(prompt.deferPriorLabel) {
+                    applyStartBlockChoice(prompt, strategy: .startNowDeferActiveAfter)
+                }
+                Button("Cancel", role: .cancel) {
+                    startBlockPrompt = nil
+                }
+            }
+        } message: {
+            if let prompt = startBlockPrompt {
+                Text(prompt.message)
+            }
         }
     }
 
@@ -316,7 +336,7 @@ struct TimeblockFocusModeView: View {
                 }
             }
 
-            FocusSoundscapeNowPlayingStrip(
+            FocusSoundscapeInlineControl(
                 store: soundStore,
                 accent: blockAccent,
                 onOpenSounds: { showSoundscapeSheet = true }
@@ -445,7 +465,7 @@ struct TimeblockFocusModeView: View {
 
     private func startBlockNowButton(blockID: UUID, accent: Color) -> some View {
         Button {
-            viewModel.startFormulaBlockNow(blockID: blockID)
+            requestStartBlockNow(blockID: blockID)
         } label: {
             Text("Start this time block now")
                 .font(CueInTypography.bodyMedium)
@@ -659,10 +679,22 @@ struct TimeblockFocusModeView: View {
     }
 
     private func canStartBlockNow(_ block: DayBlock) -> Bool {
-        viewModel.isFormulaRunLive
-            && viewModel.formulaSchedulePausedAt == nil
-            && block.state == .upcoming
-            && !(block.pinsToClock || block.isAnchorBlock)
+        viewModel.canStartFormulaBlockNow(blockID: block.id)
+    }
+
+    private func requestStartBlockNow(blockID: UUID) {
+        if let prompt = viewModel.formulaBlockStartPrompt(for: blockID) {
+            startBlockPrompt = prompt
+            return
+        }
+        viewModel.applyFormulaBlockStart(blockID: blockID, strategy: .finishPriorAndStart)
+        focusedBlockID = blockID
+    }
+
+    private func applyStartBlockChoice(_ prompt: FormulaBlockStartPrompt, strategy: FormulaBlockStartStrategy) {
+        viewModel.applyFormulaBlockStart(blockID: prompt.targetBlockID, strategy: strategy)
+        startBlockPrompt = nil
+        focusedBlockID = prompt.targetBlockID
     }
 
     // MARK: - Formatting

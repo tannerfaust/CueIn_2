@@ -1056,7 +1056,7 @@ private extension TaskDetailSheet {
         if let field = store.field(draft.fieldID) {
             return field.name
         }
-        return "No project"
+        return "Inbox"
     }
 
     var organizationIcon: String {
@@ -1066,7 +1066,7 @@ private extension TaskDetailSheet {
         if let field = store.field(draft.fieldID) {
             return field.resolvedIconSystemName
         }
-        return "folder"
+        return "tray.fill"
     }
 
     var organizationTint: Color {
@@ -1098,7 +1098,8 @@ private extension TaskDetailSheet {
             Label("No project", systemImage: "xmark")
         }
 
-        let relevant = draft.fieldID.map(store.projects) ?? store.projects
+        let relevant = (draft.fieldID.map(store.projects) ?? store.projects)
+            .filter { !$0.isNotionImported }
         ForEach(relevant) { project in
             Button {
                 draft.projectID = project.id
@@ -1115,7 +1116,7 @@ private extension TaskDetailSheet {
             draft.fieldID = nil
             draft.projectID = nil
         } label: {
-            Label("None", systemImage: "xmark")
+            Label("Inbox", systemImage: "tray.fill")
         }
 
         ForEach(store.fields) { field in

@@ -1,0 +1,44 @@
+import { adminClient, corsHeaders, json, requireUser } from "../_shared/linear.ts";
+
+function linearRedirectURI() {
+  const configured = Deno.env.get("LINEAR_REDIRECT_URI")?.trim();
+  if (configured) return configured;
+
+  const supabaseURL = Deno.env.get("SUPABASE_URL")?.replace(/\/+$/, "");
+  if (!supabaseURL) throw new Error("SUPABASE_URL is not configured");
+  return `${supabaseURL}/functions/v1/linear-oauth-callback`;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+
+  try {
+    const admin = adminClient();
+    const user = await requireUser(req, admin);
+    const redirectURI = linearRedirectURI();
+
+    const clientId = Deno.env.get("LINEAR_CLIENT_ID");
+    if (!clientId) return json({ error: "LINEAR_CLIENT_ID is not configured" }, 500);
+
+    const state = crypto.randomUUID();
+    const { error } = await admin.from("linear_oauth_states").insert({
+      user_id: user.id,
+      state,
+      redirect_uri: redirectURI,
+    });
+    if (error) return json({ error: error.message }, 500);
+
+    const url = new URL("https://linear.app/oauth/authorize");
+    url.searchParams.set("client_id", clientId);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("redirect_uri", redirectURI);
+    url.searchParams.set("state", state);
+    url.searchParams.set("scope", "read,write");
+
+    return json({ authorization_url: url.toString(), state }, 200);
+  } catch (error) {
+    if (error instanceof Response) return error;
+    return json({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
+  }
+});

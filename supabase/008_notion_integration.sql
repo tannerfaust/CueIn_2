@@ -24,6 +24,9 @@ create table if not exists public.notion_connections (
     notion_parent_page_id text,
     projects_database_id text,
     tasks_database_id text,
+    external_tasks_database_id text,
+    external_tasks_database_title text,
+    external_tasks_property_map jsonb,
     status text not null default 'active' check (status in ('active', 'disconnected', 'error')),
     last_error text,
     last_synced_at timestamptz,
@@ -67,6 +70,11 @@ alter table public.tasks
 
 alter table public.projects
     add column if not exists external_source text;
+
+alter table public.notion_connections
+    add column if not exists external_tasks_database_id text,
+    add column if not exists external_tasks_database_title text,
+    add column if not exists external_tasks_property_map jsonb;
 
 create table if not exists public.notion_sync_runs (
     id uuid primary key default gen_random_uuid(),

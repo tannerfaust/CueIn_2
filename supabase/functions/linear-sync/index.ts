@@ -1,4 +1,5 @@
 import {
+  acquireIntegrationLock,
   adminClient,
   corsHeaders,
   decryptToken,
@@ -49,6 +50,7 @@ Deno.serve(async (req) => {
   const admin = adminClient();
   let runId: string | null = null;
   let userId: string | null = null;
+  let releaseLock: (() => Promise<void>) | null = null;
   const debugLog: string[] = [];
 
   try {
@@ -62,6 +64,14 @@ Deno.serve(async (req) => {
     const projectTargets = nonEmpty(body.targets?.project_ids);
     const forceOverwriteTaskIDs = new Set(nonEmpty(body.targets?.force_overwrite_task_ids) ?? []);
     const conflicts: SyncConflict[] = [];
+
+    // Serialize concurrent runs for the same user so they can't both observe
+    // the pre-push `cuein_updated_at` and double-push.
+    const lock = await acquireIntegrationLock(admin, userId, "linear");
+    if (!lock.acquired) {
+      return json({ ok: true, projects_pushed: 0, projects_pulled: 0, tasks_pushed: 0, tasks_pulled: 0, conflicts: [], skipped: "another_sync_in_progress" }, 200);
+    }
+    releaseLock = lock.release;
 
     const { data: connection, error: connectionError } = await admin
       .from("linear_connections")
@@ -152,6 +162,10 @@ Deno.serve(async (req) => {
     }
     if (error instanceof Response) return error;
     return json({ error: message }, 500);
+  } finally {
+    if (releaseLock) {
+      try { await releaseLock(); } catch (_) { /* logged inside release */ }
+    }
   }
 });
 

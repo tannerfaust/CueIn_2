@@ -166,24 +166,46 @@ final class SupabaseClient {
     }
 
     func fetch<Record: Decodable>(_ type: Record.Type, table: SupabaseTable, updatedAfter: Date?, session: SupabaseAuthSession) async throws -> [Record] {
+        // Supabase REST caps responses at 1000 rows by default. Pre-pagination
+        // we silently dropped everything past row 1000 — a power user with a
+        // large workspace would lose data after enough syncs. Page through
+        // 500-row chunks ordered by (updated_at, id) and stop when the page
+        // is short, which means we drained the result set.
         let config = try configuration()
-        var query = [
-            URLQueryItem(name: "select", value: "*"),
-            URLQueryItem(name: "order", value: "updated_at.asc")
-        ]
-        if let updatedAfter {
-            query.append(URLQueryItem(name: "updated_at", value: "gte.\(ISO8601DateFormatter.cueInSync.string(from: updatedAfter))"))
+        let pageSize = 500
+        var results: [Record] = []
+        var offset = 0
+        while true {
+            var query = [
+                URLQueryItem(name: "select", value: "*"),
+                URLQueryItem(name: "order", value: "updated_at.asc,id.asc"),
+                URLQueryItem(name: "limit", value: String(pageSize)),
+                URLQueryItem(name: "offset", value: String(offset))
+            ]
+            if let updatedAfter {
+                query.append(URLQueryItem(name: "updated_at", value: "gte.\(ISO8601DateFormatter.cueInSync.string(from: updatedAfter))"))
+            }
+            let page: [Record] = try await request(
+                baseURL: config.restBaseURL,
+                path: table.rawValue,
+                queryItems: query,
+                method: "GET",
+                body: Optional<EmptyBody>.none,
+                config: config,
+                session: session
+            )
+            results.append(contentsOf: page)
+            if page.count < pageSize { break }
+            offset += pageSize
+            // Defensive cap: 50k rows per table is well past anything a real
+            // workspace produces; treat further results as anomaly worth
+            // investigating instead of looping forever.
+            if offset >= 50_000 {
+                AppLogger.shared.log("SupabaseClient.fetch hit defensive 50k row cap on table \(table.rawValue); returning truncated results", category: .database)
+                break
+            }
         }
-
-        return try await request(
-            baseURL: config.restBaseURL,
-            path: table.rawValue,
-            queryItems: query,
-            method: "GET",
-            body: Optional<EmptyBody>.none,
-            config: config,
-            session: session
-        )
+        return results
     }
 
     func deleteAccount(session: SupabaseAuthSession) async throws {

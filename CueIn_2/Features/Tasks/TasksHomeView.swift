@@ -79,6 +79,7 @@ struct TasksHomeView<RouteDestination: View>: View {
     let onCreateProject: (UUID?) -> Void
     let onPoolMove: (TaskItem, Bool) -> Void
     let onDeleteTask: (TaskItem, String) -> Void
+    let onOpenSettings: () -> Void
     @ViewBuilder let routeDestination: (TasksRoute) -> RouteDestination
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -159,14 +160,43 @@ struct TasksHomeView<RouteDestination: View>: View {
 
 private extension TasksHomeView {
     var worklist: some View {
+        Group {
+            if selectedWorklist == .notionProjects {
+                notionProjectsWorklist
+            } else if selectedWorklist == .linearProjects {
+                linearProjectsWorklist
+            } else {
+                taskScrollWorklist
+            }
+        }
+        .background(CueInColors.background.ignoresSafeArea())
+        .navigationTitle(selectedTitle)
+        .cueInNavigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if !usesPersistentSidebar {
+                TasksWorklistChromeToolbar(
+                    sidebarPresented: $sidebarPresented,
+                    onOpenSettings: onOpenSettings
+                )
+            }
+        }
+    }
+
+    var taskScrollWorklist: some View {
         let tasks = visibleTasks
         return ScrollView(.vertical, showsIndicators: false) {
             if tasks.isEmpty {
                 TaskEmptyPanel(
                     icon: selectedEmptyIcon,
                     title: selectedEmptyTitle,
-                    actionTitle: "New task",
-                    action: { onCreateTask(defaultsForCreate) }
+                    actionTitle: selectedWorklist == .notionTasks ? "Sync Notion" : (selectedWorklist == .linearTasks ? "Sync Linear" : "New task"),
+                    action: {
+                        if selectedWorklist == .notionTasks || selectedWorklist == .linearTasks {
+                            onOpenSettings()
+                        } else {
+                            onCreateTask(defaultsForCreate)
+                        }
+                    }
                 )
                 .padding(.horizontal, CueInSpacing.screenHorizontal)
                 .padding(.top, CueInSpacing.xl)
@@ -184,12 +214,72 @@ private extension TasksHomeView {
                 .padding(.bottom, CueInLayout.scrollBottomInset)
             }
         }
-        .background(CueInColors.background.ignoresSafeArea())
-        .navigationTitle(selectedTitle)
-        .cueInNavigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if !usesPersistentSidebar {
-                TasksWorklistChromeToolbar(sidebarPresented: $sidebarPresented)
+    }
+
+    var notionProjectsWorklist: some View {
+        let projects = store.projects.filter(\.isNotionImported)
+        return ScrollView(.vertical, showsIndicators: false) {
+            if projects.isEmpty {
+                TaskEmptyPanel(
+                    icon: "folder",
+                    title: "No Notion projects",
+                    actionTitle: "Open settings",
+                    action: onOpenSettings
+                )
+                .padding(.horizontal, CueInSpacing.screenHorizontal)
+                .padding(.top, CueInSpacing.xl)
+            } else {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: CueInSpacing.md),
+                        GridItem(.flexible(), spacing: CueInSpacing.md),
+                    ],
+                    spacing: CueInSpacing.md
+                ) {
+                    ForEach(projects) { project in
+                        NavigationLink(value: TasksRoute.project(project.id)) {
+                            ProjectDashboardCard(project: project, store: store)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, CueInSpacing.screenHorizontal)
+                .padding(.top, CueInSpacing.md)
+                .padding(.bottom, CueInLayout.scrollBottomInset)
+            }
+        }
+    }
+
+    var linearProjectsWorklist: some View {
+        let projects = store.projects.filter(\.isLinearImported)
+        return ScrollView(.vertical, showsIndicators: false) {
+            if projects.isEmpty {
+                TaskEmptyPanel(
+                    icon: "folder",
+                    title: "No Linear projects",
+                    actionTitle: "Open settings",
+                    action: onOpenSettings
+                )
+                .padding(.horizontal, CueInSpacing.screenHorizontal)
+                .padding(.top, CueInSpacing.xl)
+            } else {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: CueInSpacing.md),
+                        GridItem(.flexible(), spacing: CueInSpacing.md),
+                    ],
+                    spacing: CueInSpacing.md
+                ) {
+                    ForEach(projects) { project in
+                        NavigationLink(value: TasksRoute.project(project.id)) {
+                            ProjectDashboardCard(project: project, store: store)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, CueInSpacing.screenHorizontal)
+                .padding(.top, CueInSpacing.md)
+                .padding(.bottom, CueInLayout.scrollBottomInset)
             }
         }
     }
@@ -211,7 +301,8 @@ private extension TasksHomeView {
                 onCreateProject(fieldID)
             },
             showsTrailingHairline: !usesPersistentSidebar,
-            showsHeaderDisplayPreferencesMenu: usesPersistentSidebar
+            showsHeaderDisplayPreferencesMenu: usesPersistentSidebar,
+            onOpenSettings: onOpenSettings
         )
     }
 
@@ -310,18 +401,22 @@ private extension TasksHomeView {
 }
 
 private extension TasksHomeView {
+    func cueInListFilter(_ task: TaskItem) -> Bool {
+        TasksModulePreferences.shouldShowTaskInCueInLists(task)
+    }
+
     var visibleTasks: [TaskItem] {
         switch selectedWorklist {
         case .tasks:
             return tasksList
         case .collection(.today):
-            return store.todayTasks.filter { !$0.isCompleted }
+            return store.todayTasks.filter { !$0.isCompleted && cueInListFilter($0) }
         case .collection(.inbox):
-            return store.inboxTasks
+            return store.inboxTasks.filter(cueInListFilter)
         case .collection(.upcoming):
-            return store.upcomingTasks
+            return store.upcomingTasks.filter(cueInListFilter)
         case .collection(.all):
-            return store.tasks.filter { $0.status != .archived }
+            return store.tasks.filter { $0.status != .archived && cueInListFilter($0) }
         case .completed:
             return store.tasks
                 .filter(\.isCompleted)
@@ -344,8 +439,16 @@ private extension TasksHomeView {
                 .sorted(by: actionSort)
         case .notionTasks:
             return store.tasks
-                .filter { $0.isNotionImported && $0.status != .archived }
+                .filter { store.isNotionTask($0) && $0.status != .archived }
                 .sorted(by: actionSort)
+        case .notionProjects:
+            return []
+        case .linearTasks:
+            return store.tasks
+                .filter { store.isLinearTask($0) && $0.status != .archived }
+                .sorted(by: actionSort)
+        case .linearProjects:
+            return []
         case .field(let id):
             return store.activeTasks
                 .filter { $0.fieldID == id }
@@ -358,7 +461,7 @@ private extension TasksHomeView {
     }
 
     var tasksList: [TaskItem] {
-        store.activeTasks.sorted(by: actionSort)
+        store.activeTasks.filter(cueInListFilter).sorted(by: actionSort)
     }
 
     func actionSort(_ a: TaskItem, _ b: TaskItem) -> Bool {
@@ -420,6 +523,9 @@ private extension TasksHomeView {
         case .habits: return "tasks-worklist:habits"
         case .rituals: return "tasks-worklist:rituals"
         case .notionTasks: return "tasks-worklist:notion"
+        case .notionProjects: return "tasks-worklist:notion-projects"
+        case .linearTasks: return "tasks-worklist:linear"
+        case .linearProjects: return "tasks-worklist:linear-projects"
         case .field(let id): return "tasks-worklist:field:\(id.uuidString)"
         case .project(let id): return "tasks-worklist:project:\(id.uuidString)"
         }
@@ -434,7 +540,10 @@ private extension TasksHomeView {
         case .saved: return "Saved"
         case .habits: return "Habits"
         case .rituals: return "Rituals"
-        case .notionTasks: return "Notion"
+        case .notionTasks: return "Notion tasks"
+        case .notionProjects: return "Notion projects"
+        case .linearTasks: return "Linear tasks"
+        case .linearProjects: return "Linear projects"
         case .field(let id): return store.field(id)?.name ?? "Field"
         case .project(let id): return store.project(id)?.name ?? "Project"
         }
@@ -452,7 +561,10 @@ private extension TasksHomeView {
         case .saved: return "bookmark"
         case .habits: return "repeat"
         case .rituals: return "sparkles"
-        case .notionTasks: return "doc.text"
+        case .notionTasks: return "doc.text.fill"
+        case .notionProjects: return "folder.fill"
+        case .linearTasks: return "doc.text.fill"
+        case .linearProjects: return "folder.fill"
         case .field: return "square.grid.2x2"
         case .project: return "folder"
         }
@@ -470,7 +582,10 @@ private extension TasksHomeView {
         case .saved: return "Nothing saved"
         case .habits: return "No habits yet"
         case .rituals: return "No rituals yet"
-        case .notionTasks: return "No Notion tasks"
+        case .notionTasks: return "No Notion tasks yet"
+        case .notionProjects: return "No Notion projects"
+        case .linearTasks: return "No Linear tasks yet"
+        case .linearProjects: return "No Linear projects"
         case .field: return "No active tasks"
         case .project: return "No project tasks"
         }
@@ -489,6 +604,7 @@ private struct CueInToolbarIconPressStyle: ButtonStyle {
 
 private struct TasksWorklistChromeToolbar: ToolbarContent {
     @Binding var sidebarPresented: Bool
+    let onOpenSettings: () -> Void
 
     var body: some ToolbarContent {
         chromeItems
@@ -518,7 +634,7 @@ private struct TasksWorklistChromeToolbar: ToolbarContent {
         if sidebarPresented {
             ToolbarItem(placement: CueInToolbarPlacement.topBarLeading) {
                 Menu {
-                    TasksTaskDisplayPreferencesMenuContent()
+                    TasksSidebarOverflowMenuContent(onOpenSettings: onOpenSettings)
                 } label: {
                     // Extra layout margin so the 44pt glass circle is not clipped by the
                     // nav toolbar host during the moment `sidebarPresented` flips off.
@@ -528,9 +644,27 @@ private struct TasksWorklistChromeToolbar: ToolbarContent {
                 .buttonStyle(.plain)
                 .compositingGroup()
                 .fixedSize(horizontal: true, vertical: true)
-                .accessibilityLabel("Customize task display")
+                .accessibilityLabel("Tasks menu")
             }
         }
+    }
+}
+
+// MARK: - Sidebar overflow (settings + quick display)
+
+private struct TasksSidebarOverflowMenuContent: View {
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        Button {
+            onOpenSettings()
+        } label: {
+            Label("Settings", systemImage: "gearshape")
+        }
+
+        Divider()
+
+        TasksTaskDisplayPreferencesMenuContent()
     }
 }
 
@@ -575,7 +709,9 @@ private struct TasksLinearSidebar: View {
     let showsTrailingHairline: Bool
     /// Split layout: overflow menu in sidebar header. Compact: menu is separate leading toolbar item when drawer is open.
     let showsHeaderDisplayPreferencesMenu: Bool
+    let onOpenSettings: () -> Void
     @Bindable private var notionStore = NotionIntegrationStore.shared
+    @Bindable private var linearStore = LinearIntegrationStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: CueInSpacing.sm) {
@@ -585,23 +721,57 @@ private struct TasksLinearSidebar: View {
                 VStack(alignment: .leading, spacing: CueInSpacing.base) {
                     sidebarSection("Tasks") {
                         sidebarRow(.tasks, title: "Tasks", icon: "checklist", count: tasksCount)
-                        sidebarRow(.collection(.today), title: "To-do", icon: "circle.grid.2x2", count: store.todayTasks.filter { !$0.isCompleted }.count)
-                        sidebarRow(.collection(.inbox), title: "Inbox", icon: "tray", count: store.inboxTasks.count)
-                        sidebarRow(.collection(.upcoming), title: "Upcoming", icon: "calendar", count: store.upcomingTasks.count)
+                        sidebarRow(.collection(.today), title: "To-do", icon: "circle.grid.2x2", count: store.todayTasks.filter { !$0.isCompleted && TasksModulePreferences.shouldShowTaskInCueInLists($0) }.count)
+                        sidebarRow(.collection(.inbox), title: "Inbox", icon: "tray", count: store.inboxTasks.filter { TasksModulePreferences.shouldShowTaskInCueInLists($0) }.count)
+                        sidebarRow(.collection(.upcoming), title: "Upcoming", icon: "calendar", count: store.upcomingTasks.filter { TasksModulePreferences.shouldShowTaskInCueInLists($0) }.count)
                     }
 
                     sidebarSection("Plan") {
-                        sidebarRouteRow(title: "Projects", icon: "folder", route: .projects, count: store.projects.count)
+                        sidebarRouteRow(title: "Projects", icon: "folder", route: .projects(nil), count: cueInProjectCount)
                         sidebarRouteRow(title: "Fields", icon: "square.grid.2x2", route: .initiatives, count: store.fields.count)
                     }
 
-                    if notionIsConnected || notionTaskCount > 0 || notionProjectCount > 0 {
-                        sidebarSection("Notion") {
-                            sidebarRow(.notionTasks, title: "Tasks", icon: "doc.text", count: notionTaskCount, tint: CueInColors.textPrimary)
-                            sidebarRouteRow(title: "Projects", icon: "tray.full", route: .projects, count: notionProjectCount)
-                            if let workspaceTitle {
-                                sidebarStaticRow(title: workspaceTitle, icon: "building.2", count: nil, tint: CueInColors.textTertiary)
+                    sidebarSection("Notion") {
+                        sidebarRow(.notionTasks, title: "Tasks", icon: "doc.text.fill", count: notionTaskCount, tint: notionAccent)
+                        sidebarRow(.notionProjects, title: "Projects", icon: "folder.fill", count: notionProjectCount, tint: notionAccent)
+
+                        if notionIsConnected, let workspaceTitle {
+                            sidebarStaticRow(title: workspaceTitle, icon: "building.2", count: nil, tint: CueInColors.textTertiary)
+                        } else if !notionIsConnected {
+                            Button {
+                                onOpenSettings()
+                            } label: {
+                                sidebarRowContent(
+                                    title: "Connect Notion",
+                                    icon: "link",
+                                    count: nil,
+                                    isSelected: false,
+                                    tint: CueInColors.accentFocus
+                                )
                             }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    sidebarSection("Linear") {
+                        sidebarRow(.linearTasks, title: "Tasks", icon: "doc.text.fill", count: linearTaskCount, tint: linearAccent)
+                        sidebarRow(.linearProjects, title: "Projects", icon: "folder.fill", count: linearProjectCount, tint: linearAccent)
+
+                        if linearIsConnected, let linearWorkspaceTitle {
+                            sidebarStaticRow(title: linearWorkspaceTitle, icon: "building.2", count: nil, tint: CueInColors.textTertiary)
+                        } else if !linearIsConnected {
+                            Button {
+                                onOpenSettings()
+                            } label: {
+                                sidebarRowContent(
+                                    title: "Connect Linear",
+                                    icon: "link",
+                                    count: nil,
+                                    isSelected: false,
+                                    tint: CueInColors.accentFocus
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
 
@@ -614,7 +784,7 @@ private struct TasksLinearSidebar: View {
                         sidebarRow(.saved, title: "Saved", icon: "bookmark", count: store.tasks.filter(\.savesToArchive).count)
                         sidebarRow(.archived, title: "Archive", icon: "archivebox", count: store.tasks.filter { $0.status == .archived }.count)
                         sidebarRow(.completed, title: "Completed", icon: "checkmark.circle", count: store.tasks.filter(\.isCompleted).count)
-                        sidebarRow(.collection(.all), title: "All", icon: "list.bullet", count: store.tasks.filter { $0.status != .archived }.count)
+                        sidebarRow(.collection(.all), title: "All", icon: "list.bullet", count: store.tasks.filter { $0.status != .archived && TasksModulePreferences.shouldShowTaskInCueInLists($0) }.count)
                     }
                 }
                 .padding(.horizontal, CueInSpacing.md)
@@ -640,7 +810,7 @@ private struct TasksLinearSidebar: View {
             HStack(alignment: .center, spacing: CueInSpacing.sm) {
                 Spacer(minLength: 0)
                 Menu {
-                    TasksTaskDisplayPreferencesMenuContent()
+                    TasksSidebarOverflowMenuContent(onOpenSettings: onOpenSettings)
                 } label: {
                     CueInOverflowMenuGlyph()
                         .frame(width: 48, height: 48)
@@ -648,15 +818,27 @@ private struct TasksLinearSidebar: View {
                 .buttonStyle(.plain)
                 .fixedSize(horizontal: true, vertical: true)
                 .compositingGroup()
-                .accessibilityLabel("Customize task display")
+                .accessibilityLabel("Tasks menu")
             }
             .padding(.horizontal, CueInSpacing.md)
             .padding(.vertical, 2)
         }
     }
 
+    private var notionAccent: Color {
+        CueInColors.accentRoutine
+    }
+
+    private var linearAccent: Color {
+        CueInColors.accentMini
+    }
+
     private var tasksCount: Int {
-        store.activeTasks.count
+        store.activeTasks.filter { TasksModulePreferences.shouldShowTaskInCueInLists($0) }.count
+    }
+
+    private var cueInProjectCount: Int {
+        store.projects.filter { !$0.isExternal }.count
     }
 
     private var habitsCount: Int {
@@ -668,7 +850,7 @@ private struct TasksLinearSidebar: View {
     }
 
     private var notionTaskCount: Int {
-        store.tasks.filter { $0.isNotionImported && $0.status != .archived }.count
+        store.tasks.filter { store.isNotionTask($0) && $0.status != .archived }.count
     }
 
     private var notionProjectCount: Int {
@@ -683,6 +865,26 @@ private struct TasksLinearSidebar: View {
     private var workspaceTitle: String? {
         if case let .connected(connection) = notionStore.state {
             return connection.workspaceName ?? "Notion workspace"
+        }
+        return nil
+    }
+
+    private var linearTaskCount: Int {
+        store.tasks.filter { store.isLinearTask($0) && $0.status != .archived }.count
+    }
+
+    private var linearProjectCount: Int {
+        store.projects.filter(\.isLinearImported).count
+    }
+
+    private var linearIsConnected: Bool {
+        if case .connected = linearStore.state { return true }
+        return false
+    }
+
+    private var linearWorkspaceTitle: String? {
+        if case let .connected(connection) = linearStore.state {
+            return connection.workspaceName ?? "Linear workspace"
         }
         return nil
     }

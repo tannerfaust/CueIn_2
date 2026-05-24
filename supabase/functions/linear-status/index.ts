@@ -1,4 +1,4 @@
-import { adminClient, corsHeaders, json, requireUser } from "../_shared/notion.ts";
+import { adminClient, corsHeaders, json, requireUser } from "../_shared/linear.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -8,8 +8,8 @@ Deno.serve(async (req) => {
     const admin = adminClient();
     const user = await requireUser(req, admin);
     const { data, error } = await admin
-      .from("notion_connections")
-      .select("id, workspace_id, workspace_name, projects_database_id, tasks_database_id, external_tasks_database_id, external_tasks_database_title, external_tasks_property_map, status, last_synced_at")
+      .from("linear_connections")
+      .select("id, workspace_id, workspace_name, status, last_synced_at")
       .eq("user_id", user.id)
       .eq("status", "active")
       .order("updated_at", { ascending: false })
